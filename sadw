@@ -15,18 +15,15 @@
 
 
 
-
-
-
-
 -- =====================================
--- COMPKILLER FULL GUI PATCH
--- Auto-clean + FPS-safe
+-- COMPKILLER SAFE GUI CLEANUP PATCH
 -- =====================================
+
+local CoreGui = game:GetService("CoreGui")
 
 getgenv().__COMPKILLER_GUIS = getgenv().__COMPKILLER_GUIS or {}
 
--- Destroy all old GUIs from previous executions
+-- Destroy old Compkiller GUIs
 for _, gui in ipairs(getgenv().__COMPKILLER_GUIS) do
 	pcall(function()
 		gui:Destroy()
@@ -34,17 +31,12 @@ for _, gui in ipairs(getgenv().__COMPKILLER_GUIS) do
 end
 table.clear(getgenv().__COMPKILLER_GUIS)
 
--- Wrap Instance.new to auto-track ScreenGuis
-local __oldInstanceNew = Instance.new
-Instance.new = function(className, parent)
-	local obj = __oldInstanceNew(className, parent)
-
-	if className == "ScreenGui" then
+-- Track newly added ScreenGuis (SAFE)
+CoreGui.DescendantAdded:Connect(function(obj)
+	if obj:IsA("ScreenGui") and obj.Name:lower():find("compkiller") then
 		table.insert(getgenv().__COMPKILLER_GUIS, obj)
 	end
-
-	return obj
-end
+end)
 
 
 
