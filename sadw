@@ -14,46 +14,43 @@
 --]]
 
 
--- =====================================
--- COMPKILLER GUI SINGLETON + CLEANUP
--- =====================================
-getgenv().__COMPKILLER_ACTIVE_GUI = getgenv().__COMPKILLER_ACTIVE_GUI or nil
-getgenv().__COMPKILLER_CONNECTIONS = getgenv().__COMPKILLER_CONNECTIONS or {}
 
-local function __disconnectAll()
-	for _, conn in ipairs(getgenv().__COMPKILLER_CONNECTIONS) do
-		pcall(function()
-			conn:Disconnect()
-		end)
-	end
-	table.clear(getgenv().__COMPKILLER_CONNECTIONS)
-end
 
-local function __destroyPreviousGUI()
-	if getgenv().__COMPKILLER_ACTIVE_GUI then
-		pcall(function()
-			getgenv().__COMPKILLER_ACTIVE_GUI:Destroy()
-		end)
-		getgenv().__COMPKILLER_ACTIVE_GUI = nil
-	end
-	__disconnectAll()
-end
+
+
 
 -- =====================================
--- COMPKILLER GLOBAL GUI CLEANER
+-- COMPKILLER FULL GUI PATCH
+-- Auto-clean + FPS-safe
 -- =====================================
+
 getgenv().__COMPKILLER_GUIS = getgenv().__COMPKILLER_GUIS or {}
 
-local function __killAllCompkillerGuis()
-	for _, gui in ipairs(getgenv().__COMPKILLER_GUIS) do
-		pcall(function()
-			gui:Destroy()
-		end)
+-- Destroy all old GUIs from previous executions
+for _, gui in ipairs(getgenv().__COMPKILLER_GUIS) do
+	pcall(function()
+		gui:Destroy()
+	end)
+end
+table.clear(getgenv().__COMPKILLER_GUIS)
+
+-- Wrap Instance.new to auto-track ScreenGuis
+local __oldInstanceNew = Instance.new
+Instance.new = function(className, parent)
+	local obj = __oldInstanceNew(className, parent)
+
+	if className == "ScreenGui" then
+		table.insert(getgenv().__COMPKILLER_GUIS, obj)
 	end
-	table.clear(getgenv().__COMPKILLER_GUIS)
+
+	return obj
 end
 
-__killAllCompkillerGuis()
+
+
+
+
+
 
 
 --- Export Types ---
@@ -1462,9 +1459,12 @@ Compkiller.FontAwesome = {
 	['magnifying-glass'] = "rbxassetid://74387839235930",
 };
 
+
 function Compkiller:OptimizeMode(v)
 	Compkiller.PerformanceMode = v;
 end;
+
+Compkiller.PerformanceMode = true;
 
 function Compkiller:IsStudio()
 	return RunService:IsStudio()	
