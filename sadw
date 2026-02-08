@@ -13,43 +13,61 @@
 		Compkiller:CustomIconHighlight()
 --]]
 
-
-
--- =====================================
--- COMPKILLER SAFE GUI CLEANUP PATCH
--- =====================================
-
 local CoreGui = game:GetService("CoreGui")
 
-getgenv().__COMPKILLER_GUIS = getgenv().__COMPKILLER_GUIS or {}
+-- 1. Setup Global State (Prevents duplicates)
+getgenv().__COMPKILLER_TRACKER = getgenv().__COMPKILLER_TRACKER or {
+    Connections = {},
+    Guis = {}
+}
+local Tracker = getgenv().__COMPKILLER_TRACKER
 
--- Destroy old Compkiller GUIs
-for _, gui in ipairs(getgenv().__COMPKILLER_GUIS) do
-	pcall(function()
-		gui:Destroy()
-	end)
+-- 2. Clean up Old Connections (Stops lag from previous runs)
+for _, conn in pairs(Tracker.Connections) do
+    if conn then conn:Disconnect() end
 end
-table.clear(getgenv().__COMPKILLER_GUIS)
+table.clear(Tracker.Connections)
 
--- Track newly added ScreenGuis (SAFE)
-CoreGui.DescendantAdded:Connect(function(obj)
-	if obj:IsA("ScreenGui") and obj.Name:lower():find("compkiller") then
-		table.insert(getgenv().__COMPKILLER_GUIS, obj)
-	end
+-- 3. Destroy Old GUIs immediately
+for _, child in ipairs(CoreGui:GetChildren()) do
+    if child:IsA("ScreenGui") then
+        -- Check for Attribute (Reliable) OR Name (Fallback)
+        if child:GetAttribute("CompKillerID") == "MainLib" or child.Name:lower():find("compkiller") then
+            child:Destroy()
+        end
+    end
+end
+
+-- 4. Start Efficient Tracking (No RenderStepped!)
+local MainConnection = CoreGui.ChildAdded:Connect(function(gui)
+    -- Wait a moment for properties to set
+    task.defer(function()
+        if gui:IsA("ScreenGui") then
+            -- Check if this is the GUI we want to track
+            if gui:GetAttribute("CompKillerID") == "MainLib" or gui.Name:lower():find("compkiller") then
+                
+                -- Add to global table
+                table.insert(Tracker.Guis, gui)
+                
+                -- Use Event instead of Loop to detect deletion
+                local CleanupConnection
+                CleanupConnection = gui.AncestryChanged:Connect(function()
+                    if not gui.Parent then
+                        -- GUI was removed, clean up table
+                        local index = table.find(Tracker.Guis, gui)
+                        if index then table.remove(Tracker.Guis, index) end
+                        
+                        -- Disconnect this specific event
+                        if CleanupConnection then CleanupConnection:Disconnect() end
+                    end
+                end)
+            end
+        end
+    end)
 end)
 
-
-
-
-
--- Kill RenderStepped spam when GUI is gone
-game:GetService("RunService").RenderStepped:Connect(function()
-	for i = #getgenv().__COMPKILLER_GUIS, 1, -1 do
-		if not getgenv().__COMPKILLER_GUIS[i].Parent then
-			table.remove(getgenv().__COMPKILLER_GUIS, i)
-		end
-	end
-end)
+-- Save connection to global table so we can stop it next time
+table.insert(Tracker.Connections, MainConnection)
 
 
 
