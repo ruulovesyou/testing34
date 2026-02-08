@@ -8219,7 +8219,7 @@ local CoreGui: PlayerGui = (gethui and gethui()) or (get_hidden_gui and get_hidd
 local Mouse: Mouse = LocalPlayer:GetMouse();
 local CurrentCamera: Camera? = cloneref(workspace.CurrentCamera);
 
-local Compkiller = {
+Compkiller = {
 	Version = '2.6',
 	Logo = "rbxassetid://120245531583106",
 	Windows = {},
