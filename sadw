@@ -17,39 +17,6 @@
 
 
 
-local CoreGui = game:GetService("CoreGui")
-
-getgenv().__COMPKILLER_GUIS = getgenv().__COMPKILLER_GUIS or {}
-
--- Destroy old Compkiller GUIs
-for _, gui in ipairs(getgenv().__COMPKILLER_GUIS) do
-	pcall(function()
-		gui:Destroy()
-	end)
-end
-table.clear(getgenv().__COMPKILLER_GUIS)
-
--- Track newly added ScreenGuis (SAFE)
-CoreGui.DescendantAdded:Connect(function(obj)
-	if obj:IsA("ScreenGui") and obj.Name:lower():find("compkiller") then
-		table.insert(getgenv().__COMPKILLER_GUIS, obj)
-	end
-end)
-
-
-
-
-
--- Kill RenderStepped spam when GUI is gone
-game:GetService("RunService").RenderStepped:Connect(function()
-	for i = #getgenv().__COMPKILLER_GUIS, 1, -1 do
-		if not getgenv().__COMPKILLER_GUIS[i].Parent then
-			table.remove(getgenv().__COMPKILLER_GUIS, i)
-		end
-	end
-end)
-
-
 
 --- Export Types ---
 
