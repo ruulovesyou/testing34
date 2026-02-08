@@ -50,6 +50,14 @@ end
 
 
 
+-- Kill RenderStepped spam when GUI is gone
+game:GetService("RunService").RenderStepped:Connect(function()
+	for i = #getgenv().__COMPKILLER_GUIS, 1, -1 do
+		if not getgenv().__COMPKILLER_GUIS[i].Parent then
+			table.remove(getgenv().__COMPKILLER_GUIS, i)
+		end
+	end
+end)
 
 
 
