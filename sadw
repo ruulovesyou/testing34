@@ -13,61 +13,41 @@
 		Compkiller:CustomIconHighlight()
 --]]
 
+
+
+
+
 local CoreGui = game:GetService("CoreGui")
 
--- 1. Setup Global State (Prevents duplicates)
-getgenv().__COMPKILLER_TRACKER = getgenv().__COMPKILLER_TRACKER or {
-    Connections = {},
-    Guis = {}
-}
-local Tracker = getgenv().__COMPKILLER_TRACKER
+getgenv().__COMPKILLER_GUIS = getgenv().__COMPKILLER_GUIS or {}
 
--- 2. Clean up Old Connections (Stops lag from previous runs)
-for _, conn in pairs(Tracker.Connections) do
-    if conn then conn:Disconnect() end
+-- Destroy old Compkiller GUIs
+for _, gui in ipairs(getgenv().__COMPKILLER_GUIS) do
+	pcall(function()
+		gui:Destroy()
+	end)
 end
-table.clear(Tracker.Connections)
+table.clear(getgenv().__COMPKILLER_GUIS)
 
--- 3. Destroy Old GUIs immediately
-for _, child in ipairs(CoreGui:GetChildren()) do
-    if child:IsA("ScreenGui") then
-        -- Check for Attribute (Reliable) OR Name (Fallback)
-        if child:GetAttribute("CompKillerID") == "MainLib" or child.Name:lower():find("compkiller") then
-            child:Destroy()
-        end
-    end
-end
-
--- 4. Start Efficient Tracking (No RenderStepped!)
-local MainConnection = CoreGui.ChildAdded:Connect(function(gui)
-    -- Wait a moment for properties to set
-    task.defer(function()
-        if gui:IsA("ScreenGui") then
-            -- Check if this is the GUI we want to track
-            if gui:GetAttribute("CompKillerID") == "MainLib" or gui.Name:lower():find("compkiller") then
-                
-                -- Add to global table
-                table.insert(Tracker.Guis, gui)
-                
-                -- Use Event instead of Loop to detect deletion
-                local CleanupConnection
-                CleanupConnection = gui.AncestryChanged:Connect(function()
-                    if not gui.Parent then
-                        -- GUI was removed, clean up table
-                        local index = table.find(Tracker.Guis, gui)
-                        if index then table.remove(Tracker.Guis, index) end
-                        
-                        -- Disconnect this specific event
-                        if CleanupConnection then CleanupConnection:Disconnect() end
-                    end
-                end)
-            end
-        end
-    end)
+-- Track newly added ScreenGuis (SAFE)
+CoreGui.DescendantAdded:Connect(function(obj)
+	if obj:IsA("ScreenGui") and obj.Name:lower():find("compkiller") then
+		table.insert(getgenv().__COMPKILLER_GUIS, obj)
+	end
 end)
 
--- Save connection to global table so we can stop it next time
-table.insert(Tracker.Connections, MainConnection)
+
+
+
+
+-- Kill RenderStepped spam when GUI is gone
+game:GetService("RunService").RenderStepped:Connect(function()
+	for i = #getgenv().__COMPKILLER_GUIS, 1, -1 do
+		if not getgenv().__COMPKILLER_GUIS[i].Parent then
+			table.remove(getgenv().__COMPKILLER_GUIS, i)
+		end
+	end
+end)
 
 
 
@@ -3292,220 +3272,211 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 end;
 
 function Compkiller:_DrawKeybinds(Window: ScreenGui)
-	if Compkiller.__KEYBINDS_CACHE then
-		return Compkiller.__KEYBINDS_CACHE;
-	end;
+    if Compkiller.__KEYBINDS_CACHE then
+        return Compkiller.__KEYBINDS_CACHE;
+    end;
 
-	local Keybinds = Instance.new("Frame")
-	local UICorner = Instance.new("UICorner")
-	local IconFrame = Instance.new("Frame")
-	local UICorner_2 = Instance.new("UICorner")
-	local Frame = Instance.new("Frame")
-	local Icon = Instance.new("ImageLabel")
-	local HeaderFrame = Instance.new("Frame")
-	local HeadLabel = Instance.new("TextLabel")
-	local MainFrame = Instance.new("Frame")
-	local UIListLayout = Instance.new("UIListLayout")
-	local MovingFrame = Instance.new("Frame")
+    local Keybinds = Instance.new("Frame")
+    local UICorner = Instance.new("UICorner")
+    local IconFrame = Instance.new("Frame")
+    local UICorner_2 = Instance.new("UICorner")
+    local Frame = Instance.new("Frame")
+    local Icon = Instance.new("ImageLabel")
+    local HeaderFrame = Instance.new("Frame")
+    local HeadLabel = Instance.new("TextLabel")
+    local MainFrame = Instance.new("Frame")
+    local UIListLayout = Instance.new("UIListLayout")
+    local MovingFrame = Instance.new("Frame")
 
-	Keybinds.Name = Compkiller:_RandomString()
-	Keybinds.Parent = Window
-	Keybinds.BackgroundColor3 = Compkiller.Colors.BGDBColor;
-	Keybinds.BackgroundTransparency = 0.025
-	Keybinds.BorderColor3 = Color3.fromRGB(0, 0, 0)
-	Keybinds.BorderSizePixel = 0
-	Keybinds.Position = UDim2.new(0,100,0,100)
-	Keybinds.Size = UDim2.new(0, 125, 0, 25)
-	Keybinds.ZIndex = 150
+    Keybinds.Name = Compkiller:_RandomString()
+    Keybinds.Parent = Window
+    Keybinds.BackgroundColor3 = Compkiller.Colors.BGDBColor;
+    Keybinds.BackgroundTransparency = 1 -- Start hidden
+    Keybinds.BorderColor3 = Color3.fromRGB(0, 0, 0)
+    Keybinds.BorderSizePixel = 0
+    Keybinds.Position = UDim2.new(0,100,0,100)
+    Keybinds.Size = UDim2.new(0, 125, 0, 25)
+    Keybinds.ZIndex = 150
+    Keybinds.Visible = false -- Start invisible
 
-	table.insert(Compkiller.Elements.BGDBColor,{
-		Element = Keybinds,
-		Property = 'BackgroundColor3'
-	});
+    table.insert(Compkiller.Elements.BGDBColor,{
+        Element = Keybinds,
+        Property = 'BackgroundColor3'
+    });
 
+    UICorner.CornerRadius = UDim.new(0, 3)
+    UICorner.Parent = Keybinds
 
-	UICorner.CornerRadius = UDim.new(0, 3)
-	UICorner.Parent = Keybinds
+    IconFrame.Name = Compkiller:_RandomString()
+    IconFrame.Parent = Keybinds
+    IconFrame.AnchorPoint = Vector2.new(1, 0.5)
+    IconFrame.BackgroundColor3 = Compkiller.Colors.BGDBColor
+    IconFrame.BackgroundTransparency = 1
+    IconFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
+    IconFrame.BorderSizePixel = 0
+    IconFrame.Position = UDim2.new(0, 5, 0.5, 0)
+    IconFrame.Size = UDim2.new(1, 10, 1, 0)
+    IconFrame.SizeConstraint = Enum.SizeConstraint.RelativeYY
+    IconFrame.ZIndex = 149
 
-	IconFrame.Name = Compkiller:_RandomString()
-	IconFrame.Parent = Keybinds
-	IconFrame.AnchorPoint = Vector2.new(1, 0.5)
-	IconFrame.BackgroundColor3 = Compkiller.Colors.BGDBColor
-	IconFrame.BackgroundTransparency = 0.300
-	IconFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
-	IconFrame.BorderSizePixel = 0
-	IconFrame.Position = UDim2.new(0, 5, 0.5, 0)
-	IconFrame.Size = UDim2.new(1, 10, 1, 0)
-	IconFrame.SizeConstraint = Enum.SizeConstraint.RelativeYY
-	IconFrame.ZIndex = 149
+    table.insert(Compkiller.Elements.BGDBColor,{
+        Element = IconFrame,
+        Property = 'BackgroundColor3'
+    });
 
-	table.insert(Compkiller.Elements.BGDBColor,{
-		Element = IconFrame,
-		Property = 'BackgroundColor3'
-	});
+    UICorner_2.CornerRadius = UDim.new(0, 3)
+    UICorner_2.Parent = IconFrame
 
-	UICorner_2.CornerRadius = UDim.new(0, 3)
-	UICorner_2.Parent = IconFrame
+    Frame.Parent = IconFrame
+    Frame.AnchorPoint = Vector2.new(0, 0.5)
+    Frame.BackgroundColor3 = Compkiller.Colors.Highlight;
+    Frame.BorderColor3 = Color3.fromRGB(0, 0, 0)
+    Frame.BorderSizePixel = 0
+    Frame.Position = UDim2.new(1, -5, 0.5, 0)
+    Frame.Size = UDim2.new(0, 2, 1, 0)
+    Frame.ZIndex = 151
+    Frame.BackgroundTransparency = 1
 
-	Frame.Parent = IconFrame
-	Frame.AnchorPoint = Vector2.new(0, 0.5)
-	Frame.BackgroundColor3 = Compkiller.Colors.Highlight;
-	Frame.BorderColor3 = Color3.fromRGB(0, 0, 0)
-	Frame.BorderSizePixel = 0
-	Frame.Position = UDim2.new(1, -5, 0.5, 0)
-	Frame.Size = UDim2.new(0, 2, 1, 0)
-	Frame.ZIndex = 151
+    table.insert(Compkiller.Elements.Highlight,{
+        Element = Frame,
+        Property = 'BackgroundColor3'
+    });
 
-	table.insert(Compkiller.Elements.Highlight,{
-		Element = Frame,
-		Property = 'BackgroundColor3'
-	});
+    Icon.Name = Compkiller:_RandomString()
+    Icon.Parent = IconFrame
+    Icon.AnchorPoint = Vector2.new(0.5, 0.5)
+    Icon.BackgroundTransparency = 1.000
+    Icon.BorderColor3 = Color3.fromRGB(0, 0, 0)
+    Icon.BorderSizePixel = 0
+    Icon.Position = UDim2.new(0.5, -2, 0.5, 0)
+    Icon.Size = UDim2.new(0, 20, 0, 20)
+    Icon.SizeConstraint = Enum.SizeConstraint.RelativeYY
+    Icon.ZIndex = 159
+    Icon.Image = Compkiller:CacheImage("rbxassetid://10723416765");
+    Icon.ImageTransparency = 1
 
-	Icon.Name = Compkiller:_RandomString()
-	Icon.Parent = IconFrame
-	Icon.AnchorPoint = Vector2.new(0.5, 0.5)
-	Icon.BackgroundTransparency = 1.000
-	Icon.BorderColor3 = Color3.fromRGB(0, 0, 0)
-	Icon.BorderSizePixel = 0
-	Icon.Position = UDim2.new(0.5, -2, 0.5, 0)
-	Icon.Size = UDim2.new(0, 20, 0, 20)
-	Icon.SizeConstraint = Enum.SizeConstraint.RelativeYY
-	Icon.ZIndex = 159
-	Icon.Image = Compkiller:CacheImage("rbxassetid://10723416765");
+    HeaderFrame.Name = Compkiller:_RandomString()
+    HeaderFrame.Parent = Keybinds
+    HeaderFrame.AnchorPoint = Vector2.new(0.5, 0)
+    HeaderFrame.BackgroundTransparency = 1.000
+    HeaderFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
+    HeaderFrame.BorderSizePixel = 0
+    HeaderFrame.ClipsDescendants = true
+    HeaderFrame.Position = UDim2.new(0.5, 0, 0, 0)
+    HeaderFrame.Size = UDim2.new(1, -10, 1, 0)
+    HeaderFrame.ZIndex = 155
 
-	HeaderFrame.Name = Compkiller:_RandomString()
-	HeaderFrame.Parent = Keybinds
-	HeaderFrame.AnchorPoint = Vector2.new(0.5, 0)
-	HeaderFrame.BackgroundTransparency = 1.000
-	HeaderFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
-	HeaderFrame.BorderSizePixel = 0
-	HeaderFrame.ClipsDescendants = true
-	HeaderFrame.Position = UDim2.new(0.5, 0, 0, 0)
-	HeaderFrame.Size = UDim2.new(1, -10, 1, 0)
-	HeaderFrame.ZIndex = 155
+    HeadLabel.Name = Compkiller:_RandomString()
+    HeadLabel.Parent = HeaderFrame
+    HeadLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+    HeadLabel.BackgroundTransparency = 1.000
+    HeadLabel.BorderColor3 = Color3.fromRGB(0, 0, 0)
+    HeadLabel.BorderSizePixel = 0
+    HeadLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
+    HeadLabel.Size = UDim2.new(1, -10, 1, 0)
+    HeadLabel.ZIndex = 156
+    HeadLabel.Font = Enum.Font.GothamMedium
+    HeadLabel.Text = "Keybinds"
+    HeadLabel.TextColor3 = Compkiller.Colors.SwitchColor
+    HeadLabel.TextSize = 12.000
+    HeadLabel.TextTransparency = 1
 
-	HeadLabel.Name = Compkiller:_RandomString()
-	HeadLabel.Parent = HeaderFrame
-	HeadLabel.AnchorPoint = Vector2.new(0.5, 0.5)
-	HeadLabel.BackgroundTransparency = 1.000
-	HeadLabel.BorderColor3 = Color3.fromRGB(0, 0, 0)
-	HeadLabel.BorderSizePixel = 0
-	HeadLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
-	HeadLabel.Size = UDim2.new(1, -10, 1, 0)
-	HeadLabel.ZIndex = 156
-	HeadLabel.Font = Enum.Font.GothamMedium
-	HeadLabel.Text = "Keybinds"
-	HeadLabel.TextColor3 = Compkiller.Colors.SwitchColor
-	HeadLabel.TextSize = 12.000
+    table.insert(Compkiller.Elements.SwitchColor,{
+        Element = HeadLabel,
+        Property = 'TextColor3'
+    });
 
-	table.insert(Compkiller.Elements.SwitchColor,{
-		Element = HeadLabel,
-		Property = 'TextColor3'
-	});
+    MainFrame.Name = Compkiller:_RandomString()
+    MainFrame.Parent = Keybinds
+    MainFrame.AnchorPoint = Vector2.new(1, 0)
+    MainFrame.BackgroundTransparency = 1.000
+    MainFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
+    MainFrame.BorderSizePixel = 0
+    MainFrame.Position = UDim2.new(1, 0, 1, 5)
+    MainFrame.Size = UDim2.new(1, 30, 1, 3)
+    MainFrame.ZIndex = 156;
+    MainFrame.ClipsDescendants = true;
 
-	MainFrame.Name = Compkiller:_RandomString()
-	MainFrame.Parent = Keybinds
-	MainFrame.AnchorPoint = Vector2.new(1, 0)
-	MainFrame.BackgroundTransparency = 1.000
-	MainFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
-	MainFrame.BorderSizePixel = 0
-	MainFrame.Position = UDim2.new(1, 0, 1, 5)
-	MainFrame.Size = UDim2.new(1, 30, 1, 3)
-	MainFrame.ZIndex = 156;
-	MainFrame.ClipsDescendants = true;
+    UIListLayout.Parent = MainFrame
+    UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    UIListLayout.Padding = UDim.new(0, 5)
 
-	UIListLayout.Parent = MainFrame
-	UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	UIListLayout.Padding = UDim.new(0, 5)
+    MovingFrame.Name = Compkiller:_RandomString()
+    MovingFrame.Parent = Keybinds
+    MovingFrame.AnchorPoint = Vector2.new(1, 0.5)
+    MovingFrame.BackgroundTransparency = 1.000
+    MovingFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
+    MovingFrame.BorderSizePixel = 0
+    MovingFrame.Position = UDim2.new(1, 0, 0.5, 0)
+    MovingFrame.Size = UDim2.new(1, 30, 1, 0)
 
-	MovingFrame.Name = Compkiller:_RandomString()
-	MovingFrame.Parent = Keybinds
-	MovingFrame.AnchorPoint = Vector2.new(1, 0.5)
-	MovingFrame.BackgroundTransparency = 1.000
-	MovingFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
-	MovingFrame.BorderSizePixel = 0
-	MovingFrame.Position = UDim2.new(1, 0, 0.5, 0)
-	MovingFrame.Size = UDim2.new(1, 30, 1, 0)
+    Compkiller:Drag(MovingFrame,Keybinds,0.1);
 
-	Compkiller:Drag(MovingFrame,Keybinds,0.1);
+    -- [[ OPTIMIZED UPDATE LOGIC ]] --
+    local IsVisible = false
+    local TweenInfoFast = TweenInfo.new(0.25)
 
-	local Ref = {
-		Root = Keybinds
-	};
+    local function UpdateKeybindsVisibility()
+        local ContentSize = UIListLayout.AbsoluteContentSize.Y
+        
+        -- Calculate Width
+        local LargF = 100
+        for _, v in pairs(MainFrame:GetChildren()) do
+            if v:IsA("Frame") and v:GetAttribute('AvgScale') then
+                if v:GetAttribute('AvgScale') > LargF then
+                    LargF = v:GetAttribute('AvgScale')
+                end
+            end
+        end
 
-	Ref.THREAD = task.spawn(function()
-		while true do task.wait()
-			Compkiller:_Animation(MainFrame,TweenInfo.new(0.4),{
-				Size = UDim2.new(1, 30, 1, UIListLayout.AbsoluteContentSize.Y + 1)
-			});
+        if ContentSize > 1 then
+            -- SHOW
+            if not IsVisible then
+                IsVisible = true
+                Keybinds.Visible = true
+                
+                Compkiller:_Animation(IconFrame, TweenInfoFast, { BackgroundTransparency = 0.3 })
+                Compkiller:_Animation(Frame, TweenInfoFast, { BackgroundTransparency = 0 })
+                Compkiller:_Animation(HeadLabel, TweenInfoFast, { TextTransparency = 0 })
+                Compkiller:_Animation(Icon, TweenInfoFast, { ImageTransparency = 0 })
+                Compkiller:_Animation(Keybinds, TweenInfoFast, { BackgroundTransparency = 0.025 })
+            end
+            
+            -- Always update size if content changes
+            Compkiller:_Animation(MainFrame, TweenInfo.new(0.4), { 
+                Size = UDim2.new(1, 30, 1, ContentSize + 1) 
+            })
+            Compkiller:_Animation(Keybinds, TweenInfoFast, { 
+                Size = UDim2.new(0, LargF, 0, 25) 
+            })
+        else
+            -- HIDE
+            if IsVisible then
+                IsVisible = false
+                
+                Compkiller:_Animation(HeadLabel, TweenInfoFast, { TextTransparency = 1 })
+                Compkiller:_Animation(Keybinds, TweenInfoFast, { BackgroundTransparency = 1 })
+                Compkiller:_Animation(IconFrame, TweenInfoFast, { BackgroundTransparency = 1 })
+                Compkiller:_Animation(Frame, TweenInfoFast, { BackgroundTransparency = 1 })
+                Compkiller:_Animation(Icon, TweenInfoFast, { ImageTransparency = 1 })
+                
+                -- Wait for animation then hide
+                task.delay(0.25, function()
+                    if not IsVisible then Keybinds.Visible = false end
+                end)
+            end
+        end
+    end
 
-			if UIListLayout.AbsoluteContentSize.Y > 1 then
-				Compkiller:_Animation(IconFrame,TweenInfo.new(0.25),{
-					BackgroundTransparency = 0.3
-				})
-
-				Compkiller:_Animation(Frame,TweenInfo.new(0.25),{
-					BackgroundTransparency = 0
-				})
-
-				Compkiller:_Animation(HeadLabel,TweenInfo.new(0.25),{
-					TextTransparency = 0
-				})
-
-				Compkiller:_Animation(Icon,TweenInfo.new(0.25),{
-					ImageTransparency = 0
-				});
-
-				local LargF = 100;
-
-				for i,v in next , MainFrame:GetChildren() do
-					if v:GetAttribute('AvgScale') then
-						if v:GetAttribute('AvgScale') > LargF then
-							LargF = v:GetAttribute('AvgScale');
-						end;
-					end;
-				end;
-
-				Compkiller:_Animation(Keybinds,TweenInfo.new(0.25),{
-					BackgroundTransparency = 0.025,
-					Size = UDim2.new(0, LargF, 0, 25)
-				})
-			else
-				Compkiller:_Animation(HeadLabel,TweenInfo.new(0.25),{
-					TextTransparency = 1
-				})
-
-				Compkiller:_Animation(Keybinds,TweenInfo.new(0.25),{
-					BackgroundTransparency = 1
-				})
-
-				Compkiller:_Animation(IconFrame,TweenInfo.new(0.25),{
-					BackgroundTransparency = 1
-				})
-
-				Compkiller:_Animation(Frame,TweenInfo.new(0.25),{
-					BackgroundTransparency = 1
-				})
-
-				Compkiller:_Animation(Icon,TweenInfo.new(0.25),{
-					ImageTransparency = 1
-				});
-			end;
-
-			Keybinds.Visible = (Keybinds.BackgroundTransparency < 0.9 and true) or false;
-
-			if Compkiller.PerformanceMode then
-				if Keybinds.Visible then
-					Compkiller:_SetNilP(Keybinds , Window);
-				else
-					Compkiller:_SetNilP(Keybinds , nil);
-				end;
-			else
-				Compkiller:_SetNilP(Keybinds , Window);
-			end;
-		end;
-	end);
+    -- Update only when list changes (0% CPU Idle)
+    UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(UpdateKeybindsVisibility)
+    
+    -- Keep reference for caching
+    Compkiller.__KEYBINDS_CACHE = Keybinds
+    
+    return Keybinds;
+end;
 
 	function Ref:AddFrame()
 		local Keyholder = Instance.new("Frame")
@@ -6363,64 +6334,115 @@ function Compkiller:ChangeHighlightColor(NewColor: Color3)
 	end;
 end;
 
+
 function Compkiller.new(Config : Window)
+    -- [[ 1. AUTO-CLEANUP (Prevents Duplicate GUIs) ]] --
+    if getgenv().CompKillerInstance and getgenv().CompKillerInstance.Parent then
+        getgenv().CompKillerInstance:Destroy()
+    end
+    local CoreGui = game:GetService("CoreGui")
+    for _, child in ipairs(CoreGui:GetChildren()) do
+        if child:IsA("ScreenGui") and child:GetAttribute("CompKillerID") == "MainLib" then
+            child:Destroy()
+        end
+    end
 
-	if not Config.Scale then
-		if Compkiller:_IsMobile() then
-			Config.Scale = Compkiller.Scale.Mobile;
-		else
-			Config.Scale = Compkiller.Scale.Window;
-		end;
-	end;
+    if not Config.Scale then
+        if Compkiller:_IsMobile() then
+            Config.Scale = Compkiller.Scale.Mobile;
+        else
+            Config.Scale = Compkiller.Scale.Window;
+        end;
+    end;
 
-	Config = Compkiller.__CONFIG(Config , {
-		Name = "COMPKILLER",
-		Keybind = "Insert",
-		Logo = Compkiller.Logo;
-		Scale = Compkiller.Scale.Window,
-		TextSize = 15
-	});
+    Config = Compkiller.__CONFIG(Config , {
+        Name = "COMPKILLER",
+        Keybind = "Insert",
+        Logo = Compkiller.Logo;
+        Scale = Compkiller.Scale.Window,
+        TextSize = 15
+    });
 
-	local TabHover = Compkiller.__SIGNAL(false);
-	local WindowOpen = Compkiller.__SIGNAL(true);
-	local WindowArgs = {
-		SelectedTab = nil,
-		Tabs = {},
-		LastTab = nil,
-		IsOpen = true,
-		AlwayShowTab = false,
-		THREADS = {},
-		PerformanceMode = false,
-		Notify = Compkiller.newNotify()
-	};
+    local TabHover = Compkiller.__SIGNAL(false);
+    local WindowOpen = Compkiller.__SIGNAL(true);
+    local WindowArgs = {
+        SelectedTab = nil,
+        Tabs = {},
+        LastTab = nil,
+        IsOpen = true,
+        AlwayShowTab = false,
+        THREADS = {},
+        PerformanceMode = true,
+        Notify = Compkiller.newNotify()
+    };
 
-	WindowArgs.Username = LocalPlayer.Name;
+    WindowArgs.Username = LocalPlayer.Name;
 
-	if Compkiller:_IsMobile() then
-		WindowArgs.AlwayShowTab = true;
-	end;
+    if Compkiller:_IsMobile() then
+        WindowArgs.AlwayShowTab = true;
+    end;
 
-	local CompKiller = Instance.new("ScreenGui")
-	local MainFrame = Instance.new("Frame")
-	local UICorner = Instance.new("UICorner")
-	local TabFrame = Instance.new("Frame")
-	local UICorner_2 = Instance.new("UICorner")
-	local LineFrame1 = Instance.new("Frame")
-	local CompLogo = Instance.new("ImageLabel")
-	local WindowLabel = Instance.new("TextLabel")
-	local TabButtons = Instance.new("Frame")
-	local SelectionFrame = Instance.new("Frame")
-	local UICorner_3 = Instance.new("UICorner")
-	local TabButtonScrollingFrame = Instance.new("ScrollingFrame")
-	local UIListLayout = Instance.new("UIListLayout")
-	local Userinfo = Instance.new("Frame")
-	local UserProfile = Instance.new("ImageLabel")
-	local UICorner_4 = Instance.new("UICorner")
-	local UserText = Instance.new("TextLabel")
-	local ExpireText = Instance.new("TextLabel")
-	local TabMainFrame = Instance.new("Frame")
+    local CompKiller = Instance.new("ScreenGui")
+    CompKiller:SetAttribute("CompKillerID", "MainLib") -- Cleanup Tag
+    getgenv().CompKillerInstance = CompKiller -- Global Reference
+    
+    local MainFrame = Instance.new("Frame")
+    local UICorner = Instance.new("UICorner")
+    local TabFrame = Instance.new("Frame")
+    local UICorner_2 = Instance.new("UICorner")
+    local LineFrame1 = Instance.new("Frame")
+    local CompLogo = Instance.new("ImageLabel")
+    local WindowLabel = Instance.new("TextLabel")
+    local TabButtons = Instance.new("Frame")
+    local SelectionFrame = Instance.new("Frame")
+    local UICorner_3 = Instance.new("UICorner")
+    local TabButtonScrollingFrame = Instance.new("ScrollingFrame")
+    local UIListLayout = Instance.new("UIListLayout")
+    local Userinfo = Instance.new("Frame")
+    local UserProfile = Instance.new("ImageLabel")
+    local UICorner_4 = Instance.new("UICorner")
+    local UserText = Instance.new("TextLabel")
+    local ExpireText = Instance.new("TextLabel")
+    local TabMainFrame = Instance.new("Frame")
 
-	Compkiller:_DrawKeybinds(CompKiller);
+    Compkiller:_DrawKeybinds(CompKiller);
+    
+    -- [[ OPTIMIZED TAB LOOP (Lag Fix) ]] --
+    -- This replaces the original 'while true' loop that was causing FPS drops.
+    local LastTabY = -9999
+    
+    -- Only update animation when list layout changes
+    UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        TabButtonScrollingFrame.CanvasSize = UDim2.fromOffset(0,UIListLayout.AbsoluteContentSize.Y)
+        
+        if WindowArgs.SelectedTab then
+             local TargetY = WindowArgs.SelectedTab.AbsolutePosition.Y - TabButtons.AbsolutePosition.Y
+             if math.abs(LastTabY - TargetY) > 1 then
+                 LastTabY = TargetY
+                 SelectionFrame.BackgroundTransparency = 0
+                 Compkiller:_Animation(SelectionFrame, TweenInfo.new(0.2), {
+                     Position = UDim2.new(1, 5, 0, TargetY + 4)
+                 })
+             end
+        end
+    end)
+    
+    -- Slower check for dragging/scrolling (0% CPU when idle)
+    task.spawn(function()
+        while CompKiller.Parent do
+            task.wait(0.2) 
+            if WindowArgs.SelectedTab and MainFrame.Visible then
+                 local TargetY = WindowArgs.SelectedTab.AbsolutePosition.Y - TabButtons.AbsolutePosition.Y
+                 if math.abs(LastTabY - TargetY) > 1 then
+                     LastTabY = TargetY
+                     SelectionFrame.BackgroundTransparency = 0
+                     Compkiller:_Animation(SelectionFrame, TweenInfo.new(0.2), {
+                         Position = UDim2.new(1, 5, 0, TargetY + 4)
+                     })
+                 end
+            end
+        end
+    end)
 
 	UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
 		TabButtonScrollingFrame.CanvasSize = UDim2.fromOffset(0,UIListLayout.AbsoluteContentSize.Y)
