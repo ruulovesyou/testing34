@@ -370,6 +370,11 @@ local Compkiller = {
 	NilFolder = Instance.new('Folder'),
 	ArcylicParent = CurrentCamera,
 	ProtectGui = protect_gui or protectgui or (syn and syn.protect_gui) or function(s) return s; end,
+	-- Performance Optimization Systems
+	_TweenCache = {},
+	_ConnectionCache = {},
+	_DebounceCache = {},
+	_UpdateQueue = {},
 };
 
 Compkiller.Colors = {
@@ -1421,6 +1426,24 @@ Compkiller.FontAwesome = {
 
 function Compkiller:OptimizeMode(v)
 	Compkiller.PerformanceMode = v;
+	
+	if v then
+		-- Performance optimizations when enabled
+		-- Clear tween cache to free memory
+		for key, tween in pairs(Compkiller._TweenCache) do
+			if tween and tween.PlaybackState == Enum.PlaybackState.Playing then
+				tween:Cancel()
+			end
+		end
+		Compkiller._TweenCache = {}
+		
+		-- Clear debounce cache
+		Compkiller._DebounceCache = {}
+		
+		print("[Compkiller] Performance Mode: ENABLED - Animations disabled, updates optimized")
+	else
+		print("[Compkiller] Performance Mode: DISABLED - Full visual effects enabled")
+	end
 end;
 
 function Compkiller:IsStudio()
@@ -1442,9 +1465,6 @@ function Compkiller:_SetNilP(Ins: Instance , Parent: Instance)
 	end;
 
 	Ins.Parent = Parent or Compkiller.NilFolder;
-
-
-
 end;
 
 function Compkiller:SetAllText(flags : {[string] : string})
@@ -1515,11 +1535,67 @@ function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
 end;
 
 function Compkiller:_Animation(Self: Instance , Info: TweenInfo , Property :{[K] : V})
+	-- Performance Mode: Skip animations if enabled
+	if self.PerformanceMode then
+		for prop, value in pairs(Property) do
+			Self[prop] = value
+		end
+		return
+	end
+	
+	-- Tween caching for reuse
+	local cacheKey = tostring(Self)
+	local cachedTween = self._TweenCache[cacheKey]
+	
+	if cachedTween and cachedTween.PlaybackState == Enum.PlaybackState.Playing then
+		cachedTween:Cancel()
+	end
+	
 	local Tween = TweenService:Create(Self , Info or TweenInfo.new(0.25) , Property);
-
+	self._TweenCache[cacheKey] = Tween
+	
 	Tween:Play();
-
+	
+	-- Clean up cache after completion
+	task.delay((Info and Info.Time) or 0.25, function()
+		if self._TweenCache[cacheKey] == Tween then
+			self._TweenCache[cacheKey] = nil
+		end
+	end)
+	
 	return Tween;
+end;
+
+-- Debounce helper to prevent excessive function calls
+function Compkiller:_Debounce(key: string, delay: number, callback: () -> ())
+	local cache = self._DebounceCache[key]
+	
+	if cache and (tick() - cache) < delay then
+		return false
+	end
+	
+	self._DebounceCache[key] = tick()
+	task.defer(callback)
+	return true
+end;
+
+-- Store and manage connections for cleanup
+function Compkiller:_StoreConnection(key: string, connection: RBXScriptConnection)
+	if self._ConnectionCache[key] then
+		self._ConnectionCache[key]:Disconnect()
+	end
+	self._ConnectionCache[key] = connection
+	return connection
+end;
+
+-- Disconnect all cached connections (for cleanup)
+function Compkiller:_CleanupConnections()
+	for key, connection in pairs(self._ConnectionCache) do
+		if connection and connection.Connected then
+			connection:Disconnect()
+		end
+	end
+	self._ConnectionCache = {}
 end;
 
 function Compkiller:_Input(Frame : Frame , Callback : () -> ()) : TextButton
@@ -3436,8 +3512,7 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 			end;
 
 			Keybinds.Visible = (Keybinds.BackgroundTransparency < 0.9 and true) or false;
---[[
-			pcall(function()
+
 			if Compkiller.PerformanceMode then
 				if Keybinds.Visible then
 					Compkiller:_SetNilP(Keybinds , Window);
@@ -3447,8 +3522,6 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 			else
 				Compkiller:_SetNilP(Keybinds , Window);
 			end;
-			end)
-]]
 		end;
 	end);
 
@@ -6295,17 +6368,22 @@ function Compkiller:ChangeHighlightColor(NewColor: Color3)
 	Compkiller.Colors.Highlight = NewColor;
 	Compkiller.Colors.Toggle = Color3.fromHSV(H,S,V - 0.2);
 
-	for i,v in next , Compkiller.Elements.Highlight do
-		if v.Element and v.Property then
-			v.Element[v.Property] = NewColor;
+	-- Optimized: Batch color updates in deferred thread
+	task.defer(function()
+		-- Update highlight elements
+		for i,v in next , Compkiller.Elements.Highlight do
+			if v.Element and v.Property then
+				v.Element[v.Property] = NewColor;
+			end;
 		end;
-	end;
 
-	for i,v in next , Compkiller.Elements do
-		if v.Element and v.Property and v.Element:GetAttribute('Enabled') then
-			v.Element[v.Property] = NewColor;
+		-- Update enabled elements
+		for i,v in next , Compkiller.Elements do
+			if v.Element and v.Property and v.Element:GetAttribute('Enabled') then
+				v.Element[v.Property] = NewColor;
+			end;
 		end;
-	end;
+	end)
 end;
 
 function Compkiller.new(Config : Window)
@@ -6314,12 +6392,12 @@ function Compkiller.new(Config : Window)
 	local existingGUI = CoreGui:FindFirstChild(GUI_IDENTIFIER)
 	if existingGUI then
 		pcall(function()
-			existingGUI.Parent = nil  -- Unparent first
+			existingGUI.Parent = nil
 		end)
 		task.spawn(function()
-			existingGUI:Destroy()  -- Destroy in separate thread
+			existingGUI:Destroy()
 		end)
-		task.wait(0.3)  -- Wait for cleanup to complete
+		task.wait(0.1) -- Wait for cleanup to complete
 	end
 
 	if not Config.Scale then
@@ -6379,9 +6457,12 @@ function Compkiller.new(Config : Window)
 
 	Compkiller:_DrawKeybinds(CompKiller);
 
-	UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
-		TabButtonScrollingFrame.CanvasSize = UDim2.fromOffset(0,UIListLayout.AbsoluteContentSize.Y)
-	end);
+	-- Optimized: Debounced UIListLayout update
+	Compkiller:_StoreConnection("TabButtonScrolling", UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
+		Compkiller:_Debounce("TabButtonResize", 0.05, function()
+			TabButtonScrollingFrame.CanvasSize = UDim2.fromOffset(0,UIListLayout.AbsoluteContentSize.Y)
+		end)
+	end));
 
 	CompKiller.Name = "CompkillerInterface_MainGUI"  -- Fixed name for single execution
 	CompKiller.Parent = CoreGui;
@@ -6412,13 +6493,16 @@ function Compkiller.new(Config : Window)
 	MainFrame.Size = Compkiller.Scale.Window
 	MainFrame.ZIndex = 4
 
-	MainFrame:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
-		if MainFrame.BackgroundTransparency > 0.9 then
-			MainFrame.Visible = false;
-		else
-			MainFrame.Visible = true;
-		end;
-	end)
+	-- Optimized: Debounced visibility update
+	Compkiller:_StoreConnection("MainFrameVisibility", MainFrame:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
+		Compkiller:_Debounce("MainFrameVis", 0.05, function()
+			if MainFrame.BackgroundTransparency > 0.9 then
+				MainFrame.Visible = false;
+			else
+				MainFrame.Visible = true;
+			end;
+		end)
+	end))
 
 	Compkiller:_Animation(MainFrame,TweenInfo.new(1,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
 		Size = Config.Scale
@@ -10658,14 +10742,43 @@ function Compkiller:RemovePreviousGUI()
 	local existingGUI = CoreGui:FindFirstChild(GUI_IDENTIFIER)
 	if existingGUI then
 		pcall(function()
-			existingGUI.Parent = nil  -- Unparent first
+			existingGUI.Parent = nil
 		end)
 		task.spawn(function()
-			existingGUI:Destroy()  -- Destroy in separate thread
+			existingGUI:Destroy()
 		end)
-		task.wait(0.3)  -- Wait for cleanup to complete
+		return true
 	end
 	return false
+end
+
+-- Performance: Clean all cached resources
+function Compkiller:CleanupResources()
+	-- Disconnect all stored connections
+	for key, connection in pairs(self._ConnectionCache) do
+		if connection and connection.Connected then
+			pcall(function()
+				connection:Disconnect()
+			end)
+		end
+	end
+	self._ConnectionCache = {}
+	
+	-- Cancel all active tweens
+	for key, tween in pairs(self._TweenCache) do
+		if tween and tween.PlaybackState == Enum.PlaybackState.Playing then
+			pcall(function()
+				tween:Cancel()
+			end)
+		end
+	end
+	self._TweenCache = {}
+	
+	-- Clear caches
+	self._DebounceCache = {}
+	self._UpdateQueue = {}
+	
+	print("[Compkiller] All resources cleaned up")
 end
 
 return Compkiller;
