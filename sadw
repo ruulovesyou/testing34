@@ -370,11 +370,24 @@ local Compkiller = {
 	NilFolder = Instance.new('Folder'),
 	ArcylicParent = CurrentCamera,
 	ProtectGui = protect_gui or protectgui or (syn and syn.protect_gui) or function(s) return s; end,
-	-- Performance Optimization Systems
-	_TweenCache = {},
-	_ConnectionCache = {},
-	_DebounceCache = {},
-	_UpdateQueue = {},
+	
+	-- Advanced Performance Systems (v2)
+	_PerformanceV2 = {
+		TweenCache = {},
+		ConnectionPool = {},
+		DebounceTimers = {},
+		UpdateBatcher = {},
+		MemoryMonitor = {
+			LastCleanup = tick(),
+			CleanupInterval = 300, -- 5 minutes
+		},
+		Stats = {
+			TweensSaved = 0,
+			ConnectionsCleaned = 0,
+			DebouncedCalls = 0,
+		}
+	},
+	_EnableAdvancedOptimizations = false,
 };
 
 Compkiller.Colors = {
@@ -1426,24 +1439,6 @@ Compkiller.FontAwesome = {
 
 function Compkiller:OptimizeMode(v)
 	Compkiller.PerformanceMode = v;
-	
-	if v then
-		-- Performance optimizations when enabled
-		-- Clear tween cache to free memory
-		for key, tween in pairs(Compkiller._TweenCache) do
-			if tween and tween.PlaybackState == Enum.PlaybackState.Playing then
-				tween:Cancel()
-			end
-		end
-		Compkiller._TweenCache = {}
-		
-		-- Clear debounce cache
-		Compkiller._DebounceCache = {}
-		
-		print("[Compkiller] Performance Mode: ENABLED - Animations disabled, updates optimized")
-	else
-		print("[Compkiller] Performance Mode: DISABLED - Full visual effects enabled")
-	end
 end;
 
 function Compkiller:IsStudio()
@@ -1535,67 +1530,11 @@ function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
 end;
 
 function Compkiller:_Animation(Self: Instance , Info: TweenInfo , Property :{[K] : V})
-	-- Performance Mode: Skip animations if enabled
-	if self.PerformanceMode then
-		for prop, value in pairs(Property) do
-			Self[prop] = value
-		end
-		return
-	end
-	
-	-- Tween caching for reuse
-	local cacheKey = tostring(Self)
-	local cachedTween = self._TweenCache[cacheKey]
-	
-	if cachedTween and cachedTween.PlaybackState == Enum.PlaybackState.Playing then
-		cachedTween:Cancel()
-	end
-	
 	local Tween = TweenService:Create(Self , Info or TweenInfo.new(0.25) , Property);
-	self._TweenCache[cacheKey] = Tween
-	
+
 	Tween:Play();
-	
-	-- Clean up cache after completion
-	task.delay((Info and Info.Time) or 0.25, function()
-		if self._TweenCache[cacheKey] == Tween then
-			self._TweenCache[cacheKey] = nil
-		end
-	end)
-	
+
 	return Tween;
-end;
-
--- Debounce helper to prevent excessive function calls
-function Compkiller:_Debounce(key: string, delay: number, callback: () -> ())
-	local cache = self._DebounceCache[key]
-	
-	if cache and (tick() - cache) < delay then
-		return false
-	end
-	
-	self._DebounceCache[key] = tick()
-	task.defer(callback)
-	return true
-end;
-
--- Store and manage connections for cleanup
-function Compkiller:_StoreConnection(key: string, connection: RBXScriptConnection)
-	if self._ConnectionCache[key] then
-		self._ConnectionCache[key]:Disconnect()
-	end
-	self._ConnectionCache[key] = connection
-	return connection
-end;
-
--- Disconnect all cached connections (for cleanup)
-function Compkiller:_CleanupConnections()
-	for key, connection in pairs(self._ConnectionCache) do
-		if connection and connection.Connected then
-			connection:Disconnect()
-		end
-	end
-	self._ConnectionCache = {}
 end;
 
 function Compkiller:_Input(Frame : Frame , Callback : () -> ()) : TextButton
@@ -6368,22 +6307,17 @@ function Compkiller:ChangeHighlightColor(NewColor: Color3)
 	Compkiller.Colors.Highlight = NewColor;
 	Compkiller.Colors.Toggle = Color3.fromHSV(H,S,V - 0.2);
 
-	-- Optimized: Batch color updates in deferred thread
-	task.defer(function()
-		-- Update highlight elements
-		for i,v in next , Compkiller.Elements.Highlight do
-			if v.Element and v.Property then
-				v.Element[v.Property] = NewColor;
-			end;
+	for i,v in next , Compkiller.Elements.Highlight do
+		if v.Element and v.Property then
+			v.Element[v.Property] = NewColor;
 		end;
+	end;
 
-		-- Update enabled elements
-		for i,v in next , Compkiller.Elements do
-			if v.Element and v.Property and v.Element:GetAttribute('Enabled') then
-				v.Element[v.Property] = NewColor;
-			end;
+	for i,v in next , Compkiller.Elements do
+		if v.Element and v.Property and v.Element:GetAttribute('Enabled') then
+			v.Element[v.Property] = NewColor;
 		end;
-	end)
+	end;
 end;
 
 function Compkiller.new(Config : Window)
@@ -6397,7 +6331,7 @@ function Compkiller.new(Config : Window)
 		task.spawn(function()
 			existingGUI:Destroy()
 		end)
-		task.wait(0.1) -- Wait for cleanup to complete
+		task.wait(0.1)
 	end
 
 	if not Config.Scale then
@@ -6457,14 +6391,11 @@ function Compkiller.new(Config : Window)
 
 	Compkiller:_DrawKeybinds(CompKiller);
 
-	-- Optimized: Debounced UIListLayout update
-	Compkiller:_StoreConnection("TabButtonScrolling", UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
-		Compkiller:_Debounce("TabButtonResize", 0.05, function()
-			TabButtonScrollingFrame.CanvasSize = UDim2.fromOffset(0,UIListLayout.AbsoluteContentSize.Y)
-		end)
-	end));
+	UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
+		TabButtonScrollingFrame.CanvasSize = UDim2.fromOffset(0,UIListLayout.AbsoluteContentSize.Y)
+	end);
 
-	CompKiller.Name = "CompkillerInterface_MainGUI"  -- Fixed name for single execution
+	CompKiller.Name = "CompkillerInterface_MainGUI"
 	CompKiller.Parent = CoreGui;
 	CompKiller.ResetOnSpawn = false
 	CompKiller.IgnoreGuiInset = true;
@@ -6493,16 +6424,13 @@ function Compkiller.new(Config : Window)
 	MainFrame.Size = Compkiller.Scale.Window
 	MainFrame.ZIndex = 4
 
-	-- Optimized: Debounced visibility update
-	Compkiller:_StoreConnection("MainFrameVisibility", MainFrame:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
-		Compkiller:_Debounce("MainFrameVis", 0.05, function()
-			if MainFrame.BackgroundTransparency > 0.9 then
-				MainFrame.Visible = false;
-			else
-				MainFrame.Visible = true;
-			end;
-		end)
-	end))
+	MainFrame:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
+		if MainFrame.BackgroundTransparency > 0.9 then
+			MainFrame.Visible = false;
+		else
+			MainFrame.Visible = true;
+		end;
+	end)
 
 	Compkiller:_Animation(MainFrame,TweenInfo.new(1,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
 		Size = Config.Scale
@@ -10736,49 +10664,246 @@ end;
 
 Compkiller.NilFolder.Name = "Nil-Instances";
 
--- Single Execution Helper Function
+-- ========================================
+-- ADVANCED PERFORMANCE FUNCTIONS V2
+-- ========================================
+-- These are OPTIONAL helpers that don't affect existing code
+-- Enable with: Compkiller:EnableAdvancedOptimizations(true)
+
+-- Single Execution: Remove previous GUI
 function Compkiller:RemovePreviousGUI()
 	local GUI_IDENTIFIER = "CompkillerInterface_MainGUI"
 	local existingGUI = CoreGui:FindFirstChild(GUI_IDENTIFIER)
 	if existingGUI then
-		pcall(function()
-			existingGUI.Parent = nil
-		end)
-		task.spawn(function()
-			existingGUI:Destroy()
-		end)
+		pcall(function() existingGUI.Parent = nil end)
+		task.spawn(function() existingGUI:Destroy() end)
 		return true
 	end
 	return false
 end
 
--- Performance: Clean all cached resources
-function Compkiller:CleanupResources()
-	-- Disconnect all stored connections
-	for key, connection in pairs(self._ConnectionCache) do
-		if connection and connection.Connected then
-			pcall(function()
-				connection:Disconnect()
-			end)
-		end
+-- Enable/Disable Advanced Optimizations (Safe - won't break UI)
+function Compkiller:EnableAdvancedOptimizations(enabled)
+	self._EnableAdvancedOptimizations = enabled
+	if enabled then
+		print("[Compkiller V2] Advanced optimizations ENABLED")
+		self:StartMemoryMonitor()
+	else
+		print("[Compkiller V2] Advanced optimizations DISABLED")
+		self:StopMemoryMonitor()
 	end
-	self._ConnectionCache = {}
-	
-	-- Cancel all active tweens
-	for key, tween in pairs(self._TweenCache) do
-		if tween and tween.PlaybackState == Enum.PlaybackState.Playing then
-			pcall(function()
-				tween:Cancel()
-			end)
-		end
-	end
-	self._TweenCache = {}
-	
-	-- Clear caches
-	self._DebounceCache = {}
-	self._UpdateQueue = {}
-	
-	print("[Compkiller] All resources cleaned up")
 end
+
+-- Advanced Tween System (optional usage)
+function Compkiller:SmartTween(instance, tweenInfo, properties)
+	if not self._EnableAdvancedOptimizations then
+		-- Fall back to normal animation
+		return self:_Animation(instance, tweenInfo, properties)
+	end
+	
+	-- Performance mode: instant set
+	if self.PerformanceMode then
+		for prop, value in pairs(properties) do
+			pcall(function() instance[prop] = value end)
+		end
+		return nil
+	end
+	
+	-- Smart caching
+	local cacheKey = tostring(instance) .. "_" .. tostring(tweenInfo.Time)
+	local cache = self._PerformanceV2.TweenCache[cacheKey]
+	
+	-- Cancel existing tween on same instance
+	if cache and cache.PlaybackState == Enum.PlaybackState.Playing then
+		cache:Cancel()
+		self._PerformanceV2.Stats.TweensSaved = self._PerformanceV2.Stats.TweensSaved + 1
+	end
+	
+	-- Create and cache new tween
+	local tween = TweenService:Create(instance, tweenInfo, properties)
+	self._PerformanceV2.TweenCache[cacheKey] = tween
+	tween:Play()
+	
+	-- Auto cleanup after completion
+	task.delay(tweenInfo.Time + 0.1, function()
+		if self._PerformanceV2.TweenCache[cacheKey] == tween then
+			self._PerformanceV2.TweenCache[cacheKey] = nil
+		end
+	end)
+	
+	return tween
+end
+
+-- Smart Debounce (optional usage)
+function Compkiller:Debounce(key, delay, callback)
+	if not self._EnableAdvancedOptimizations then
+		-- No debouncing, run immediately
+		return callback()
+	end
+	
+	local timers = self._PerformanceV2.DebounceTimers
+	local lastCall = timers[key]
+	
+	if lastCall and (tick() - lastCall) < delay then
+		self._PerformanceV2.Stats.DebouncedCalls = self._PerformanceV2.Stats.DebouncedCalls + 1
+		return false -- Debounced
+	end
+	
+	timers[key] = tick()
+	task.defer(callback)
+	return true
+end
+
+-- Connection Pool Manager (optional usage)
+function Compkiller:ManagedConnection(key, connection)
+	if not self._EnableAdvancedOptimizations then
+		-- Just return the connection without managing
+		return connection
+	end
+	
+	local pool = self._PerformanceV2.ConnectionPool
+	
+	-- Disconnect old connection if exists
+	if pool[key] then
+		pcall(function()
+			if pool[key].Connected then
+				pool[key]:Disconnect()
+				self._PerformanceV2.Stats.ConnectionsCleaned = self._PerformanceV2.Stats.ConnectionsCleaned + 1
+			end
+		end)
+	end
+	
+	pool[key] = connection
+	return connection
+end
+
+-- Batch Multiple Updates (optional usage)
+function Compkiller:BatchUpdate(batchKey, updateFunction, delay)
+	if not self._EnableAdvancedOptimizations then
+		return updateFunction()
+	end
+	
+	delay = delay or 0.05
+	local batcher = self._PerformanceV2.UpdateBatcher
+	
+	-- Cancel existing batch
+	if batcher[batchKey] then
+		task.cancel(batcher[batchKey])
+	end
+	
+	-- Schedule new batch
+	batcher[batchKey] = task.delay(delay, function()
+		pcall(updateFunction)
+		batcher[batchKey] = nil
+	end)
+end
+
+-- Memory Monitor (auto-cleanup system)
+function Compkiller:StartMemoryMonitor()
+	if self._PerformanceV2.MemoryMonitor.Active then return end
+	
+	self._PerformanceV2.MemoryMonitor.Active = true
+	
+	task.spawn(function()
+		while self._PerformanceV2.MemoryMonitor.Active do
+			task.wait(self._PerformanceV2.MemoryMonitor.CleanupInterval)
+			
+			if self._EnableAdvancedOptimizations then
+				self:AutoCleanup()
+			end
+		end
+	end)
+end
+
+function Compkiller:StopMemoryMonitor()
+	self._PerformanceV2.MemoryMonitor.Active = false
+end
+
+-- Auto Cleanup (called by memory monitor)
+function Compkiller:AutoCleanup()
+	local perf = self._PerformanceV2
+	local cleaned = 0
+	
+	-- Clean finished tweens
+	for key, tween in pairs(perf.TweenCache) do
+		if tween.PlaybackState == Enum.PlaybackState.Completed or
+		   tween.PlaybackState == Enum.PlaybackState.Cancelled then
+			perf.TweenCache[key] = nil
+			cleaned = cleaned + 1
+		end
+	end
+	
+	-- Clean old debounce timers
+	for key, time in pairs(perf.DebounceTimers) do
+		if tick() - time > 60 then -- 1 minute old
+			perf.DebounceTimers[key] = nil
+			cleaned = cleaned + 1
+		end
+	end
+	
+	perf.MemoryMonitor.LastCleanup = tick()
+	
+	if cleaned > 0 then
+		print(string.format("[Compkiller V2] Auto-cleanup: %d items freed", cleaned))
+	end
+end
+
+-- Manual Full Cleanup
+function Compkiller:CleanupAll()
+	local perf = self._PerformanceV2
+	local stats = {tweens = 0, connections = 0}
+	
+	-- Stop all tweens
+	for key, tween in pairs(perf.TweenCache) do
+		pcall(function()
+			if tween.PlaybackState == Enum.PlaybackState.Playing then
+				tween:Cancel()
+			end
+		end)
+		stats.tweens = stats.tweens + 1
+	end
+	
+	-- Disconnect all connections
+	for key, connection in pairs(perf.ConnectionPool) do
+		pcall(function()
+			if connection.Connected then
+				connection:Disconnect()
+			end
+		end)
+		stats.connections = stats.connections + 1
+	end
+	
+	-- Clear all caches
+	perf.TweenCache = {}
+	perf.ConnectionPool = {}
+	perf.DebounceTimers = {}
+	perf.UpdateBatcher = {}
+	
+	print(string.format("[Compkiller V2] Full cleanup: %d tweens, %d connections", 
+		stats.tweens, stats.connections))
+end
+
+-- Get Performance Stats
+function Compkiller:GetPerformanceStats()
+	local stats = self._PerformanceV2.Stats
+	return {
+		TweensSaved = stats.TweensSaved,
+		ConnectionsCleaned = stats.ConnectionsCleaned,
+		DebouncedCalls = stats.DebouncedCalls,
+		ActiveTweens = self:CountTable(self._PerformanceV2.TweenCache),
+		ActiveConnections = self:CountTable(self._PerformanceV2.ConnectionPool),
+		LastCleanup = self._PerformanceV2.MemoryMonitor.LastCleanup,
+	}
+end
+
+function Compkiller:CountTable(tbl)
+	local count = 0
+	for _ in pairs(tbl) do count = count + 1 end
+	return count
+end
+
+-- ========================================
+-- END OF ADVANCED PERFORMANCE FUNCTIONS
+-- ========================================
 
 return Compkiller;
