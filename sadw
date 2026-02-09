@@ -6307,7 +6307,13 @@ function Compkiller.new(Config : Window)
 	local GUI_IDENTIFIER = "CompkillerInterface_MainGUI"
 	local existingGUI = CoreGui:FindFirstChild(GUI_IDENTIFIER)
 	if existingGUI then
-		existingGUI:Destroy()
+		pcall(function()
+			existingGUI.Parent = nil  -- Unparent first
+		end)
+		task.spawn(function()
+			existingGUI:Destroy()  -- Destroy in separate thread
+		end)
+		task.wait(0.3)  -- Wait for cleanup to complete
 	end
 
 	if not Config.Scale then
@@ -10645,8 +10651,13 @@ function Compkiller:RemovePreviousGUI()
 	local GUI_IDENTIFIER = "CompkillerInterface_MainGUI"
 	local existingGUI = CoreGui:FindFirstChild(GUI_IDENTIFIER)
 	if existingGUI then
-		existingGUI:Destroy()
-		return true
+		pcall(function()
+			existingGUI.Parent = nil  -- Unparent first
+		end)
+		task.spawn(function()
+			existingGUI:Destroy()  -- Destroy in separate thread
+		end)
+		task.wait(0.3)  -- Wait for cleanup to complete
 	end
 	return false
 end
