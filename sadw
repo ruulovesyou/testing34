@@ -1442,6 +1442,9 @@ function Compkiller:_SetNilP(Ins: Instance , Parent: Instance)
 	end;
 
 	Ins.Parent = Parent or Compkiller.NilFolder;
+
+
+
 end;
 
 function Compkiller:SetAllText(flags : {[string] : string})
@@ -3433,7 +3436,8 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 			end;
 
 			Keybinds.Visible = (Keybinds.BackgroundTransparency < 0.9 and true) or false;
-
+--[[
+			pcall(function()
 			if Compkiller.PerformanceMode then
 				if Keybinds.Visible then
 					Compkiller:_SetNilP(Keybinds , Window);
@@ -3443,6 +3447,8 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 			else
 				Compkiller:_SetNilP(Keybinds , Window);
 			end;
+			end)
+]]
 		end;
 	end);
 
