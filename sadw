@@ -37,10 +37,41 @@ getgenv()._CK_CLEANUP = function()
 end
 
 -- Virtualization Support
-local cloneref = (cloneref or function(f) return f end)
-local HttpService = cloneref(game:GetService('HttpService'))
-local TweenService = cloneref(game:GetService('TweenService'))
-local UserInputService = cloneref(game:GetService('UserInputService'))
+local cloneref        = (cloneref or function(f) return f end)
+local HttpService     = cloneref(game:GetService('HttpService'))
+local TweenService    = cloneref(game:GetService('TweenService'))
+local UserInputService= cloneref(game:GetService('UserInputService'))
+local RunService      = cloneref(game:GetService('RunService'))
+local TextService     = cloneref(game:GetService('TextService'))
+
+-- Core client references
+local LocalPlayer   = game:GetService('Players').LocalPlayer
+local CurrentCamera = workspace.CurrentCamera
+local Mouse         = LocalPlayer:GetMouse()
+
+-- Connection + thread trackers (registered into _CK_CONNECTIONS / kill switch)
+local function _TrackConn(conn)
+    table.insert(_CK_CONNECTIONS, conn)
+    return conn
+end
+
+local _CK_THREADS = {}
+local function _TrackThread(thread)
+    table.insert(_CK_THREADS, thread)
+    return thread
+end
+
+-- Extend kill-switch cleanup to also cancel all tracked threads
+do
+    local _baseCleanup = getgenv()._CK_CLEANUP
+    getgenv()._CK_CLEANUP = function()
+        for _, t in ipairs(_CK_THREADS) do
+            pcall(task.cancel, t)
+        end
+        _CK_THREADS = {}
+        if _baseCleanup then _baseCleanup() end
+    end
+end
 
 
 local Compkiller = {
@@ -1200,10 +1231,12 @@ function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
 end;
 
 function Compkiller:_Animation(Self: Instance , Info: TweenInfo , Property :{[K] : V})
+	-- Route through SmartAnimation when the optimizer is active
+	if _OPT and _OPT.Enabled then
+		return self:_SmartAnimation(Self, Info, Property)
+	end
 	local Tween = TweenService:Create(Self , Info or TweenInfo.new(0.25) , Property);
-
 	Tween:Play();
-
 	return Tween;
 end;
 
@@ -2828,12 +2861,10 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 				SPAWN_THREAD = nil;
 			end;
 
-			SPAWN_THREAD = task.spawn(function()
-				while true do task.wait(0.00001)
-					if not Args.IsHold then
-						break;	
-					end;
-
+		SPAWN_THREAD = task.spawn(function()
+				local hb = RunService.Heartbeat
+				while Args.IsHold do
+					hb:Wait()
 					Callback(Color3.fromHSV(H , S , V),Transparency);
 				end;
 			end);
@@ -3062,7 +3093,7 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 	};
 
 	Ref.THREAD = _TrackThread(task.spawn(function()
-		while true do task.wait()
+		while true do RunService.Heartbeat:Wait()
 			Compkiller:_Animation(MainFrame,TweenInfo.new(0.4),{
 				Size = UDim2.new(1, 30, 1, UIListLayout.AbsoluteContentSize.Y + 1)
 			});
@@ -3528,7 +3559,7 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 	end;
 
 	APIRef.Thread = _TrackThread(task.spawn(function()
-		while true do task.wait(0.01)
+		while true do task.wait(0.05)
 			if APIRef.Mode ~= 1 then
 				if ElementAPI:GetValue() == APIRef.On then
 					KeybindFrame:SetVisible(true);
@@ -8902,7 +8933,7 @@ function Compkiller.new(Config : Window)
 		TabArgs.LeftThread = coroutine.wrap(function()
 			task.wait();
 
-			while true do task.wait(0.01)
+			while true do task.wait(0.05)
 				TabArgs:_UpdateScrolling(Upvalue.Left , Upvalue.LeftLayout);
 			end;
 		end);
@@ -8910,7 +8941,7 @@ function Compkiller.new(Config : Window)
 		TabArgs.RightThread = coroutine.wrap(function()
 			task.wait(0.1);
 
-			while true do task.wait(0.01)
+			while true do task.wait(0.05)
 				TabArgs:_UpdateScrolling(Upvalue.Right , Upvalue.RightLayout);
 			end;
 		end);
@@ -9622,7 +9653,7 @@ function Compkiller.new(Config : Window)
 			Property = "BackgroundColor3"
 		});
 
-		while true do task.wait(0.01);
+		while true do RunService.Heartbeat:Wait();
 			BlurElement.Size = UDim2.new(1, TabFrame.AbsoluteSize.X - 35, 1, 0);
 			MovementFrame.Size = UDim2.new(1, TabFrame.AbsoluteSize.X - 35, 1, 0);
 
@@ -10334,8 +10365,6 @@ Compkiller.NilFolder.Name = "Nil-Instances";
 --    Compkiller:GetFPS()                            -- current avg FPS
 --    Compkiller:GetOptimizerStats()                 -- live stat table
 -- ============================================================
-
-local RunService = cloneref(game:GetService("RunService"))
 
 -- ── Internal state ────────────────────────────────────────────
 local _OPT = {
