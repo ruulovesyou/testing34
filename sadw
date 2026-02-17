@@ -1,67 +1,76 @@
---[[ 
-    Compkiller Interface (Smart Performance Edition)
-    - Auto-Kill Switch: Prevents "Instance Stacking" (The #1 cause of lag).
-    - Smart Injection: Waits for game load to prevent crash.
-    - FPS Guard: Rolling FPS sampler prevents FPS drop on repeated GUI executions.
-    - Tween Orphan Killer: Cancels leftover tweens from previous executions.
-    - Thread Scrubber: Kills old background loops so they never double-run.
-    - Clean Re-Execute: FPS sample state resets each execution — no stale data.
+--[[
+    Compkiller Interface (Smart Performance Edition v3)
+    - Single-Execution Guard: Destroys ALL old GUI instances before loading a new one.
+    - Thread & Connection Scrubber: Kills old loops so they never run 2x, 3x, 4x.
+    - FPS Guard: Rolling sampler + SmartAnimation keep FPS stable on re-execute.
+    - Tween Orphan Killer: Cancels leaked tweens from previous executions.
+    - Clean State Reset: NOTIFY_CACHE, Windows table, and FPS samples all reset cleanly.
 --]]
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 
--- 1. ADVANCED KILL SWITCH
--- This searches for ANY trace of your menu and destroys it before loading a new one.
-local CoreGui = game:GetService("CoreGui")
-local PlayerGui = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
+-- ── SERVICE REFS (needed before cleanup so SecureKill can run) ────────────────
+local CoreGui       = game:GetService("CoreGui")
+local Players       = game:GetService("Players")
+local LocalPlayer   = Players.LocalPlayer
+local PlayerGui     = LocalPlayer:FindFirstChild("PlayerGui")
 
+-- ── SINGLE-EXECUTION GUARD ────────────────────────────────────────────────────
+-- Destroy every known GUI name this script can create.
+-- IMPORTANT: "CompkillerInterface_MainGUI" is the actual ScreenGui name used
+-- by Compkiller:newWindow(). All legacy names are kept for safety.
 local function SecureKill(target)
-    if CoreGui:FindFirstChild(target) then CoreGui[target]:Destroy() end
-    if PlayerGui and PlayerGui:FindFirstChild(target) then PlayerGui[target]:Destroy() end
+    pcall(function()
+        local c = CoreGui:FindFirstChild(target)
+        if c then c:Destroy() end
+    end)
+    pcall(function()
+        if PlayerGui then
+            local c = PlayerGui:FindFirstChild(target)
+            if c then c:Destroy() end
+        end
+    end)
 end
 
-SecureKill("Compkiller") 
+SecureKill("CompkillerInterface_MainGUI")   -- actual main window name
+SecureKill("Compkiller")
 SecureKill("RubicsX")
-SecureKill("RubicsX_Main") 
+SecureKill("RubicsX_Main")
 SecureKill("CompkillerUI")
 
--- 2. THREAD & CONNECTION SCRUBBER
--- Disconnects old background loops so they don't run 2x, 3x, 4x times...
+-- ── THREAD / CONNECTION SCRUBBER ─────────────────────────────────────────────
+-- Run old cleanup BEFORE declaring new state so references are correct.
 pcall(function()
     if getgenv()._CK_CLEANUP then getgenv()._CK_CLEANUP() end
 end)
 
 local _CK_CONNECTIONS = {}
+local _CK_THREADS     = {}
 
--- Virtualization Support
+-- ── SERVICE REFS (virtualized for executor compatibility) ─────────────────────
 local cloneref         = (cloneref or function(f) return f end)
-local HttpService      = cloneref(game:GetService('HttpService'))
-local TweenService     = cloneref(game:GetService('TweenService'))
-local UserInputService = cloneref(game:GetService('UserInputService'))
-local RunService       = cloneref(game:GetService('RunService'))
-local TextService      = cloneref(game:GetService('TextService'))
+local HttpService      = cloneref(game:GetService("HttpService"))
+local TweenService     = cloneref(game:GetService("TweenService"))
+local UserInputService = cloneref(game:GetService("UserInputService"))
+local RunService       = cloneref(game:GetService("RunService"))
+local TextService      = cloneref(game:GetService("TextService"))
 
--- Core client references
-local LocalPlayer   = game:GetService('Players').LocalPlayer
 local CurrentCamera = workspace.CurrentCamera
 local Mouse         = LocalPlayer:GetMouse()
 
--- Optimizer state — declared HERE so _Animation can safely read it from line 1
--- The full optimizer API is wired at the bottom of the file
+-- ── OPTIMIZER STATE ───────────────────────────────────────────────────────────
+-- Declared early so _Animation can read it. Full API is wired at the bottom.
 local _OPT = {
-    Enabled       = false,  -- off by default; use Compkiller:EnableAdvancedOptimizations(true)
-    AnimThreshold = 45,     -- FPS floor before instant-set kicks in
-    MemInterval   = 120,    -- seconds between auto memory sweeps
-    FPS           = 60,
-    FpsSamples    = {},
-    FpsSampleMax  = 30,
-    ActiveTweens  = {},
-    MonitorThread = nil,
+    Enabled        = false,   -- use Compkiller:EnableAdvancedOptimizations(true) to turn on
+    AnimThreshold  = 45,      -- FPS floor; below this, animations instant-set instead of tween
+    MemInterval    = 120,     -- seconds between background tween sweeps
+    FPS            = 60,
+    FpsSamples     = {},
+    FpsSampleMax   = 30,
+    ActiveTweens   = {},
+    MonitorThread  = nil,
     Stats = { TweensCancelled = 0, InstantSets = 0, MemorySweeps = 0, LastSweepAt = 0 },
 }
-
--- Thread + connection trackers
-local _CK_THREADS = {}
 
 local function _TrackConn(conn)
     table.insert(_CK_CONNECTIONS, conn)
@@ -73,16 +82,15 @@ local function _TrackThread(thread)
     return thread
 end
 
--- Single unified cleanup — replaces whatever was set before
--- Handles: connections, threads, active tweens — all in one place
+-- ── UNIFIED CLEANUP (stored globally so next execution can call it) ───────────
 getgenv()._CK_CLEANUP = function()
-    -- 1. Cancel all tracked threads
+    -- 1. Cancel all tracked background threads
     for _, t in ipairs(_CK_THREADS) do
         pcall(task.cancel, t)
     end
     _CK_THREADS = {}
 
-    -- 2. Cancel all orphaned tweens from the previous execution
+    -- 2. Cancel all orphaned tweens
     for _, tw in ipairs(_OPT.ActiveTweens) do
         pcall(function()
             if tw and tw.PlaybackState == Enum.PlaybackState.Playing then
@@ -92,16 +100,24 @@ getgenv()._CK_CLEANUP = function()
     end
     _OPT.ActiveTweens = {}
 
-    -- 3. Disconnect all tracked connections
+    -- 3. Disconnect all tracked signal connections
     for _, conn in ipairs(_CK_CONNECTIONS) do
-        if conn then pcall(function() conn:Disconnect() end) end
+        pcall(function() if conn then conn:Disconnect() end end)
     end
     _CK_CONNECTIONS = {}
 
-    -- 4. Reset FPS sampler state so the new execution starts with a clean slate
-    --    (prevents stale samples from inflating/deflating the rolling average)
-    _OPT.FpsSamples   = {}
-    _OPT.FPS          = 60
+    -- 4. Destroy the random-named Notification ScreenGui (can't be killed by name)
+    pcall(function()
+        if Compkiller and Compkiller.NOTIFY_CACHE and Compkiller.NOTIFY_CACHE._gui then
+            Compkiller.NOTIFY_CACHE._gui:Destroy()
+        end
+    end)
+    -- NOTE: The main "CompkillerInterface_MainGUI" window is killed by SecureKill
+    -- at the top of the script (before this cleanup runs), which is correct.
+
+    -- 5. Reset FPS sampler — prevents stale samples from skewing the rolling average
+    _OPT.FpsSamples    = {}
+    _OPT.FPS           = 60
     _OPT.MonitorThread = nil
 end
 
@@ -1193,26 +1209,6 @@ function Compkiller:_SetNilP(Ins: Instance , Parent: Instance)
 	end;
 
 	Ins.Parent = Parent or Compkiller.NilFolder;
-end;
-
-function Compkiller:SetAllText(flags : {[string] : string})
-	if not flags then -- reset to default
-		for i,v in next , Compkiller.Flags do
-			if v.SetText then
-				v:SetText(nil);
-			end;
-		end;
-
-		return;
-	end;
-
-	flags = flags or {};
-
-	for i,v in next , flags do
-		if Compkiller.Flags[i] and Compkiller.Flags[i].SetText then
-			Compkiller.Flags[i]:SetText(v);
-		end;
-	end;
 end;
 
 function Compkiller:_GetIcon(name : string , font_aws) : string
@@ -10129,9 +10125,14 @@ function Compkiller:Loader(IconId,Duration)
 end;
 
 function Compkiller.newNotify()
-	if Compkiller.NOTIFY_CACHE then
+	-- Return cache only if the underlying ScreenGui is still alive.
+	-- On re-execute the old ScreenGui gets destroyed by SecureKill; the stale
+	-- cache pointer would return a dead reference and break all notifications.
+	if Compkiller.NOTIFY_CACHE and Compkiller.NOTIFY_CACHE._gui
+		and Compkiller.NOTIFY_CACHE._gui.Parent ~= nil then
 		return Compkiller.NOTIFY_CACHE;
-	end;
+	end
+	Compkiller.NOTIFY_CACHE = nil  -- clear dead reference before rebuilding
 
 	local Notification = Instance.new("ScreenGui")
 	local NotifyContainer = Instance.new("Frame")
@@ -10160,6 +10161,7 @@ function Compkiller.newNotify()
 	local LayoutREF = 0;
 
 	Compkiller.NOTIFY_CACHE = {
+		_gui = Notification,   -- held so newNotify() can check if it is still alive
 		new = function(Notify: Notify) : NotifyPayback
 			Notify = Compkiller.__CONFIG(Notify, {
 				Icon = Compkiller.Logo,
@@ -10443,11 +10445,11 @@ function Compkiller:EnableAdvancedOptimizations(enabled: boolean)
                 _OPT.MonitorThread = nil
             end)
             _OPT.MonitorThread = thread
-            -- Register with cleanup so re-executing the GUI cancels the old monitor
+            -- Register so _CK_CLEANUP cancels it cleanly on re-execute
             _TrackThread(thread)
         end
     else
-        -- Signal the monitor loop to stop; it will nil itself
+        -- Signal the monitor loop to stop; it will nil itself on next iteration
         _OPT.MonitorThread = nil
     end
 end
@@ -10541,18 +10543,18 @@ function Compkiller:_SmartAnimation(Self: Instance, Info: TweenInfo, Property: {
             pcall(function() Self[prop] = val end)
         end
         _OPT.Stats.InstantSets += 1
-        -- Return a safe dummy so any :Wait() call on the result doesn't error.
-        -- We fire and destroy the BindableEvent immediately to avoid instance leaks.
+        -- Return a dummy so :Completed:Wait() on the result doesn't error.
+        -- Fire + Destroy immediately so we never leak a BindableEvent instance.
         local dummy = Instance.new("BindableEvent")
         local dummyEvent = dummy.Event
-        dummy:Fire()   -- pre-fire so any :Wait() resolves instantly
+        dummy:Fire()    -- pre-fired so any :Wait() resolves instantly
         dummy:Destroy()
         return {
-            Completed      = dummyEvent,
-            PlaybackState  = Enum.PlaybackState.Completed,
+            Completed     = dummyEvent,
+            PlaybackState = Enum.PlaybackState.Completed,
         }
     end
-    -- Normal path: create tween, track it, play it
+    -- Normal path: create tween, track it for orphan sweep, play it
     local tween = TweenService:Create(Self, Info or TweenInfo.new(0.25), Property)
     if _OPT.Enabled then
         table.insert(_OPT.ActiveTweens, tween)
@@ -10565,12 +10567,12 @@ end
 function Compkiller:_SweepMemory()
     local kept = {}
     for _, tw in ipairs(_OPT.ActiveTweens) do
-        -- Safely read PlaybackState; drop tween silently if it has been GC'd
+        -- Capture PlaybackState safely; a GC'd tween will error on property access
         local ok, state = pcall(function() return tw.PlaybackState end)
         if ok and state == Enum.PlaybackState.Playing then
             table.insert(kept, tw)
         end
-        -- Completed / Cancelled / errored tweens are simply dropped (GC handles them)
+        -- Completed / Cancelled / dead tweens are dropped; GC handles them
     end
     _OPT.ActiveTweens = kept
     _OPT.Stats.MemorySweeps += 1
