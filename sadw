@@ -1,3 +1,5 @@
+print("udapted 1")
+
 --[[
     Compkiller Interface (Smart Performance Edition v3)
     - Single-Execution Guard: Destroys ALL old GUI instances before loading a new one.
@@ -112,6 +114,14 @@ getgenv()._CK_CLEANUP = function()
             Compkiller.NOTIFY_CACHE._gui:Destroy()
         end
     end)
+    -- Clear both caches — their root instances are destroyed by SecureKill / above.
+    -- This forces a clean rebuild on the next execution instead of returning dead refs.
+    if Compkiller then
+        Compkiller.NOTIFY_CACHE     = nil
+        Compkiller.__KEYBINDS_CACHE = nil
+        Compkiller.Windows          = {}
+        Compkiller.WindowsNil       = {}
+    end
     -- NOTE: The main "CompkillerInterface_MainGUI" window is killed by SecureKill
     -- at the top of the script (before this cleanup runs), which is correct.
 
@@ -2978,9 +2988,14 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 end;
 
 function Compkiller:_DrawKeybinds(Window: ScreenGui)
-	if Compkiller.__KEYBINDS_CACHE then
+	-- Only reuse the cache if the keybind Frame is still alive inside a valid window.
+	-- After re-execute the old ScreenGui is destroyed; the stale cache would return
+	-- a parented-to-nil Frame, which is what causes the ghost black-square panel.
+	if Compkiller.__KEYBINDS_CACHE and Compkiller.__KEYBINDS_CACHE.Root
+		and Compkiller.__KEYBINDS_CACHE.Root.Parent ~= nil then
 		return Compkiller.__KEYBINDS_CACHE;
-	end;
+	end
+	Compkiller.__KEYBINDS_CACHE = nil  -- clear dead reference before rebuilding
 
 	local Keybinds = Instance.new("Frame")
 	local UICorner = Instance.new("UICorner")
@@ -9248,6 +9263,18 @@ function Compkiller.new(Config : Window)
 				refresh();
 				refreshScale();
 			end);
+
+			-- If the section was configured to start collapsed, flip IsOpen now
+			-- and let the existing refresh/chevron rotation handle the visual state.
+			-- This uses the real internal machinery — no fake ContentContainer search.
+			if config.Closed then
+				IsOpen = false
+				SectionClose.Rotation = -180  -- chevron already points "up" when open; point down when closed
+				task.delay(0.05, function()
+					refresh()
+					refreshScale()
+				end)
+			end
 
 			Header.MouseEnter:Connect(function()
 				Compkiller:_Animation(SectionText,TweenInfo.new(0.2),{
