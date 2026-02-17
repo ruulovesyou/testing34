@@ -10614,25 +10614,92 @@ end
 
 -- Get Performance Stats
 function Compkiller:GetPerformanceStats()
-	local stats = self._PerformanceV2.Stats
-	return {
-		TweensSaved = stats.TweensSaved,
-		ConnectionsCleaned = stats.ConnectionsCleaned,
-		DebouncedCalls = stats.DebouncedCalls,
-		ActiveTweens = self:CountTable(self._PerformanceV2.TweenCache),
-		ActiveConnections = self:CountTable(self._PerformanceV2.ConnectionPool),
-		LastCleanup = self._PerformanceV2.MemoryMonitor.LastCleanup,
-	}
+    local stats = self._PerformanceV2.Stats
+    return {
+        TweensSaved = stats.TweensSaved,
+        ConnectionsCleaned = stats.ConnectionsCleaned,
+        DebouncedCalls = stats.DebouncedCalls,
+        ActiveTweens = self:CountTable(self._PerformanceV2.TweenCache),
+        ActiveConnections = self:CountTable(self._PerformanceV2.ConnectionPool)
+    }
 end
 
-function Compkiller:CountTable(tbl)
-	local count = 0
-	for _ in pairs(tbl) do count = count + 1 end
-	return count
+
+
+
+-- [[ 🟢 LOOTIFY: SMART GUI OPTIMIZER SUITE 🟢 ]]
+function Compkiller:GuiPerformance()
+    local GuiPerf = {}
+    
+    -- 1. REDUCE MOTION (Instantly apply changes, no Tweens)
+    -- Saves CPU by skipping calculations for smooth animations
+    function GuiPerf:ToggleAnimations(enabled)
+        getgenv()._CK_ReduceMotion = not enabled -- Inverted: Toggle ON = No Anim
+        
+        local originalAnim = Compkiller._Animation
+        
+        -- Backup original function once
+        if not getgenv()._CK_RealAnim then
+            getgenv()._CK_RealAnim = originalAnim
+        end
+
+        if getgenv()._CK_ReduceMotion then
+            -- Override with "Instant Set" function
+            Compkiller._Animation = function(self, object, info, properties)
+                for prop, value in pairs(properties) do
+                    object[prop] = value 
+                end
+                return {Completed = {Wait = function() return true end}} 
+            end
+        else
+            -- Restore Original
+            Compkiller._Animation = getgenv()._CK_RealAnim
+        end
+    end
+
+    -- 2. LOW DETAIL MODE (Removes Shadows, Blurs, Strokes)
+    -- Saves GPU by hiding expensive visual effects
+    function GuiPerf:LowDetailMode(enabled)
+        local MainGui = CoreGui:FindFirstChild("RubicsX") or CoreGui:FindFirstChild("Compkiller")
+        if not MainGui then return end
+        
+        for _, v in pairs(MainGui:GetDescendants()) do
+            if enabled then
+                -- Disable expensive visuals
+                if v:IsA("UIStroke") or v:IsA("uishadow") then
+                    v.Enabled = false
+                elseif v:IsA("UICorner") then
+                    v.CornerRadius = UDim.new(0, 0) -- Square corners are faster
+                elseif v:IsA("BlurEffect") then
+                    v.Enabled = false
+                end
+            else
+                -- Re-enable visuals
+                if v:IsA("UIStroke") then v.Enabled = true end
+                if v:IsA("BlurEffect") then v.Enabled = true end
+            end
+        end
+    end
+
+    -- 3. SMART BACKGROUND SAVER
+    function GuiPerf:SmartSleep(state)
+        if state then
+            getgenv()._CK_SleepConn = UserInputService.WindowFocusReleased:Connect(function()
+                setfpscap(60) -- Drop to 10 FPS when alt-tabbed
+            end)
+            getgenv()._CK_WakeConn = UserInputService.WindowFocused:Connect(function()
+                setfpscap(360) -- Restore FPS
+            end)
+        else
+            if getgenv()._CK_SleepConn then getgenv()._CK_SleepConn:Disconnect() end
+            if getgenv()._CK_WakeConn then getgenv()._CK_WakeConn:Disconnect() end
+            setfpscap(360)
+        end
+    end
+
+    return GuiPerf
 end
 
--- ========================================
--- END OF ADVANCED PERFORMANCE FUNCTIONS
--- ========================================
+
 
 return Compkiller;
