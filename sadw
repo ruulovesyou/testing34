@@ -62,7 +62,7 @@ local Mouse         = LocalPlayer:GetMouse()
 -- ── OPTIMIZER STATE ───────────────────────────────────────────────────────────
 -- Declared early so _Animation can read it. Full API is wired at the bottom.
 local _OPT = {
-    Enabled        = false,   -- use Compkiller:EnableAdvancedOptimizations(true) to turn on
+    Enabled        = true,   -- use Compkiller:EnableAdvancedOptimizations(true) to turn on
     AnimThreshold  = 30,      -- hard floor; below this, skip TweenService entirely
     MemInterval    = 120,     -- seconds between background tween sweeps
     FPS            = 60,
