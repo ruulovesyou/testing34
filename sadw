@@ -3510,7 +3510,7 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 				Compkiller:_SetNilP(Keybinds , Window);
 			end;
 		end;
-	end);
+	end));
 
 	function Ref:AddFrame()
 		local Keyholder = Instance.new("Frame")
@@ -3919,7 +3919,7 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 				KeybindFrame:SetVisible(false);
 			end;
 		end;
-	end)
+	end));
 
 	Parent.InputEnded:Connect(function(Input,Typing)
 		if Input.UserInputType == Enum.UserInputType.MouseButton2 and not Typing then
@@ -8776,7 +8776,7 @@ function Compkiller.new(Config : Window)
 						Refresh();
 					end;
 				end;
-			end);
+			end));
 
 			return Init;
 		end;
@@ -10051,7 +10051,7 @@ function Compkiller.new(Config : Window)
 				TabHover:Fire(true);
 			end;
 		end;
-	end);
+	end));
 
 	WindowArgs:Update();
 
@@ -10955,13 +10955,3 @@ end
 -- ========================================
 
 return Compkiller;
-
-
---[[
-Notifier.new({
-	Title = "Version 1.0v",
-	Content = "BETA mode",
-	Duration = 5,
-	Icon = "rbxassetid://120245531583106"
-});
-]]
