@@ -10957,10 +10957,11 @@ end
 return Compkiller;
 
 
-
+--[[
 Notifier.new({
 	Title = "Version 1.0v",
 	Content = "BETA mode",
 	Duration = 5,
 	Icon = "rbxassetid://120245531583106"
 });
+]]
