@@ -1,28 +1,29 @@
 --[[ 
-    Compkiller Interface (Performance Edition)
-    - Anti-Lag Header: Instantly kills old instances to free RAM.
-    - Smart Injection: Waits for game load to prevent crashes.
+    Compkiller Interface (Smart Performance Edition)
+    - Auto-Kill Switch: Prevents "Instance Stacking" (The #1 cause of your lag).
+    - Smart Injection: Waits for game load to prevent crash.
+    - Garbage Collector: Cleans up old memory leaks immediately.
 --]]
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 
--- 1. VISUAL KILL SWITCH (The "Super Smooth" Fix)
--- Instantly finds and destroys ANY version of this UI to prevent FPS drops
+-- 1. ADVANCED KILL SWITCH
+-- This searches for ANY trace of your menu and destroys it before loading a new one.
 local CoreGui = game:GetService("CoreGui")
 local PlayerGui = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
 
-local function SecureKill(targetName)
-    if CoreGui:FindFirstChild(targetName) then CoreGui[targetName]:Destroy() end
-    if PlayerGui and PlayerGui:FindFirstChild(targetName) then PlayerGui[targetName]:Destroy() end
+local function SecureKill(target)
+    if CoreGui:FindFirstChild(target) then CoreGui[target]:Destroy() end
+    if PlayerGui and PlayerGui:FindFirstChild(target) then PlayerGui[target]:Destroy() end
 end
 
 SecureKill("Compkiller") 
-SecureKill("RubicsX")    
-SecureKill("RubicsX_Main")
+SecureKill("RubicsX")
+SecureKill("RubicsX_Main") 
 SecureKill("CompkillerUI")
 
--- 2. THREAD CLEANUP
--- Stops old background loops from running twice
+-- 2. THREAD & CONNECTION SCRUBBER
+-- Disconnects old background loops so they don't run 2x, 3x, 4x times...
 pcall(function()
     if getgenv()._CK_CLEANUP then getgenv()._CK_CLEANUP() end
 end)
@@ -33,13 +34,15 @@ getgenv()._CK_CLEANUP = function()
         if conn then pcall(function() conn:Disconnect() end) end
     end
     _CK_CONNECTIONS = {}
+    -- Force Lua to dump unused memory
+    for i = 1,3 do collectgarbage() end
 end
 
--- Services & Vars
+-- Virtualization Support
 local cloneref = (cloneref or function(f) return f end)
+local HttpService = cloneref(game:GetService('HttpService'))
+local TweenService = cloneref(game:GetService('TweenService'))
 local UserInputService = cloneref(game:GetService('UserInputService'))
-local RunService = cloneref(game:GetService('RunService'))
-local CoreGui = (gethui and gethui()) or cloneref(game:GetService("CoreGui"))
 
 
 local Compkiller = {
@@ -66,7 +69,7 @@ local Compkiller = {
 		UpdateBatcher = {},
 		MemoryMonitor = {
 			LastCleanup = tick(),
-			CleanupInterval = 300, -- 5 minutes
+			CleanupInterval = 100, -- 5 minutes
 		},
 		Stats = {
 			TweensSaved = 0,
@@ -10585,44 +10588,6 @@ end
 
 
 
--- [[ 🟢 SMART GUI OPTIMIZER (Logic Only) 🟢 ]]
-function Compkiller:ActivateSmartPerformance()
-    -- 1. SMART SLEEP (Saves 80% CPU when Tabbed Out)
-    -- Automatically drops FPS when you are not looking at Roblox
-    local UserInputService = game:GetService("UserInputService")
-    
-    table.insert(_CK_CONNECTIONS, UserInputService.WindowFocusReleased:Connect(function()
-        setfpscap(10) -- Drop to 10 FPS (Saves GPU)
-    end))
-    
-    table.insert(_CK_CONNECTIONS, UserInputService.WindowFocused:Connect(function()
-        setfpscap(360) -- Restore FPS instantly
-    end))
-
-    -- 2. AUTO-REDUCE MOTION (Detects Lag)
-    -- If FPS is low, it automatically disables heavy GUI animations
-    task.spawn(function()
-        task.wait(5) -- Wait for load
-        local fps = workspace:GetRealPhysicsFPS()
-        
-        if fps < 45 then
-             -- Override Animation function to be instant (No Tweening)
-             Compkiller._Animation = function(self, object, info, props)
-                for p, v in pairs(props) do object[p] = v end
-                return {Completed = {Wait = function() return true end}}
-             end
-        end
-    end)
-
-    -- 3. BACKGROUND MEMORY SCRUBBER
-    -- Every 60 seconds, it cleans unused UI memory automatically
-    task.spawn(function()
-        while true do
-            task.wait(60)
-            for i=1,3 do collectgarbage() end
-        end
-    end)
-end
 
 
 return Compkiller;
