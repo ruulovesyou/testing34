@@ -1,8 +1,11 @@
 --[[ 
     Compkiller Interface (Smart Performance Edition)
-    - Auto-Kill Switch: Prevents "Instance Stacking" (The #1 cause of your lag).
+    - Auto-Kill Switch: Prevents "Instance Stacking" (The #1 cause of lag).
     - Smart Injection: Waits for game load to prevent crash.
-    - FPS Guard: Prevents FPS drop on repeated GUI executions.
+    - FPS Guard: Rolling FPS sampler prevents FPS drop on repeated GUI executions.
+    - Tween Orphan Killer: Cancels leftover tweens from previous executions.
+    - Thread Scrubber: Kills old background loops so they never double-run.
+    - Clean Re-Execute: FPS sample state resets each execution — no stale data.
 --]]
 
 if not game:IsLoaded() then game.Loaded:Wait() end
@@ -94,6 +97,12 @@ getgenv()._CK_CLEANUP = function()
         if conn then pcall(function() conn:Disconnect() end) end
     end
     _CK_CONNECTIONS = {}
+
+    -- 4. Reset FPS sampler state so the new execution starts with a clean slate
+    --    (prevents stale samples from inflating/deflating the rolling average)
+    _OPT.FpsSamples   = {}
+    _OPT.FPS          = 60
+    _OPT.MonitorThread = nil
 end
 
 
@@ -10424,7 +10433,7 @@ function Compkiller:EnableAdvancedOptimizations(enabled: boolean)
     if _OPT.Enabled then
         -- Start background memory monitor if not already running
         if not _OPT.MonitorThread then
-            _OPT.MonitorThread = task.spawn(function()
+            local thread = task.spawn(function()
                 while _OPT.Enabled do
                     task.wait(_OPT.MemInterval)
                     if _OPT.Enabled then
@@ -10433,6 +10442,9 @@ function Compkiller:EnableAdvancedOptimizations(enabled: boolean)
                 end
                 _OPT.MonitorThread = nil
             end)
+            _OPT.MonitorThread = thread
+            -- Register with cleanup so re-executing the GUI cancels the old monitor
+            _TrackThread(thread)
         end
     else
         -- Signal the monitor loop to stop; it will nil itself
@@ -10529,10 +10541,14 @@ function Compkiller:_SmartAnimation(Self: Instance, Info: TweenInfo, Property: {
             pcall(function() Self[prop] = val end)
         end
         _OPT.Stats.InstantSets += 1
-        -- Return a safe dummy so any :Wait() call on the result doesn't error
+        -- Return a safe dummy so any :Wait() call on the result doesn't error.
+        -- We fire and destroy the BindableEvent immediately to avoid instance leaks.
         local dummy = Instance.new("BindableEvent")
+        local dummyEvent = dummy.Event
+        dummy:Fire()   -- pre-fire so any :Wait() resolves instantly
+        dummy:Destroy()
         return {
-            Completed      = dummy.Event,
+            Completed      = dummyEvent,
             PlaybackState  = Enum.PlaybackState.Completed,
         }
     end
@@ -10547,14 +10563,14 @@ end
 
 -- Internal memory sweep (called by monitor + CleanupAll)
 function Compkiller:_SweepMemory()
-    local before = #_OPT.ActiveTweens
     local kept = {}
     for _, tw in ipairs(_OPT.ActiveTweens) do
-        local state = pcall(function() return tw.PlaybackState end)
-        if state and tw.PlaybackState == Enum.PlaybackState.Playing then
+        -- Safely read PlaybackState; drop tween silently if it has been GC'd
+        local ok, state = pcall(function() return tw.PlaybackState end)
+        if ok and state == Enum.PlaybackState.Playing then
             table.insert(kept, tw)
         end
-        -- Completed / Cancelled tweens are simply dropped (GC handles them)
+        -- Completed / Cancelled / errored tweens are simply dropped (GC handles them)
     end
     _OPT.ActiveTweens = kept
     _OPT.Stats.MemorySweeps += 1
