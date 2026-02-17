@@ -1,3 +1,4 @@
+print("new ver:1")
 --[[
     Compkiller Interface (Smart Performance Edition v3)
     - Single-Execution Guard: Destroys ALL old GUI instances before loading a new one.
@@ -10434,35 +10435,30 @@ Compkiller.NilFolder.Name = "Nil-Instances";
 
 
 
-
-
-
-
--- [[ INTEGRATED ADVANCED OPTIMIZER v5 ]] --
+-- [[ COMPKILLER ADVANCED OPTIMIZER v5 - FINAL INTEGRATED ]] --
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
--- 1. INTERNAL OPTIMIZER STATE
-local _OPT = {
+-- 1. SCOPED OPTIMIZER STATE
+-- We put this inside Compkiller so all functions can see it!
+Compkiller._OPT = {
     Enabled = true,
     FPS = 60,
     FpsSamples = {},
     FpsSampleMax = 10,
-    AnimThreshold = 30, -- Below this, animations become instant
+    AnimThreshold = 30,
     MemInterval = 30,
     ActiveTweens = {},
     ActiveTweenMap = {},
-    MonitorThread = nil,
     Stats = {
         TweensCancelled = 0,
         InstantSets = 0,
         DedupCancels = 0,
         MemorySweeps = 0,
-        LastSweepAt = 0
     }
 }
 
--- Create the Dummy Stub for instant-sets (Zero Allocation)
+-- 2. SHARED DUMMY OBJECT (Prevents Memory Leaks)
 local _dummyBE = Instance.new("BindableEvent")
 local _DummyTween = {
     Completed = _dummyBE.Event,
@@ -10472,85 +10468,76 @@ local _DummyTween = {
     Pause = function() end,
 }
 
--- 2. FPS SAMPLER (O(1) Running Sum)
+-- 3. AUTOMATIC FPS SAMPLER
+-- This calculates your real-time FPS so the UI knows when to optimize
 task.spawn(function()
     local _runSum = 0
-    RunService.Heartbeat:Connect(function(dt)
+    local conn = RunService.Heartbeat:Connect(function(dt)
         local fps = 1 / math.max(dt, 0.001)
-        if #_OPT.FpsSamples >= _OPT.FpsSampleMax then
-            _runSum = _runSum - table.remove(_OPT.FpsSamples, 1)
+        if #Compkiller._OPT.FpsSamples >= Compkiller._OPT.FpsSampleMax then
+            _runSum -= table.remove(Compkiller._OPT.FpsSamples, 1)
         end
-        table.insert(_OPT.FpsSamples, fps)
-        _runSum = _runSum + fps
-        _OPT.FPS = _runSum / #_OPT.FpsSamples
+        table.insert(Compkiller._OPT.FpsSamples, fps)
+        _runSum += fps
+        Compkiller._OPT.FPS = _runSum / #Compkiller._OPT.FpsSamples
     end)
+    -- If your library has a connection tracker, add 'conn' to it here.
 end)
 
--- 3. THE SMART ANIMATION FUNCTION (The Core Fix)
+-- 4. THE SMART ANIMATION ENGINE
 function Compkiller:_SmartAnimation(Self: Instance, Info: TweenInfo, Property: {[any]: any})
-    if not _OPT.Enabled then
+    local opt = Compkiller._OPT
+    
+    if not opt.Enabled then
         local tw = TweenService:Create(Self, Info, Property)
         tw:Play()
         return tw
     end
 
-    local currentFPS = _OPT.FPS
-    
-    -- TIER 2: INSTANT-SET (Below Threshold)
-    if currentFPS < _OPT.AnimThreshold then
+    -- TIER 2: INSTANT-SET (Triggered when Lagging)
+    if opt.FPS < opt.AnimThreshold then
         for prop, val in pairs(Property) do
             pcall(function() Self[prop] = val end)
         end
-        _OPT.Stats.InstantSets = _OPT.Stats.InstantSets + 1
+        opt.Stats.InstantSets += 1
         return _DummyTween
     end
 
-    -- TIER 1: ADAPTIVE TWEENING
+    -- TIER 1: ADAPTIVE TWEENING (Smooth Mode)
     local baseDuration = (Info and Info.Time) or 0.25
-    local fpsScale = math.clamp(currentFPS / 60, 0.5, 1.0) -- Snappier as FPS drops
+    local fpsScale = math.clamp(opt.FPS / 60, 0.5, 1.0) 
     local newDuration = math.max(0.05, baseDuration * fpsScale)
 
     local newInfo = TweenInfo.new(
         newDuration,
         Info.EasingStyle or Enum.EasingStyle.Quad,
-        Info.EasingDirection or Enum.EasingDirection.Out,
-        Info.RepeatCount or 0,
-        Info.Reverses or false,
-        Info.DelayTime or 0
+        Info.EasingDirection or Enum.EasingDirection.Out
     )
 
-    -- DEDUPLICATION (Stop "fighting" tweens)
+    -- DEDUPLICATION (Stops "Fighting" Animations)
+    local debugId = Self:GetDebugId()
     for prop in pairs(Property) do
-        local dedupKey = tostring(Self:GetDebugId()) .. "|" .. prop
-        local existing = _OPT.ActiveTweenMap[dedupKey]
-        if existing then
-            pcall(function() 
-                if existing.PlaybackState == Enum.PlaybackState.Playing then
-                    existing:Cancel() 
-                    _OPT.Stats.DedupCancels = _OPT.Stats.DedupCancels + 1
-                end
-            end)
-            _OPT.ActiveTweenMap[dedupKey] = nil
+        local key = debugId .. "|" .. prop
+        local existing = opt.ActiveTweenMap[key]
+        if existing and existing.PlaybackState == Enum.PlaybackState.Playing then
+            pcall(function() existing:Cancel() end)
+            opt.Stats.DedupCancels += 1
         end
     end
 
-    -- Play Scaled Tween
+    -- Create and Track Tween
     local tween = TweenService:Create(Self, newInfo, Property)
-    table.insert(_OPT.ActiveTweens, tween)
+    table.insert(opt.ActiveTweens, tween)
     
     for prop in pairs(Property) do
-        _OPT.ActiveTweenMap[tostring(Self:GetDebugId()) .. "|" .. prop] = tween
+        opt.ActiveTweenMap[debugId .. "|" .. prop] = tween
     end
 
     tween.Completed:Connect(function()
-        local idx = table.find(_OPT.ActiveTweens, tween)
-        if idx then table.remove(_OPT.ActiveTweens, idx) end
-        -- Cleanup Map
+        local idx = table.find(opt.ActiveTweens, tween)
+        if idx then table.remove(opt.ActiveTweens, idx) end
         for prop in pairs(Property) do
-            local key = tostring(Self:GetDebugId()) .. "|" .. prop
-            if _OPT.ActiveTweenMap[key] == tween then
-                _OPT.ActiveTweenMap[key] = nil
-            end
+            opt.ActiveTweenMap[debugId .. "|" .. prop] = nil
         end
     end)
 
@@ -10558,26 +10545,37 @@ function Compkiller:_SmartAnimation(Self: Instance, Info: TweenInfo, Property: {
     return tween
 end
 
--- 4. PUBLIC API METHODS
-function Compkiller:EnableAdvancedOptimizations(enabled: boolean)
-    _OPT.Enabled = enabled
+-- 5. PUBLIC API (These will now work correctly)
+function Compkiller:EnableAdvancedOptimizations(enabled)
+    Compkiller._OPT.Enabled = enabled
 end
 
 function Compkiller:GetFPS()
-    return math.floor(_OPT.FPS + 0.5)
+    return math.floor(Compkiller._OPT.FPS + 0.5)
 end
 
 function Compkiller:GetOptimizerStats()
+    local opt = Compkiller._OPT
     return {
         FPS = self:GetFPS(),
-        ActiveTweens = #_OPT.ActiveTweens,
-        DedupCancels = _OPT.Stats.DedupCancels,
-        InstantSets = _OPT.Stats.InstantSets
+        ActiveTweens = #opt.ActiveTweens,
+        DedupCancels = opt.Stats.DedupCancels,
+        InstantSets = opt.Stats.InstantSets
     }
 end
 
 function Compkiller:SetAnimThreshold(fps)
-    _OPT.AnimThreshold = math.clamp(fps, 10, 144)
+    Compkiller._OPT.AnimThreshold = math.clamp(fps, 10, 144)
 end
 
-return Compkiller;
+function Compkiller:CleanupAll()
+    local opt = Compkiller._OPT
+    for key, tw in pairs(opt.ActiveTweenMap) do
+        pcall(function() tw:Cancel() end)
+    end
+    table.clear(opt.ActiveTweens)
+    table.clear(opt.ActiveTweenMap)
+    opt.Stats.TweensCancelled += 1
+end
+
+return Compkiller
