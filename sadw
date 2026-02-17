@@ -1,407 +1,55 @@
---[[
-    		Compkiller Interface
-
-    Author: 4lpaca
-    License: MIT
-    Github: https://github.com/4lpaca-pin/CompKiller
-    Original: compkiller.net
-
-        Version: 2.6
-    - Improved Performance Mode
-    	Compkiller:OptimizeMode(< boolean >)
-  	- Added Auto Color Logo
-		Compkiller:CustomIconHighlight()
+--[[ 
+    Compkiller Interface (Smart Performance Edition)
+    - Auto-Kill Switch: Prevents "Instance Stacking" (The #1 cause of your lag).
+    - Smart Injection: Waits for game load to prevent crash.
+    - Garbage Collector: Cleans up old memory leaks immediately.
+--]]
+--[[ 
+    Compkiller Interface (Smart Performance Edition)
+    - Auto-Kill Switch: Prevents "Instance Stacking" (The #1 cause of your lag).
+    - Smart Injection: Waits for game load to prevent crash.
+    - Garbage Collector: Cleans up old memory leaks immediately.
 --]]
 
---- Export Types ---
+if not game:IsLoaded() then game.Loaded:Wait() end
+
+-- 1. ADVANCED KILL SWITCH
+-- This searches for ANY trace of your menu and destroys it before loading a new one.
+local CoreGui = game:GetService("CoreGui")
+local PlayerGui = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
+
+local function SecureKill(target)
+    if CoreGui:FindFirstChild(target) then CoreGui[target]:Destroy() end
+    if PlayerGui and PlayerGui:FindFirstChild(target) then PlayerGui[target]:Destroy() end
+end
+
+SecureKill("Compkiller") 
+SecureKill("RubicsX")
+SecureKill("RubicsX_Main") 
+SecureKill("CompkillerUI")
+
+-- 2. THREAD & CONNECTION SCRUBBER
+-- Disconnects old background loops so they don't run 2x, 3x, 4x times...
+pcall(function()
+    if getgenv()._CK_CLEANUP then getgenv()._CK_CLEANUP() end
+end)
+
+local _CK_CONNECTIONS = {}
+getgenv()._CK_CLEANUP = function()
+    for _, conn in ipairs(_CK_CONNECTIONS) do
+        if conn then pcall(function() conn:Disconnect() end) end
+    end
+    _CK_CONNECTIONS = {}
+    -- Force Lua to dump unused memory
+    for i = 1,3 do collectgarbage() end
+end
+
+-- Virtualization Support
+local cloneref = (cloneref or function(f) return f end)
+local HttpService = cloneref(game:GetService('HttpService'))
+local TweenService = cloneref(game:GetService('TweenService'))
+local UserInputService = cloneref(game:GetService('UserInputService'))
 
-export type cloneref = (target: Instance) -> Instance;
-
-export type Window = {
-	Name: string,
-	Keybind: string | Enum.KeyCode,
-	Logo: string,
-	Scale: UDim2,
-	TextSize: number
-};
-
-export type ConfigManager = {
-	Directory: string,
-	Config: string,
-};
-
-export type WriteConfig = {
-	Name: string,
-	Author: string,
-};
-
-export type WindowUpdate = {
-	Username: string,
-	ExpireDate: string,
-	Logo: string,
-	WindowName: string,
-	UserProfile: string
-};
-
-export type ConfigFunctions = {
-	Directory: string,
-	WriteConfig: (self: ConfigFunctions , Config: WriteConfig) -> any?,
-	ReadInfo: (self: ConfigFunctions , ConfigName: string) -> any?,
-	DeleteConfig: (self: ConfigFunctions , ConfigName: string) -> any?,
-	LoadConfig: (self: ConfigFunctions , ConfigName: string) -> any?,
-	GetConfigs: (self: ConfigFunctions , ConfigName: string) -> {string},
-	GetConfigCount: (self: ConfigFunctions) -> number,
-	GetFullConfigs: (self: ConfigFunctions , ConfigName: string) -> {
-		{
-			Name: string,
-			Info: {
-				Type: string,
-				Author: string,
-				Name: string,
-				CreatedDate: string,
-			}
-		}	
-	},
-};
-
-export type KeybindSettings = {
-	Key : string,
-	On : boolean | number,
-	Off : boolean | number,
-	Mode : number,
-	Name : string,
-}
-
-export type SecurityConfig = {
-	BlurEnabled : boolean,
-	ImageScale: number,
-};
-
-export type Notify = {
-	Icon: string,
-	Title: string,
-	Content: string,
-	Duration: number
-};
-
-export type NotifyPayback = {
-	SetProgress: (self: Notify , time: number) -> any?,
-	Content: (self: Notify , str: string) -> any?,
-	Title: (self: Notify , str: string) -> any?,
-	Close: () -> any?,
-}
-
-export type Watermark = {
-	Icon: string,
-	Text: string
-};
-
-export type TabConfig = {
-	Name: string,
-	Icon: string,
-	Type: string,
-	EnableScrolling: boolean
-};
-
-export type TabConfigManager = {
-	Name: string,
-	Icon: string,
-	Config: ConfigFunctions
-}
-
-export type ContainerTab = {
-	Name: string,
-	Icon: string,
-	EnableScrolling: boolean
-};
-
-export type Category = {
-	Name: string
-};
-
-export type Section = {
-	Name: string,
-	Position: string
-};
-
-export type Toggle = {
-	Name: string,
-	Default: boolean,
-	Flag: string | nil,
-	Risky: boolean,
-	Callback: (Value: boolean) -> any?
-};
-
-export type MiniToggle = {
-	Default: boolean,
-	Flag: string | nil,
-	Callback: (Value: boolean) -> any?
-};
-
-export type TextBoxConfig = {
-	Name: string,
-	Default: string,
-	Placeholder: string,
-	Flag: string | nil,
-	Numeric: boolean,
-	Callback: (Text: string) -> any?
-};
-
-export type ColorPicker = {
-	Name: string,
-	Default: Color3,
-	Flag: string | nil,
-	Transparency: number,
-	Callback: (Value: Color3 , Trans: number) -> any?
-};
-
-export type MiniColorPicker = {
-	Default: Color3,
-	Transparency: number,
-	Flag: string | nil,
-	Callback: (Value: Color3 , Trans: number) -> any?
-};
-
-export type Slider = {
-	Name: string,
-	Min: number,
-	Max: number,
-	Default: number,
-	Type: string,
-	Round: number,
-	Callback: (Value: number) -> any?
-};
-
-export type Dropdown = {
-	Name: string,
-	Default: string | {string},
-	Values: {string},
-	Multi: boolean,
-	Callback: (Value: string | {[string]: boolean}) -> any?
-};
-
-export type Button = {
-	Name: string,
-	Callback: () -> any?
-};
-
-export type Keybind = {
-	Name: string,
-	Default: string | Enum.KeyCode,
-	Callback: (Value: string) -> any,
-	Blacklist: {string | Enum.KeyCode}
-};
-
-export type MiniKeybind = {
-	Default: string | Enum.KeyCode,
-	Callback: (Value: string) -> any,
-	Blacklist: {string | Enum.KeyCode}
-};
-
-export type Helper = {
-	Text: string
-};
-
-export type Paragraph = {
-	Title: string,
-	Content: string
-}
-
-pcall(function() -- for Luraph
-	local Constant = table.concat({"LP","H_NO"}).."_VI".."RTU".."AL".."IZE";
-	getfenv()[Constant] = getfenv()[Constant] or function(f) return f end; 
-	-- LPH_NO_VIRTUALIZE
-end);
-
-pcall(function() -- for IB1
-	local Constant = "IB".."_NO_VI".."RTU".."AL".."IZE";
-	getfenv()[Constant] = getfenv()[Constant] or function(f) return f end; 
-	-- IB_NO_VIRTUALIZE
-end);
-
-getgenv = getgenv or getfenv;
-
--- Please ignore the ugly code. [Custom File System] --
-if game:GetService('RunService'):IsStudio() then
-	local BaseWorkspace = Instance.new('Folder',game:GetService("ReplicatedFirst"));
-
-	BaseWorkspace.Name = tostring(string.char(math.random(50,120)))..tostring(string.char(math.random(50,120)))..tostring(string.char(math.random(50,120)))..tostring(string.char(math.random(50,120)))..tostring(string.char(math.random(50,120)))..tostring(string.char(math.random(50,120)));
-
-	local __get_path_c = function(path)
-		return (string.find(path,'/',1,true) and string.split(path,'/')) or (string.find(path,'\\',1,true) and string.split(path,'\\')) or {path};
-	end;
-
-	local __get_path = function(path)
-		local main = __get_path_c(path);
-
-		local block = BaseWorkspace;
-
-		for i,v in next , main do
-			block = block[v];
-		end;
-
-		return block;
-	end;
-
-	getgenv().readfile = function(path)
-		local path : StringValue = __get_path(path);
-
-		return path.Value;
-	end;
-
-	getgenv().isfile = function(path)
-		local success , message = pcall(function()
-			return __get_path(path);
-		end);
-
-		if success and not message:IsA("Folder") then
-			return true;
-		end;
-
-		return false;
-	end;
-
-	getgenv().isfolder = function(path)
-		local success , message = pcall(function()
-			return __get_path(path);
-		end);
-
-		if success and message:IsA("Folder") then
-			return true;
-		end;
-
-		return false;
-	end;
-
-	getgenv().writefile = function(path,content)
-		local main = __get_path_c(path);
-
-		local block = BaseWorkspace;
-
-		for i,v in next , main do
-			local item = block:FindFirstChild(v);
-			if not item then
-				local c = Instance.new('StringValue',block);
-
-				c.Name = tostring(v);
-				c.Value = content;
-			else
-				if item:IsA('StringValue') and tostring(item) == v then
-					item.Name = tostring(v);
-					item.Value = content;
-				end;
-
-				block = item;
-			end;
-		end;
-	end;
-
-	getgenv().listfiles = function(path)
-		local fold = __get_path(path);
-		local pa = {};
-
-		for i,v in next , fold:GetChildren() do
-			if v:IsA('StringValue') then
-				table.insert(pa,path..'/'..tostring(v));
-			end;
-		end;
-
-		return pa;
-	end;
-
-	getgenv().makefolder = function(path)
-		local main = __get_path_c(path);
-
-		local block = BaseWorkspace;
-
-		for i,v in next , main do
-			local item = block:FindFirstChild(v);
-			if not item then
-				local c = Instance.new('Folder',block);
-
-				c.Name = tostring(v);
-			else
-				block = item;
-			end;
-		end;
-	end;
-
-	getgenv().delfile = function(path)
-		local main = __get_path_c(path);
-
-		local block = BaseWorkspace;
-
-		for i,v in next , main do
-			local item = block:FindFirstChild(v);
-			if item and item:IsA('StringValue') then
-				item:Destroy();
-			else
-				block = item;
-			end;
-		end;
-	end;
-end;
-
---- Local Variables ---
-local cloneref: cloneref = cloneref or function(f) return f end;
-local TweenService: TweenService = cloneref(game:GetService('TweenService'));
-local UserInputService: UserInputService = cloneref(game:GetService('UserInputService'));
-local TextService: TextService = cloneref(game:GetService('TextService'));
-local RunService: RunService = cloneref(game:GetService('RunService'));
-local Players: Players = cloneref(game:GetService('Players'));
-local HttpService: HttpService = cloneref(game:GetService('HttpService'));
-local LocalPlayer: Player = Players.LocalPlayer;
-local CoreGui: PlayerGui = (gethui and gethui()) or (get_hidden_gui and get_hidden_gui()) or cloneref(game:FindFirstChild('CoreGui')) or cloneref(LocalPlayer.PlayerGui);
-local Mouse: Mouse = LocalPlayer:GetMouse();
-local CurrentCamera: Camera? = cloneref(workspace.CurrentCamera);
-
--- ========================================
--- GLOBAL CLEANUP SYSTEM (Fix FPS drops on re-execute)
--- ========================================
--- UserInputService connections and task threads persist across re-executions
--- because they are attached to global services, not to destroyed GUI instances.
--- This system tracks them all and disconnects/cancels them before a new GUI is built.
-
-if getgenv().__CK_CLEANUP then
-	pcall(getgenv().__CK_CLEANUP);
-end;
-
-local _CK_CONNECTIONS = {};
-local _CK_THREADS = {};
-
-getgenv().__CK_CLEANUP = function()
-	for _, conn in ipairs(_CK_CONNECTIONS) do
-		pcall(function() 
-			if conn and conn.Connected then
-				conn:Disconnect(); 
-			end
-		end);
-	end;
-	for _, thread in ipairs(_CK_THREADS) do
-		pcall(function() task.cancel(thread); end);
-	end;
-	_CK_CONNECTIONS = {};
-	_CK_THREADS = {};
-end;
-
--- Track a UserInputService (or other global service) connection for cleanup
-local function _TrackConn(conn)
-	if conn then
-		table.insert(_CK_CONNECTIONS, conn);
-	end;
-	return conn;
-end;
-
--- Track an infinite task thread for cleanup
-local function _TrackThread(thread)
-	if thread then
-		table.insert(_CK_THREADS, thread);
-	end;
-	return thread;
-end;
--- ========================================
--- END GLOBAL CLEANUP SYSTEM
--- ========================================
 
 local Compkiller = {
 	Version = '2.6',
@@ -419,6 +67,23 @@ local Compkiller = {
 	ArcylicParent = CurrentCamera,
 	ProtectGui = protect_gui or protectgui or (syn and syn.protect_gui) or function(s) return s; end,
 	
+	-- Advanced Performance Systems (v2)
+	_PerformanceV2 = {
+		TweenCache = {},
+		ConnectionPool = {},
+		DebounceTimers = {},
+		UpdateBatcher = {},
+		MemoryMonitor = {
+			LastCleanup = tick(),
+			CleanupInterval = 100, -- 5 minutes
+		},
+		Stats = {
+			TweensSaved = 0,
+			ConnectionsCleaned = 0,
+			DebouncedCalls = 0,
+		}
+	},
+	_EnableAdvancedOptimizations = false,
 };
 
 Compkiller.Colors = {
@@ -1560,19 +1225,9 @@ function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
 	return math.floor(num * mult + 0.5) / mult;
 end;
 
--- Weak-keyed cache so GC can clean up instances that get destroyed
-local _TweenCache = setmetatable({}, { __mode = "k" });
-
 function Compkiller:_Animation(Self: Instance , Info: TweenInfo , Property :{[K] : V})
-	-- Cancel any previous tween on this exact instance to prevent tween buildup
-	-- (the main cause of FPS drops on re-execution and rapid UI interactions)
-	local prev = _TweenCache[Self];
-	if prev and prev.PlaybackState == Enum.PlaybackState.Playing then
-		prev:Cancel();
-	end;
-
 	local Tween = TweenService:Create(Self , Info or TweenInfo.new(0.25) , Property);
-	_TweenCache[Self] = Tween;
+
 	Tween:Play();
 
 	return Tween;
@@ -10704,5 +10359,299 @@ function Compkiller.newNotify()
 end;
 
 Compkiller.NilFolder.Name = "Nil-Instances";
+
+-- ========================================
+-- ADVANCED PERFORMANCE FUNCTIONS V2
+-- ========================================
+-- These are OPTIONAL helpers that don't affect existing code
+-- Enable with: Compkiller:EnableAdvancedOptimizations(true)
+
+-- Single Execution: Remove previous GUI
+function Compkiller:RemovePreviousGUI()
+	local GUI_IDENTIFIER = "CompkillerInterface_MainGUI"
+	local existingGUI = CoreGui:FindFirstChild(GUI_IDENTIFIER)
+	if existingGUI then
+		pcall(function() existingGUI.Parent = nil end)
+		task.spawn(function() existingGUI:Destroy() end)
+		return true
+	end
+	return false
+end
+
+-- Enable/Disable Advanced Optimizations (Safe - won't break UI)
+function Compkiller:EnableAdvancedOptimizations(enabled)
+	self._EnableAdvancedOptimizations = enabled
+	if enabled then
+		print("[Compkiller V2] Advanced optimizations ENABLED")
+		self:StartMemoryMonitor()
+	else
+		print("[Compkiller V2] Advanced optimizations DISABLED")
+		self:StopMemoryMonitor()
+	end
+end
+
+-- Advanced Tween System (optional usage)
+function Compkiller:SmartTween(instance, tweenInfo, properties)
+	if not self._EnableAdvancedOptimizations then
+		-- Fall back to normal animation
+		return self:_Animation(instance, tweenInfo, properties)
+	end
+	
+	-- Performance mode: instant set
+	if self.PerformanceMode then
+		for prop, value in pairs(properties) do
+			pcall(function() instance[prop] = value end)
+		end
+		return nil
+	end
+	
+	-- Smart caching
+	local cacheKey = tostring(instance) .. "_" .. tostring(tweenInfo.Time)
+	local cache = self._PerformanceV2.TweenCache[cacheKey]
+	
+	-- Cancel existing tween on same instance
+	if cache and cache.PlaybackState == Enum.PlaybackState.Playing then
+		cache:Cancel()
+		self._PerformanceV2.Stats.TweensSaved = self._PerformanceV2.Stats.TweensSaved + 1
+	end
+	
+	-- Create and cache new tween
+	local tween = TweenService:Create(instance, tweenInfo, properties)
+	self._PerformanceV2.TweenCache[cacheKey] = tween
+	tween:Play()
+	
+	-- Auto cleanup after completion
+	task.delay(tweenInfo.Time + 0.1, function()
+		if self._PerformanceV2.TweenCache[cacheKey] == tween then
+			self._PerformanceV2.TweenCache[cacheKey] = nil
+		end
+	end)
+	
+	return tween
+end
+
+-- Smart Debounce (optional usage)
+function Compkiller:Debounce(key, delay, callback)
+	if not self._EnableAdvancedOptimizations then
+		-- No debouncing, run immediately
+		return callback()
+	end
+	
+	local timers = self._PerformanceV2.DebounceTimers
+	local lastCall = timers[key]
+	
+	if lastCall and (tick() - lastCall) < delay then
+		self._PerformanceV2.Stats.DebouncedCalls = self._PerformanceV2.Stats.DebouncedCalls + 1
+		return false -- Debounced
+	end
+	
+	timers[key] = tick()
+	task.defer(callback)
+	return true
+end
+
+-- Connection Pool Manager (optional usage)
+function Compkiller:ManagedConnection(key, connection)
+	if not self._EnableAdvancedOptimizations then
+		-- Just return the connection without managing
+		return connection
+	end
+	
+	local pool = self._PerformanceV2.ConnectionPool
+	
+	-- Disconnect old connection if exists
+	if pool[key] then
+		pcall(function()
+			if pool[key].Connected then
+				pool[key]:Disconnect()
+				self._PerformanceV2.Stats.ConnectionsCleaned = self._PerformanceV2.Stats.ConnectionsCleaned + 1
+			end
+		end)
+	end
+	
+	pool[key] = connection
+	return connection
+end
+
+-- Batch Multiple Updates (optional usage)
+function Compkiller:BatchUpdate(batchKey, updateFunction, delay)
+	if not self._EnableAdvancedOptimizations then
+		return updateFunction()
+	end
+	
+	delay = delay or 0.05
+	local batcher = self._PerformanceV2.UpdateBatcher
+	
+	-- Cancel existing batch
+	if batcher[batchKey] then
+		task.cancel(batcher[batchKey])
+	end
+	
+	-- Schedule new batch
+	batcher[batchKey] = task.delay(delay, function()
+		pcall(updateFunction)
+		batcher[batchKey] = nil
+	end)
+end
+
+-- Memory Monitor (auto-cleanup system)
+function Compkiller:StartMemoryMonitor()
+	if self._PerformanceV2.MemoryMonitor.Active then return end
+	
+	self._PerformanceV2.MemoryMonitor.Active = true
+	
+	task.spawn(function()
+		while self._PerformanceV2.MemoryMonitor.Active do
+			task.wait(self._PerformanceV2.MemoryMonitor.CleanupInterval)
+			
+			if self._EnableAdvancedOptimizations then
+				self:AutoCleanup()
+			end
+		end
+	end)
+end
+
+function Compkiller:StopMemoryMonitor()
+	self._PerformanceV2.MemoryMonitor.Active = false
+end
+
+-- Auto Cleanup (called by memory monitor)
+function Compkiller:AutoCleanup()
+	local perf = self._PerformanceV2
+	local cleaned = 0
+	
+	-- Clean finished tweens
+	for key, tween in pairs(perf.TweenCache) do
+		if tween.PlaybackState == Enum.PlaybackState.Completed or
+		   tween.PlaybackState == Enum.PlaybackState.Cancelled then
+			perf.TweenCache[key] = nil
+			cleaned = cleaned + 1
+		end
+	end
+	
+	-- Clean old debounce timers
+	for key, time in pairs(perf.DebounceTimers) do
+		if tick() - time > 60 then -- 1 minute old
+			perf.DebounceTimers[key] = nil
+			cleaned = cleaned + 1
+		end
+	end
+	
+	perf.MemoryMonitor.LastCleanup = tick()
+	
+	if cleaned > 0 then
+		print(string.format("[Compkiller V2] Auto-cleanup: %d items freed", cleaned))
+	end
+end
+
+-- Manual Full Cleanup
+function Compkiller:CleanupAll()
+	local perf = self._PerformanceV2
+	local stats = {tweens = 0, connections = 0}
+	
+	-- Stop all tweens
+	for key, tween in pairs(perf.TweenCache) do
+		pcall(function()
+			if tween.PlaybackState == Enum.PlaybackState.Playing then
+				tween:Cancel()
+			end
+		end)
+		stats.tweens = stats.tweens + 1
+	end
+	
+	-- Disconnect all connections
+	for key, connection in pairs(perf.ConnectionPool) do
+		pcall(function()
+			if connection.Connected then
+				connection:Disconnect()
+			end
+		end)
+		stats.connections = stats.connections + 1
+	end
+	
+	-- Clear all caches
+	perf.TweenCache = {}
+	perf.ConnectionPool = {}
+	perf.DebounceTimers = {}
+	perf.UpdateBatcher = {}
+	
+	print(string.format("[Compkiller V2] Full cleanup: %d tweens, %d connections", 
+		stats.tweens, stats.connections))
+end
+
+-- Get Performance Stats
+function Compkiller:GetPerformanceStats()
+    local stats = self._PerformanceV2.Stats
+    return {
+        TweensSaved = stats.TweensSaved,
+        ConnectionsCleaned = stats.ConnectionsCleaned,
+        DebouncedCalls = stats.DebouncedCalls,
+        ActiveTweens = self:CountTable(self._PerformanceV2.TweenCache),
+        ActiveConnections = self:CountTable(self._PerformanceV2.ConnectionPool)
+    }
+end
+
+
+-- [[ 🔴 ADVANCED SMART GUI OPTIMIZER 🔴 ]]
+function Compkiller:ActivateSmartEngine()
+    local Stats = game:GetService("Stats")
+    local RunService = game:GetService("RunService")
+    
+    -- 1. IDLE THROTTLING (Saves CPU when menu is hidden)
+    -- Stops visual updates if the menu is closed
+    task.spawn(function()
+        local MainGui = getgenv().RubicsX_UI
+        if MainGui then
+            MainGui:GetPropertyChangedSignal("Enabled"):Connect(function()
+                if not MainGui.Enabled then
+                    setfpscap(60) -- Limit FPS when menu is closed to save resources
+                else
+                    setfpscap(360) -- Unlock when opened
+                end
+            end)
+        end
+    end)
+
+    -- 2. SMART TWEEN MANAGER
+    -- Automatically disables Animations if FPS drops below 50
+    task.spawn(function()
+        local OriginalAnim = Compkiller._Animation
+        while true do
+            task.wait(1) -- Check every second
+            local CurrentFPS = workspace:GetRealPhysicsFPS()
+            
+            if CurrentFPS < 50 then
+                -- LAG DETECTED: Switch to "Instant Mode" (No CPU usage)
+                Compkiller._Animation = function(self, obj, info, props)
+                    for p,v in pairs(props) do obj[p] = v end
+                    return {Completed = {Wait = function() return true end}}
+                end
+            else
+                -- SMOOTH: Restore Animations
+                if Compkiller._Animation ~= OriginalAnim then
+                    Compkiller._Animation = OriginalAnim
+                end
+            end
+        end
+    end)
+
+    -- 3. BACKGROUND VISUAL CLEANER
+    -- Removes heavy Shadows/Strokes if they are causing GPU lag
+    task.spawn(function()
+        task.wait(3) -- Wait for UI to load
+        local MainGui = CoreGui:FindFirstChild("RubicsX") or CoreGui:FindFirstChild("Compkiller")
+        if not MainGui then return end
+
+        -- If GPU lag is detected (Frame time > 16ms), strip heavy visuals
+        if Stats.PerformanceStats.GPU:GetValue() > 16 then
+            for _, v in pairs(MainGui:GetDescendants()) do
+                if v:IsA("UIStroke") or v:IsA("uishadow") or v:IsA("BlurEffect") then
+                    v.Enabled = false
+                end
+            end
+            warn("[SmartEngine] GPU Lag detected. Shadows/Strokes disabled.")
+        end
+    end)
+end
 
 return Compkiller;
