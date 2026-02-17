@@ -10586,7 +10586,67 @@ function Compkiller:GetPerformanceStats()
 end
 
 
+-- [[ 🔴 ADVANCED SMART GUI OPTIMIZER 🔴 ]]
+function Compkiller:ActivateSmartEngine()
+    local Stats = game:GetService("Stats")
+    local RunService = game:GetService("RunService")
+    
+    -- 1. IDLE THROTTLING (Saves CPU when menu is hidden)
+    -- Stops visual updates if the menu is closed
+    task.spawn(function()
+        local MainGui = getgenv().RubicsX_UI
+        if MainGui then
+            MainGui:GetPropertyChangedSignal("Enabled"):Connect(function()
+                if not MainGui.Enabled then
+                    setfpscap(60) -- Limit FPS when menu is closed to save resources
+                else
+                    setfpscap(360) -- Unlock when opened
+                end
+            end)
+        end
+    end)
 
+    -- 2. SMART TWEEN MANAGER
+    -- Automatically disables Animations if FPS drops below 50
+    task.spawn(function()
+        local OriginalAnim = Compkiller._Animation
+        while true do
+            task.wait(1) -- Check every second
+            local CurrentFPS = workspace:GetRealPhysicsFPS()
+            
+            if CurrentFPS < 50 then
+                -- LAG DETECTED: Switch to "Instant Mode" (No CPU usage)
+                Compkiller._Animation = function(self, obj, info, props)
+                    for p,v in pairs(props) do obj[p] = v end
+                    return {Completed = {Wait = function() return true end}}
+                end
+            else
+                -- SMOOTH: Restore Animations
+                if Compkiller._Animation ~= OriginalAnim then
+                    Compkiller._Animation = OriginalAnim
+                end
+            end
+        end
+    end)
+
+    -- 3. BACKGROUND VISUAL CLEANER
+    -- Removes heavy Shadows/Strokes if they are causing GPU lag
+    task.spawn(function()
+        task.wait(3) -- Wait for UI to load
+        local MainGui = CoreGui:FindFirstChild("RubicsX") or CoreGui:FindFirstChild("Compkiller")
+        if not MainGui then return end
+
+        -- If GPU lag is detected (Frame time > 16ms), strip heavy visuals
+        if Stats.PerformanceStats.GPU:GetValue() > 16 then
+            for _, v in pairs(MainGui:GetDescendants()) do
+                if v:IsA("UIStroke") or v:IsA("uishadow") or v:IsA("BlurEffect") then
+                    v.Enabled = false
+                end
+            end
+            warn("[SmartEngine] GPU Lag detected. Shadows/Strokes disabled.")
+        end
+    end)
+end
 
 
 
