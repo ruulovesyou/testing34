@@ -1,5 +1,3 @@
-print("udapted 1")
-
 --[[
     Compkiller Interface (Smart Performance Edition v3)
     - Single-Execution Guard: Destroys ALL old GUI instances before loading a new one.
@@ -64,14 +62,16 @@ local Mouse         = LocalPlayer:GetMouse()
 -- Declared early so _Animation can read it. Full API is wired at the bottom.
 local _OPT = {
     Enabled        = false,   -- use Compkiller:EnableAdvancedOptimizations(true) to turn on
-    AnimThreshold  = 45,      -- FPS floor; below this, animations instant-set instead of tween
+    AnimThreshold  = 30,      -- hard floor; below this, skip TweenService entirely
     MemInterval    = 120,     -- seconds between background tween sweeps
     FPS            = 60,
     FpsSamples     = {},
     FpsSampleMax   = 30,
     ActiveTweens   = {},
+    ActiveTweenMap = {},
     MonitorThread  = nil,
-    Stats = { TweensCancelled = 0, InstantSets = 0, MemorySweeps = 0, LastSweepAt = 0 },
+    _DummyTween    = nil,     -- set at bottom of file; shared stub for instant-set returns
+    Stats = { TweensCancelled = 0, InstantSets = 0, DedupCancels = 0, MemorySweeps = 0, LastSweepAt = 0 },
 }
 
 local function _TrackConn(conn)
@@ -129,6 +129,8 @@ getgenv()._CK_CLEANUP = function()
     _OPT.FpsSamples    = {}
     _OPT.FPS           = 60
     _OPT.MonitorThread = nil
+    _OPT.ActiveTweenMap = {}
+    _OPT._DummyTween   = nil   -- rebuilt at bottom of next execution
 end
 
 
@@ -10413,120 +10415,115 @@ end;
 
 Compkiller.NilFolder.Name = "Nil-Instances";
 
+
 -- ============================================================
---  ADVANCED FPS GUARD & OPTIMIZER
---  Real, working performance system. Always-on core (FPS sampler
---  + orphan tween killer), plus an optional Advanced layer you
---  can flip on/off at runtime.
+--  ADVANCED GUI OPTIMIZER  (v5 — proactive, always noticeable)
 --
---  USAGE:
---    Compkiller:EnableAdvancedOptimizations(true)   -- turn ON
---    Compkiller:EnableAdvancedOptimizations(false)  -- turn OFF
---    Compkiller:CleanupAll()                        -- force full sweep
---    Compkiller:GetFPS()                            -- current avg FPS
---    Compkiller:GetOptimizerStats()                 -- live stat table
+--  WHAT MAKES IT FEEL DIFFERENT (even at 60fps):
+--
+--  1. ADAPTIVE DURATION SCALING
+--     Every tween duration is scaled by live FPS ratio:
+--       60fps → 100% original duration
+--       45fps →  75% duration  (noticeably snappier)
+--       30fps →  50% duration  (very snappy)
+--       <30fps → instant-set   (no TweenService at all)
+--     You feel this on every open/close/hover/toggle.
+--
+--  2. TWEEN DEDUPLICATION
+--     If an instance+property is already being tweened and a new
+--     tween fires for the same target, the old one is cancelled first.
+--     Stops "fighting tweens" on rapid hover-in/hover-out/toggle.
+--     Visible as smoother response with no stuttering.
+--
+--  3. INSTANT-SET FALLBACK (below AnimThreshold, default 30fps)
+--     Zero TweenService allocation. Uses a shared persistent stub
+--     so there are zero extra Instance allocations per call.
+--
+--  4. BACKGROUND SWEEP
+--     Cancels completed/orphaned tweens from ActiveTweens list.
+--     Safety net — auto-removal on Completed handles most cases.
+--
+--  API (unchanged from before):
+--    Compkiller:EnableAdvancedOptimizations(true/false)
+--    Compkiller:CleanupAll()
+--    Compkiller:GetFPS()
+--    Compkiller:GetOptimizerStats()  -- now includes DedupCancels
+--    Compkiller:SetAnimThreshold(fps)
+--    Compkiller:SetMemInterval(secs)
 -- ============================================================
 
--- ── CORE (always active) ──────────────────────────────────────
-
--- Rolling FPS sampler via Heartbeat — feeds _OPT.FPS for _SmartAnimation
-local _fpsSamplerConn = RunService.Heartbeat:Connect(function(dt)
-    local fps = 1 / math.max(dt, 0.001)
-    table.insert(_OPT.FpsSamples, fps)
-    if #_OPT.FpsSamples > _OPT.FpsSampleMax then
-        table.remove(_OPT.FpsSamples, 1)
-    end
-    local sum = 0
-    for _, v in ipairs(_OPT.FpsSamples) do sum += v end
-    _OPT.FPS = sum / #_OPT.FpsSamples
-end)
-table.insert(_CK_CONNECTIONS, _fpsSamplerConn)
+-- ── ALWAYS-ON FPS SAMPLER (running-sum, O(1) per frame) ──────
+do
+    local _runSum = 0
+    local _fpsSamplerConn = RunService.Heartbeat:Connect(function(dt)
+        local fps = 1 / math.max(dt, 0.001)
+        if #_OPT.FpsSamples >= _OPT.FpsSampleMax then
+            _runSum -= table.remove(_OPT.FpsSamples, 1)
+        end
+        table.insert(_OPT.FpsSamples, fps)
+        _runSum += fps
+        _OPT.FPS = _runSum / #_OPT.FpsSamples
+    end)
+    table.insert(_CK_CONNECTIONS, _fpsSamplerConn)
+end
 
 -- ── PUBLIC API ────────────────────────────────────────────────
 
---[[
-    Compkiller:EnableAdvancedOptimizations(true / false)
-    Toggle the Advanced Optimizer layer on or off at runtime.
-    When ON:
-      • _SmartAnimation auto-falls to instant-set below FPS threshold
-      • Background memory sweep runs every _OPT.MemInterval seconds
-      • All new tweens are tracked for clean orphan cancellation
-    When OFF:
-      • All animation calls go through the normal _Animation path
-      • Memory monitor is stopped
-      • Tween orphan sweep at re-execute still runs (core, always on)
-]]
 function Compkiller:EnableAdvancedOptimizations(enabled: boolean)
-    _OPT.Enabled = enabled == true
-
+    _OPT.Enabled = (enabled == true)
     if _OPT.Enabled then
-        -- Start background memory monitor if not already running
         if not _OPT.MonitorThread then
-            local thread = task.spawn(function()
-                while _OPT.Enabled do
+            local thread
+            thread = task.spawn(function()
+                while _OPT.Enabled and _OPT.MonitorThread == thread do
                     task.wait(_OPT.MemInterval)
-                    if _OPT.Enabled then
+                    if _OPT.Enabled and _OPT.MonitorThread == thread then
                         Compkiller:_SweepMemory()
                     end
                 end
-                _OPT.MonitorThread = nil
+                if _OPT.MonitorThread == thread then
+                    _OPT.MonitorThread = nil
+                end
             end)
             _OPT.MonitorThread = thread
-            -- Register so _CK_CLEANUP cancels it cleanly on re-execute
             _TrackThread(thread)
         end
     else
-        -- Signal the monitor loop to stop; it will nil itself on next iteration
         _OPT.MonitorThread = nil
     end
 end
 
---[[
-    Compkiller:CleanupAll()
-    Immediately cancel every tracked tween and run a full memory sweep.
-    Safe to call at any time, regardless of EnableAdvancedOptimizations state.
-]]
+-- CleanupAll: force-cancel every tracked tween + wipe dedup map.
+-- GUI animations snap to their final values immediately.
 function Compkiller:CleanupAll()
-    -- Cancel all active tweens right now
     local cancelled = 0
+    for key, tw in pairs(_OPT.ActiveTweenMap) do
+        local ok, playing = pcall(function() return tw.PlaybackState end)
+        if ok and playing == Enum.PlaybackState.Playing then
+            pcall(function() tw:Cancel() end)
+            cancelled += 1
+        end
+        _OPT.ActiveTweenMap[key] = nil
+    end
     for _, tw in ipairs(_OPT.ActiveTweens) do
-        pcall(function()
-            if tw and tw.PlaybackState == Enum.PlaybackState.Playing then
-                tw:Cancel()
-                cancelled += 1
-            end
-        end)
+        local ok, playing = pcall(function() return tw.PlaybackState end)
+        if ok and playing == Enum.PlaybackState.Playing then
+            pcall(function() tw:Cancel() end)
+            cancelled += 1
+        end
     end
     _OPT.ActiveTweens = {}
     _OPT.Stats.TweensCancelled += cancelled
-
-    -- Run full memory sweep
     Compkiller:_SweepMemory()
 end
 
---[[
-    Compkiller:GetFPS() -> number
-    Returns the current rolling-average FPS (updated every frame).
-]]
 function Compkiller:GetFPS(): number
     return math.floor(_OPT.FPS + 0.5)
 end
 
---[[
-    Compkiller:GetOptimizerStats() -> table
-    Returns a snapshot of live optimizer stats.
-    {
-        FPS             : number,
-        Enabled         : boolean,
-        AnimThreshold   : number,
-        ActiveTweens    : number,
-        TweensCancelled : number,
-        InstantSets     : number,
-        MemorySweeps    : number,
-        LastSweepAt     : number,
-    }
-]]
-function Compkiller:GetOptimizerStats(): {}
+-- GetOptimizerStats: now includes DedupCancels so you can see
+-- how many redundant tweens were stopped.
+function Compkiller:GetOptimizerStats()
     return {
         FPS             = self:GetFPS(),
         Enabled         = _OPT.Enabled,
@@ -10534,76 +10531,128 @@ function Compkiller:GetOptimizerStats(): {}
         ActiveTweens    = #_OPT.ActiveTweens,
         TweensCancelled = _OPT.Stats.TweensCancelled,
         InstantSets     = _OPT.Stats.InstantSets,
+        DedupCancels    = _OPT.Stats.DedupCancels,
         MemorySweeps    = _OPT.Stats.MemorySweeps,
         LastSweepAt     = _OPT.Stats.LastSweepAt,
     }
 end
 
---[[
-    Compkiller:SetAnimThreshold(fps: number)
-    Change the FPS floor at which _SmartAnimation switches to instant-set.
-    Default is 45. Lower = more lenient, higher = more aggressive.
-    Example:  Compkiller:SetAnimThreshold(30)
-]]
 function Compkiller:SetAnimThreshold(fps: number)
-    _OPT.AnimThreshold = math.clamp(fps, 10, 144)
+    _OPT.AnimThreshold = math.clamp(math.floor(fps), 10, 144)
 end
 
---[[
-    Compkiller:SetMemInterval(seconds: number)
-    Change how often (in seconds) the background memory sweep runs.
-    Default is 120 (2 minutes). Takes effect on next sweep cycle.
-    Example:  Compkiller:SetMemInterval(60)
-]]
 function Compkiller:SetMemInterval(seconds: number)
     _OPT.MemInterval = math.max(10, seconds)
 end
 
--- ── INTERNAL HELPERS ──────────────────────────────────────────
-
--- Smart Animation: instant-set when Advanced is on AND FPS is low
--- Falls back to normal _Animation otherwise. Called by _Animation callers.
+-- ── INTERNAL — _SmartAnimation ───────────────────────────────
+--
+--  Tier 1 (FPS >= AnimThreshold): adaptive duration + dedup cancel
+--  Tier 2 (FPS <  AnimThreshold): instant property-set, no TweenService
+--
 function Compkiller:_SmartAnimation(Self: Instance, Info: TweenInfo, Property: {[any]: any})
-    if _OPT.Enabled and _OPT.FPS < _OPT.AnimThreshold then
-        -- Instant-set all properties — zero TweenService cost
+    local currentFPS = _OPT.FPS
+    local threshold  = _OPT.AnimThreshold
+
+    -- ── TIER 2: INSTANT-SET ───────────────────────────────────
+    if currentFPS < threshold then
         for prop, val in pairs(Property) do
             pcall(function() Self[prop] = val end)
         end
         _OPT.Stats.InstantSets += 1
-        -- Return a dummy so :Completed:Wait() on the result doesn't error.
-        -- Fire + Destroy immediately so we never leak a BindableEvent instance.
-        local dummy = Instance.new("BindableEvent")
-        local dummyEvent = dummy.Event
-        dummy:Fire()    -- pre-fired so any :Wait() resolves instantly
-        dummy:Destroy()
-        return {
-            Completed     = dummyEvent,
-            PlaybackState = Enum.PlaybackState.Completed,
-        }
+        return _OPT._DummyTween
     end
-    -- Normal path: create tween, track it for orphan sweep, play it
-    local tween = TweenService:Create(Self, Info or TweenInfo.new(0.25), Property)
-    if _OPT.Enabled then
-        table.insert(_OPT.ActiveTweens, tween)
+
+    -- ── TIER 1: ADAPTIVE TWEEN ────────────────────────────────
+
+    -- Scale duration by live FPS ratio (clamped to 50%–100% of original).
+    -- At 60fps: scale=1.0  → full duration.
+    -- At 45fps: scale=0.75 → 75% — noticeably snappier.
+    -- At 30fps: scale=0.5  → 50% — very snappy (just above instant-set floor).
+    local baseDuration = (Info and Info.Time) or 0.25
+    local fpsScale     = math.clamp(currentFPS / 60, 0.5, 1.0)
+    local newDuration  = math.max(0.05, baseDuration * fpsScale)
+
+    -- Preserve original easing if supplied, just change the time.
+    local newInfo
+    if Info then
+        newInfo = TweenInfo.new(
+            newDuration,
+            Info.EasingStyle,
+            Info.EasingDirection,
+            Info.RepeatCount,
+            Info.Reverses,
+            Info.DelayTime
+        )
+    else
+        newInfo = TweenInfo.new(newDuration)
+    end
+
+    -- DEDUPLICATION: cancel any existing tween for the same instance+property.
+    -- Prevents "fighting tweens" when hover/toggle events fire rapidly.
+    for prop in pairs(Property) do
+        local dedupKey = tostring(Self) .. "|" .. prop
+        local existing = _OPT.ActiveTweenMap[dedupKey]
+        if existing then
+            local ok, playing = pcall(function() return existing.PlaybackState end)
+            if ok and playing == Enum.PlaybackState.Playing then
+                pcall(function() existing:Cancel() end)
+                _OPT.Stats.DedupCancels += 1
+            end
+            _OPT.ActiveTweenMap[dedupKey] = nil
+        end
+    end
+
+    -- Create, register, and play the scaled tween.
+    local tween = TweenService:Create(Self, newInfo, Property)
+    table.insert(_OPT.ActiveTweens, tween)
+    for prop in pairs(Property) do
+        _OPT.ActiveTweenMap[tostring(Self) .. "|" .. prop] = tween
     end
     tween:Play()
+
+    -- Auto-clean on natural completion — keeps ActiveTweens list tight.
+    tween.Completed:Connect(function()
+        local idx = table.find(_OPT.ActiveTweens, tween)
+        if idx then table.remove(_OPT.ActiveTweens, idx) end
+        for prop in pairs(Property) do
+            local key = tostring(Self) .. "|" .. prop
+            if _OPT.ActiveTweenMap[key] == tween then
+                _OPT.ActiveTweenMap[key] = nil
+            end
+        end
+    end)
+
     return tween
 end
 
--- Internal memory sweep (called by monitor + CleanupAll)
+-- ── INTERNAL — _SweepMemory ──────────────────────────────────
 function Compkiller:_SweepMemory()
     local kept = {}
     for _, tw in ipairs(_OPT.ActiveTweens) do
-        -- Capture PlaybackState safely; a GC'd tween will error on property access
         local ok, state = pcall(function() return tw.PlaybackState end)
         if ok and state == Enum.PlaybackState.Playing then
             table.insert(kept, tw)
         end
-        -- Completed / Cancelled / dead tweens are dropped; GC handles them
     end
     _OPT.ActiveTweens = kept
     _OPT.Stats.MemorySweeps += 1
     _OPT.Stats.LastSweepAt  = tick()
+end
+
+-- ── DUMMY TWEEN STUB (one per execution, reused for all instant-sets) ─
+do
+    local _dummyBE   = Instance.new("BindableEvent")
+    _dummyBE.Name    = "CK_DummyTween"
+    _dummyBE:Fire()
+    _OPT._DummyTween = {
+        Completed     = _dummyBE.Event,
+        PlaybackState = Enum.PlaybackState.Completed,
+        Cancel        = function() end,
+        Play          = function() end,
+        Pause         = function() end,
+    }
+    table.insert(_CK_CONNECTIONS, _dummyBE.Event:Connect(function() end))
 end
 
 return Compkiller;
