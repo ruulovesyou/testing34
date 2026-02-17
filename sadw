@@ -29,48 +29,71 @@ pcall(function()
 end)
 
 local _CK_CONNECTIONS = {}
-getgenv()._CK_CLEANUP = function()
-    for _, conn in ipairs(_CK_CONNECTIONS) do
-        if conn then pcall(function() conn:Disconnect() end) end
-    end
-    _CK_CONNECTIONS = {}
-end
 
 -- Virtualization Support
-local cloneref        = (cloneref or function(f) return f end)
-local HttpService     = cloneref(game:GetService('HttpService'))
-local TweenService    = cloneref(game:GetService('TweenService'))
-local UserInputService= cloneref(game:GetService('UserInputService'))
-local RunService      = cloneref(game:GetService('RunService'))
-local TextService     = cloneref(game:GetService('TextService'))
+local cloneref         = (cloneref or function(f) return f end)
+local HttpService      = cloneref(game:GetService('HttpService'))
+local TweenService     = cloneref(game:GetService('TweenService'))
+local UserInputService = cloneref(game:GetService('UserInputService'))
+local RunService       = cloneref(game:GetService('RunService'))
+local TextService      = cloneref(game:GetService('TextService'))
 
 -- Core client references
 local LocalPlayer   = game:GetService('Players').LocalPlayer
 local CurrentCamera = workspace.CurrentCamera
 local Mouse         = LocalPlayer:GetMouse()
 
--- Connection + thread trackers (registered into _CK_CONNECTIONS / kill switch)
+-- Optimizer state — declared HERE so _Animation can safely read it from line 1
+-- The full optimizer API is wired at the bottom of the file
+local _OPT = {
+    Enabled       = false,  -- off by default; use Compkiller:EnableAdvancedOptimizations(true)
+    AnimThreshold = 45,     -- FPS floor before instant-set kicks in
+    MemInterval   = 120,    -- seconds between auto memory sweeps
+    FPS           = 60,
+    FpsSamples    = {},
+    FpsSampleMax  = 30,
+    ActiveTweens  = {},
+    MonitorThread = nil,
+    Stats = { TweensCancelled = 0, InstantSets = 0, MemorySweeps = 0, LastSweepAt = 0 },
+}
+
+-- Thread + connection trackers
+local _CK_THREADS = {}
+
 local function _TrackConn(conn)
     table.insert(_CK_CONNECTIONS, conn)
     return conn
 end
 
-local _CK_THREADS = {}
 local function _TrackThread(thread)
     table.insert(_CK_THREADS, thread)
     return thread
 end
 
--- Extend kill-switch cleanup to also cancel all tracked threads
-do
-    local _baseCleanup = getgenv()._CK_CLEANUP
-    getgenv()._CK_CLEANUP = function()
-        for _, t in ipairs(_CK_THREADS) do
-            pcall(task.cancel, t)
-        end
-        _CK_THREADS = {}
-        if _baseCleanup then _baseCleanup() end
+-- Single unified cleanup — replaces whatever was set before
+-- Handles: connections, threads, active tweens — all in one place
+getgenv()._CK_CLEANUP = function()
+    -- 1. Cancel all tracked threads
+    for _, t in ipairs(_CK_THREADS) do
+        pcall(task.cancel, t)
     end
+    _CK_THREADS = {}
+
+    -- 2. Cancel all orphaned tweens from the previous execution
+    for _, tw in ipairs(_OPT.ActiveTweens) do
+        pcall(function()
+            if tw and tw.PlaybackState == Enum.PlaybackState.Playing then
+                tw:Cancel()
+            end
+        end)
+    end
+    _OPT.ActiveTweens = {}
+
+    -- 3. Disconnect all tracked connections
+    for _, conn in ipairs(_CK_CONNECTIONS) do
+        if conn then pcall(function() conn:Disconnect() end) end
+    end
+    _CK_CONNECTIONS = {}
 end
 
 
@@ -10366,32 +10389,9 @@ Compkiller.NilFolder.Name = "Nil-Instances";
 --    Compkiller:GetOptimizerStats()                 -- live stat table
 -- ============================================================
 
--- ── Internal state ────────────────────────────────────────────
-local _OPT = {
-    -- Feature flags
-    Enabled         = false,  -- Advanced layer on/off
-    AnimThreshold   = 45,     -- FPS floor before instant-set kicks in
-    MemInterval     = 120,    -- Seconds between auto memory sweeps
-
-    -- Runtime data
-    FPS             = 60,
-    FpsSamples      = {},
-    FpsSampleMax    = 30,
-    ActiveTweens    = {},     -- All tweens created since last cleanup
-    MonitorThread   = nil,    -- Memory monitor thread handle
-
-    -- Stats (for GetOptimizerStats)
-    Stats = {
-        TweensCancelled  = 0,
-        InstantSets      = 0,
-        MemorySweeps     = 0,
-        LastSweepAt      = 0,
-    },
-}
-
 -- ── CORE (always active) ──────────────────────────────────────
 
--- Rolling FPS sampler via Heartbeat
+-- Rolling FPS sampler via Heartbeat — feeds _OPT.FPS for _SmartAnimation
 local _fpsSamplerConn = RunService.Heartbeat:Connect(function(dt)
     local fps = 1 / math.max(dt, 0.001)
     table.insert(_OPT.FpsSamples, fps)
@@ -10403,21 +10403,6 @@ local _fpsSamplerConn = RunService.Heartbeat:Connect(function(dt)
     _OPT.FPS = sum / #_OPT.FpsSamples
 end)
 table.insert(_CK_CONNECTIONS, _fpsSamplerConn)
-
--- Patch _CK_CLEANUP so orphan tweens are cancelled on every re-execute
-local _prevCleanup = getgenv()._CK_CLEANUP
-getgenv()._CK_CLEANUP = function()
-    for _, tw in ipairs(_OPT.ActiveTweens) do
-        pcall(function()
-            if tw and tw.PlaybackState == Enum.PlaybackState.Playing then
-                tw:Cancel()
-                _OPT.Stats.TweensCancelled += 1
-            end
-        end)
-    end
-    _OPT.ActiveTweens = {}
-    if _prevCleanup then _prevCleanup() end
-end
 
 -- ── PUBLIC API ────────────────────────────────────────────────
 
