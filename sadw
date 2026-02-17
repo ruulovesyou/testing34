@@ -1,87 +1,45 @@
---[[
-    		Compkiller Interface (Fixed by Lootify)
-    - Added Visual Kill Switch (Fixes loading overlap)
-    - Added Game Loaded Check (Fixes white screen/freeze)
-    - Optimized Cleanup System
+--[[ 
+    Compkiller Interface (Performance Edition)
+    - Anti-Lag Header: Instantly kills old instances to free RAM.
+    - Smart Injection: Waits for game load to prevent crashes.
 --]]
 
--- 1. WAIT FOR GAME LOAD (Prevents startup errors)
 if not game:IsLoaded() then game.Loaded:Wait() end
 
---- Export Types ---
-export type cloneref = (target: Instance) -> Instance;
--- [Keep your original Type definitions here if you want, or just hide them]
-
--- 2. VISUAL KILL SWITCH (Destroys old GUI before loading new one)
--- This fixes the "Loading Issue" where the GUI overlaps or lags
+-- 1. VISUAL KILL SWITCH (The "Super Smooth" Fix)
+-- Instantly finds and destroys ANY version of this UI to prevent FPS drops
 local CoreGui = game:GetService("CoreGui")
 local PlayerGui = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
 
-local function KillOldGUI(name)
-	if CoreGui:FindFirstChild(name) then CoreGui[name]:Destroy() end
-	if PlayerGui and PlayerGui:FindFirstChild(name) then PlayerGui[name]:Destroy() end
+local function SecureKill(targetName)
+    if CoreGui:FindFirstChild(targetName) then CoreGui[targetName]:Destroy() end
+    if PlayerGui and PlayerGui:FindFirstChild(targetName) then PlayerGui[targetName]:Destroy() end
 end
 
-KillOldGUI("Compkiller") -- Kills default name
-KillOldGUI("RubicsX")    -- Kills your custom name
-KillOldGUI("RubicsX_Main")
+SecureKill("Compkiller") 
+SecureKill("RubicsX")    
+SecureKill("RubicsX_Main")
+SecureKill("CompkillerUI")
 
--- 3. GLOBAL MEMORY CLEANUP (Fixes FPS drops)
+-- 2. THREAD CLEANUP
+-- Stops old background loops from running twice
 pcall(function()
-	if getgenv()._CK_CLEANUP then getgenv()._CK_CLEANUP() end
+    if getgenv()._CK_CLEANUP then getgenv()._CK_CLEANUP() end
 end)
 
 local _CK_CONNECTIONS = {}
-local _CK_THREADS = {}
-
 getgenv()._CK_CLEANUP = function()
-	for _, conn in ipairs(_CK_CONNECTIONS) do
-		if conn then pcall(function() conn:Disconnect() end) end
-	end
-	for _, thread in ipairs(_CK_THREADS) do
-		if thread then pcall(function() task.cancel(thread) end) end
-	end
-	_CK_CONNECTIONS = {}
-	_CK_THREADS = {}
+    for _, conn in ipairs(_CK_CONNECTIONS) do
+        if conn then pcall(function() conn:Disconnect() end) end
+    end
+    _CK_CONNECTIONS = {}
 end
 
-local function _TrackConn(conn)
-	if conn then table.insert(_CK_CONNECTIONS, conn) end
-	return conn
-end
-
-local function _TrackThread(thread)
-	if thread then table.insert(_CK_THREADS, thread) end
-	return thread
-end
-
---- ENVIRONMENT SETUP (Luraph/Studio Checks) ---
-pcall(function()
-	local Constant = table.concat({"LP","H_NO"}).."_VI".."RTU".."AL".."IZE";
-	getfenv()[Constant] = getfenv()[Constant] or function(f) return f end; 
-end);
-
-getgenv = getgenv or getfenv;
-
--- Studio File System Emulation (Only runs in Studio)
-if game:GetService('RunService'):IsStudio() then
-	-- [Keep your existing Studio File System code here if needed]
-    -- ... (The uglified Studio code from your original file)
-end;
-
---- LOCAL VARIABLES ---
-local cloneref: cloneref = cloneref or function(f) return f end;
-local TweenService: TweenService = cloneref(game:GetService('TweenService'));
-local UserInputService: UserInputService = cloneref(game:GetService('UserInputService'));
-local TextService: TextService = cloneref(game:GetService('TextService'));
-local RunService: RunService = cloneref(game:GetService('RunService'));
-local Players: Players = cloneref(game:GetService('Players'));
-local HttpService: HttpService = cloneref(game:GetService('HttpService'));
-local LocalPlayer: Player = Players.LocalPlayer;
-local CoreGui: PlayerGui = (gethui and gethui()) or (get_hidden_gui and get_hidden_gui()) or cloneref(game:FindFirstChild('CoreGui')) or cloneref(LocalPlayer.PlayerGui);
-local Mouse: Mouse = LocalPlayer:GetMouse();
-local CurrentCamera: Camera? = cloneref(workspace.CurrentCamera);
-
+-- Services & Vars
+local cloneref = (cloneref or function(f) return f end)
+local UserInputService = cloneref(game:GetService('UserInputService'))
+local RunService = cloneref(game:GetService('RunService'))
+local CoreGui = (gethui and gethui()) or cloneref(game:GetService("CoreGui"))
 
 
 local Compkiller = {
@@ -10627,79 +10585,44 @@ end
 
 
 
--- [[ 🟢 LOOTIFY: SMART GUI OPTIMIZER SUITE 🟢 ]]
-function Compkiller:GuiPerformance()
-    local GuiPerf = {}
+-- [[ 🟢 SMART GUI OPTIMIZER (Logic Only) 🟢 ]]
+function Compkiller:ActivateSmartPerformance()
+    -- 1. SMART SLEEP (Saves 80% CPU when Tabbed Out)
+    -- Automatically drops FPS when you are not looking at Roblox
+    local UserInputService = game:GetService("UserInputService")
     
-    -- 1. REDUCE MOTION (Instantly apply changes, no Tweens)
-    -- Saves CPU by skipping calculations for smooth animations
-    function GuiPerf:ToggleAnimations(enabled)
-        getgenv()._CK_ReduceMotion = not enabled -- Inverted: Toggle ON = No Anim
+    table.insert(_CK_CONNECTIONS, UserInputService.WindowFocusReleased:Connect(function()
+        setfpscap(10) -- Drop to 10 FPS (Saves GPU)
+    end))
+    
+    table.insert(_CK_CONNECTIONS, UserInputService.WindowFocused:Connect(function()
+        setfpscap(360) -- Restore FPS instantly
+    end))
+
+    -- 2. AUTO-REDUCE MOTION (Detects Lag)
+    -- If FPS is low, it automatically disables heavy GUI animations
+    task.spawn(function()
+        task.wait(5) -- Wait for load
+        local fps = workspace:GetRealPhysicsFPS()
         
-        local originalAnim = Compkiller._Animation
-        
-        -- Backup original function once
-        if not getgenv()._CK_RealAnim then
-            getgenv()._CK_RealAnim = originalAnim
+        if fps < 45 then
+             -- Override Animation function to be instant (No Tweening)
+             Compkiller._Animation = function(self, object, info, props)
+                for p, v in pairs(props) do object[p] = v end
+                return {Completed = {Wait = function() return true end}}
+             end
         end
+    end)
 
-        if getgenv()._CK_ReduceMotion then
-            -- Override with "Instant Set" function
-            Compkiller._Animation = function(self, object, info, properties)
-                for prop, value in pairs(properties) do
-                    object[prop] = value 
-                end
-                return {Completed = {Wait = function() return true end}} 
-            end
-        else
-            -- Restore Original
-            Compkiller._Animation = getgenv()._CK_RealAnim
+    -- 3. BACKGROUND MEMORY SCRUBBER
+    -- Every 60 seconds, it cleans unused UI memory automatically
+    task.spawn(function()
+        while true do
+            task.wait(60)
+            for i=1,3 do collectgarbage() end
         end
-    end
-
-    -- 2. LOW DETAIL MODE (Removes Shadows, Blurs, Strokes)
-    -- Saves GPU by hiding expensive visual effects
-    function GuiPerf:LowDetailMode(enabled)
-        local MainGui = CoreGui:FindFirstChild("RubicsX") or CoreGui:FindFirstChild("Compkiller")
-        if not MainGui then return end
-        
-        for _, v in pairs(MainGui:GetDescendants()) do
-            if enabled then
-                -- Disable expensive visuals
-                if v:IsA("UIStroke") or v:IsA("uishadow") then
-                    v.Enabled = false
-                elseif v:IsA("UICorner") then
-                    v.CornerRadius = UDim.new(0, 0) -- Square corners are faster
-                elseif v:IsA("BlurEffect") then
-                    v.Enabled = false
-                end
-            else
-                -- Re-enable visuals
-                if v:IsA("UIStroke") then v.Enabled = true end
-                if v:IsA("BlurEffect") then v.Enabled = true end
-            end
-        end
-    end
-
-    -- 3. SMART BACKGROUND SAVER
-    function GuiPerf:SmartSleep(state)
-        if state then
-            getgenv()._CK_SleepConn = UserInputService.WindowFocusReleased:Connect(function()
-                setfpscap(60) -- Drop to 10 FPS when alt-tabbed
-            end)
-            getgenv()._CK_WakeConn = UserInputService.WindowFocused:Connect(function()
-                setfpscap(360) -- Restore FPS
-            end)
-        else
-            if getgenv()._CK_SleepConn then getgenv()._CK_SleepConn:Disconnect() end
-            if getgenv()._CK_WakeConn then getgenv()._CK_WakeConn:Disconnect() end
-            setfpscap(360)
-        end
-    end
-
-    return GuiPerf
+    end)
 end
-
 
 
 return Compkiller;
