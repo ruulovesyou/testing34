@@ -355,6 +355,54 @@ local CoreGui: PlayerGui = (gethui and gethui()) or (get_hidden_gui and get_hidd
 local Mouse: Mouse = LocalPlayer:GetMouse();
 local CurrentCamera: Camera? = cloneref(workspace.CurrentCamera);
 
+-- ========================================
+-- GLOBAL CLEANUP SYSTEM (Fix FPS drops on re-execute)
+-- ========================================
+-- UserInputService connections and task threads persist across re-executions
+-- because they are attached to global services, not to destroyed GUI instances.
+-- This system tracks them all and disconnects/cancels them before a new GUI is built.
+
+if getgenv().__CK_CLEANUP then
+	pcall(getgenv().__CK_CLEANUP);
+end;
+
+local _CK_CONNECTIONS = {};
+local _CK_THREADS = {};
+
+getgenv().__CK_CLEANUP = function()
+	for _, conn in ipairs(_CK_CONNECTIONS) do
+		pcall(function() 
+			if conn and conn.Connected then
+				conn:Disconnect(); 
+			end
+		end);
+	end;
+	for _, thread in ipairs(_CK_THREADS) do
+		pcall(function() task.cancel(thread); end);
+	end;
+	_CK_CONNECTIONS = {};
+	_CK_THREADS = {};
+end;
+
+-- Track a UserInputService (or other global service) connection for cleanup
+local function _TrackConn(conn)
+	if conn then
+		table.insert(_CK_CONNECTIONS, conn);
+	end;
+	return conn;
+end;
+
+-- Track an infinite task thread for cleanup
+local function _TrackThread(thread)
+	if thread then
+		table.insert(_CK_THREADS, thread);
+	end;
+	return thread;
+end;
+-- ========================================
+-- END GLOBAL CLEANUP SYSTEM
+-- ========================================
+
 local Compkiller = {
 	Version = '2.6',
 	Logo = "rbxassetid://120245531583106",
@@ -1675,17 +1723,17 @@ function Compkiller:_Blur(element : Frame , WindowRemote) : RBXScriptSignal
 	end;
 
 	local rbxsignal = CurrentCamera:GetPropertyChangedSignal('CFrame'):Connect(UpdateFunction)
-	local loopThread = UserInputService.InputChanged:Connect(function(Input)
+	local loopThread = _TrackConn(UserInputService.InputChanged:Connect(function(Input)
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch then
 			pcall(UpdateFunction);
 		end;
-	end);
+	end));
 
-	local THREAD = task.spawn(function()
+	local THREAD = _TrackThread(task.spawn(function()
 		while true do task.wait(0.1)
 			pcall(UpdateFunction);
 		end;
-	end);
+	end));
 
 	disconnect = function()
 		rbxsignal:Disconnect();
@@ -1728,11 +1776,11 @@ function Compkiller:_AddDragBlacklist(Frame: Frame)
 		SET_BLACKLIST(false);
 	end);
 
-	UserInputService.InputChanged:Connect(function()
+	_TrackConn(UserInputService.InputChanged:Connect(function()
 		if not Compkiller:_IsMouseOverFrame(Frame) then
 			SET_BLACKLIST(false);
 		end
-	end);
+	end));
 end;
 
 function Compkiller:_GetWindowFromElement(Element)
@@ -1845,7 +1893,7 @@ function Compkiller:Drag(InputFrame: Frame, MoveFrame: Frame, Speed : number)
 		Compkiller.IaDrag = dragToggle;
 	end)
 
-	UserInputService.InputChanged:Connect(function(input)
+	_TrackConn(UserInputService.InputChanged:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch and #Compkiller.DragBlacklist <= 0 then
 			if dragToggle then
 				Compkiller.IS_DRAG_MOVE = true;
@@ -1861,7 +1909,7 @@ function Compkiller:Drag(InputFrame: Frame, MoveFrame: Frame, Speed : number)
 		end
 
 		Compkiller.IaDrag = dragToggle;
-	end);
+	end));
 end;
 
 function Compkiller:_IsMobile()
@@ -3181,13 +3229,13 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		end;
 	end)
 
-	UserInputService.InputBegan:Connect(function(Input)
+	_TrackConn(UserInputService.InputBegan:Connect(function(Input)
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 			if not Compkiller:_IsMouseOverFrame(ColorPickerWindow) then
 				ToggleUI(false);
 			end;
 		end;
-	end)
+	end))
 
 	ColorRedGreenBlue.InputBegan:Connect(function(Input)
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
@@ -3391,7 +3439,7 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 		Root = Keybinds
 	};
 
-	Ref.THREAD = task.spawn(function()
+	Ref.THREAD = _TrackThread(task.spawn(function()
 		while true do task.wait()
 			Compkiller:_Animation(MainFrame,TweenInfo.new(0.4),{
 				Size = UDim2.new(1, 30, 1, UIListLayout.AbsoluteContentSize.Y + 1)
@@ -3857,7 +3905,7 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 		APIRef.Update();
 	end;
 
-	APIRef.Thread = task.spawn(function()
+	APIRef.Thread = _TrackThread(task.spawn(function()
 		while true do task.wait(0.01)
 			if APIRef.Mode ~= 1 then
 				if ElementAPI:GetValue() == APIRef.On then
@@ -3879,15 +3927,15 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 		end;
 	end);
 
-	UserInputService.InputBegan:Connect(function(Input)
+	_TrackConn(UserInputService.InputBegan:Connect(function(Input)
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.MouseButton2 or Input.UserInputType == Enum.UserInputType.Touch then
 			if not Compkiller:_IsMouseOverFrame(Parent) and not Compkiller:_IsMouseOverFrame(KeybindHandler) then
 				KB_Signal:Fire(false);
 			end;
 		end;
-	end);
+	end));
 
-	UserInputService.InputBegan:Connect(function(Input,Typing)
+	_TrackConn(UserInputService.InputBegan:Connect(function(Input,Typing)
 		if Input.KeyCode.Name == APIRef.Keybind or Input.KeyCode == APIRef.Keybind or (Input.UserInputType == Enum.UserInputType.MouseButton1 and APIRef.Keybind == "MouseLeft") or (Input.UserInputType == Enum.UserInputType.MouseButton2 and APIRef.Keybind == "MouseRight") then
 
 			if APIRef.Mode == 2 or APIRef.Mode == 4 then
@@ -3900,9 +3948,9 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 				end;
 			end;
 		end;
-	end);
+	end));
 
-	UserInputService.InputEnded:Connect(function(Input,Typing)
+	_TrackConn(UserInputService.InputEnded:Connect(function(Input,Typing)
 		if Input.KeyCode.Name == APIRef.Keybind or Input.KeyCode == APIRef.Keybind or (Input.UserInputType == Enum.UserInputType.MouseButton1 and APIRef.Keybind == "MouseLeft") or (Input.UserInputType == Enum.UserInputType.MouseButton2 and APIRef.Keybind == "MouseRight") then
 
 			if APIRef.Mode == 2 then
@@ -3911,7 +3959,7 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 				ElementAPI:SetValue(APIRef.On);
 			end;
 		end;
-	end);
+	end));
 
 	return APIRef;
 end;
@@ -4313,13 +4361,13 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			ToggleUI(true);
 		end);
 
-		UserInputService.InputBegan:Connect(function(Input)
+		_TrackConn(UserInputService.InputBegan:Connect(function(Input)
 			if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 				if Toggl and not Compkiller:_IsMouseOverFrame(ExtractElement) and not Compkiller:_IsMouseOverFrame(Element) then
 					ToggleUI(false);
 				end;
 			end
-		end)		
+		end))		
 
 		return Compkiller:_LoadElement(Elements , true , Signal)
 	end;
@@ -4634,13 +4682,13 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 		end
 	end);
 
-	UserInputService.InputBegan:Connect(function(Input)
+	_TrackConn(UserInputService.InputBegan:Connect(function(Input)
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 			if not Compkiller:_IsMouseOverFrame(DropdownWindow) then
 				ToggleUI(false);
 			end;
 		end;
-	end);
+	end));
 
 	local Args = {};
 
@@ -5314,7 +5362,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 				end
 			end)
 
-			UserInputService.InputChanged:Connect(function(Input)
+			_TrackConn(UserInputService.InputChanged:Connect(function(Input)
 				if IsHold then
 					if (Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch)  then
 						if UserInputService.TouchEnabled then
@@ -5328,7 +5376,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 						end;
 					end;
 				end;
-			end);
+			end));
 		end;
 
 		local Args = {};
@@ -7515,11 +7563,11 @@ function Compkiller.new(Config : Window)
 
 		UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(upd);
 
-		return task.defer(function()
+		return _TrackThread(task.defer(function()
 			while true do task.wait(1)
 				upd();
 			end;
-		end)
+		end))
 
 		--[[local Parent: ScrollingFrame = UilistLayout.Parent;
 
@@ -8716,7 +8764,7 @@ function Compkiller.new(Config : Window)
 
 			Refresh();
 
-			Init.THREAD = task.spawn(function()
+			Init.THREAD = _TrackThread(task.spawn(function()
 				local OldIndex = Configuration.Config:GetConfigCount();
 
 				while true do task.wait(0.125);
@@ -9860,7 +9908,7 @@ function Compkiller.new(Config : Window)
 			end);
 		end;
 
-		table.insert(WindowArgs.THREADS,task.spawn(function()
+		table.insert(WindowArgs.THREADS,_TrackThread(task.spawn(function()
 			while true do task.wait(0.15)
 				if Compkiller:_IsMobile() then
 					ToggleCloseUI(true);
@@ -9886,13 +9934,13 @@ function Compkiller.new(Config : Window)
 					end
 				end;
 			end
-		end));
+		end)));
 
-		UserInputService.InputBegan:Connect(function(Input,Typing)
+		_TrackConn(UserInputService.InputBegan:Connect(function(Input,Typing)
 			if not Typing and (Input.KeyCode == Config.Keybind or Input.KeyCode.Name == Config.Keybind) then
 				WindowArgs:_ToggleUI()
 			end;
-		end);
+		end));
 	end;
 
 	function WindowArgs:SetMenuKey(new: string | Enum.KeyCode)
@@ -9925,7 +9973,7 @@ function Compkiller.new(Config : Window)
 		WindowArgs.Profile = config.UserProfile or WindowArgs.Profile;
 	end;
 
-	WindowArgs.LOOP_THREAD = task.spawn(function()
+	WindowArgs.LOOP_THREAD = _TrackThread(task.spawn(function()
 		local TimeTic = tick();
 
 		local BlurElement = Instance.new("Frame")
