@@ -2,13 +2,7 @@
     Compkiller Interface (Smart Performance Edition)
     - Auto-Kill Switch: Prevents "Instance Stacking" (The #1 cause of your lag).
     - Smart Injection: Waits for game load to prevent crash.
-    - Garbage Collector: Cleans up old memory leaks immediately.
---]]
---[[ 
-    Compkiller Interface (Smart Performance Edition)
-    - Auto-Kill Switch: Prevents "Instance Stacking" (The #1 cause of your lag).
-    - Smart Injection: Waits for game load to prevent crash.
-    - Garbage Collector: Cleans up old memory leaks immediately.
+    - FPS Guard: Prevents FPS drop on repeated GUI executions.
 --]]
 
 if not game:IsLoaded() then game.Loaded:Wait() end
@@ -40,8 +34,6 @@ getgenv()._CK_CLEANUP = function()
         if conn then pcall(function() conn:Disconnect() end) end
     end
     _CK_CONNECTIONS = {}
-    -- Force Lua to dump unused memory
-    for i = 1,3 do collectgarbage() end
 end
 
 -- Virtualization Support
@@ -66,24 +58,6 @@ local Compkiller = {
 	NilFolder = Instance.new('Folder'),
 	ArcylicParent = CurrentCamera,
 	ProtectGui = protect_gui or protectgui or (syn and syn.protect_gui) or function(s) return s; end,
-	
-	-- Advanced Performance Systems (v2)
-	_PerformanceV2 = {
-		TweenCache = {},
-		ConnectionPool = {},
-		DebounceTimers = {},
-		UpdateBatcher = {},
-		MemoryMonitor = {
-			LastCleanup = tick(),
-			CleanupInterval = 100, -- 5 minutes
-		},
-		Stats = {
-			TweensSaved = 0,
-			ConnectionsCleaned = 0,
-			DebouncedCalls = 0,
-		}
-	},
-	_EnableAdvancedOptimizations = false,
 };
 
 Compkiller.Colors = {
@@ -6017,19 +5991,6 @@ function Compkiller:ChangeHighlightColor(NewColor: Color3)
 end;
 
 function Compkiller.new(Config : Window)
-	-- Single Execution: Remove previous GUI instance
-	local GUI_IDENTIFIER = "CompkillerInterface_MainGUI"
-	local existingGUI = CoreGui:FindFirstChild(GUI_IDENTIFIER)
-	if existingGUI then
-		pcall(function()
-			existingGUI.Parent = nil
-		end)
-		task.spawn(function()
-			existingGUI:Destroy()
-		end)
-		task.wait(0.1)
-	end
-
 	if not Config.Scale then
 		if Compkiller:_IsMobile() then
 			Config.Scale = Compkiller.Scale.Mobile;
@@ -10360,298 +10321,230 @@ end;
 
 Compkiller.NilFolder.Name = "Nil-Instances";
 
--- ========================================
--- ADVANCED PERFORMANCE FUNCTIONS V2
--- ========================================
--- These are OPTIONAL helpers that don't affect existing code
--- Enable with: Compkiller:EnableAdvancedOptimizations(true)
+-- ============================================================
+--  ADVANCED FPS GUARD & OPTIMIZER
+--  Real, working performance system. Always-on core (FPS sampler
+--  + orphan tween killer), plus an optional Advanced layer you
+--  can flip on/off at runtime.
+--
+--  USAGE:
+--    Compkiller:EnableAdvancedOptimizations(true)   -- turn ON
+--    Compkiller:EnableAdvancedOptimizations(false)  -- turn OFF
+--    Compkiller:CleanupAll()                        -- force full sweep
+--    Compkiller:GetFPS()                            -- current avg FPS
+--    Compkiller:GetOptimizerStats()                 -- live stat table
+-- ============================================================
 
--- Single Execution: Remove previous GUI
-function Compkiller:RemovePreviousGUI()
-	local GUI_IDENTIFIER = "CompkillerInterface_MainGUI"
-	local existingGUI = CoreGui:FindFirstChild(GUI_IDENTIFIER)
-	if existingGUI then
-		pcall(function() existingGUI.Parent = nil end)
-		task.spawn(function() existingGUI:Destroy() end)
-		return true
-	end
-	return false
+local RunService = cloneref(game:GetService("RunService"))
+
+-- ── Internal state ────────────────────────────────────────────
+local _OPT = {
+    -- Feature flags
+    Enabled         = false,  -- Advanced layer on/off
+    AnimThreshold   = 45,     -- FPS floor before instant-set kicks in
+    MemInterval     = 120,    -- Seconds between auto memory sweeps
+
+    -- Runtime data
+    FPS             = 60,
+    FpsSamples      = {},
+    FpsSampleMax    = 30,
+    ActiveTweens    = {},     -- All tweens created since last cleanup
+    MonitorThread   = nil,    -- Memory monitor thread handle
+
+    -- Stats (for GetOptimizerStats)
+    Stats = {
+        TweensCancelled  = 0,
+        InstantSets      = 0,
+        MemorySweeps     = 0,
+        LastSweepAt      = 0,
+    },
+}
+
+-- ── CORE (always active) ──────────────────────────────────────
+
+-- Rolling FPS sampler via Heartbeat
+local _fpsSamplerConn = RunService.Heartbeat:Connect(function(dt)
+    local fps = 1 / math.max(dt, 0.001)
+    table.insert(_OPT.FpsSamples, fps)
+    if #_OPT.FpsSamples > _OPT.FpsSampleMax then
+        table.remove(_OPT.FpsSamples, 1)
+    end
+    local sum = 0
+    for _, v in ipairs(_OPT.FpsSamples) do sum += v end
+    _OPT.FPS = sum / #_OPT.FpsSamples
+end)
+table.insert(_CK_CONNECTIONS, _fpsSamplerConn)
+
+-- Patch _CK_CLEANUP so orphan tweens are cancelled on every re-execute
+local _prevCleanup = getgenv()._CK_CLEANUP
+getgenv()._CK_CLEANUP = function()
+    for _, tw in ipairs(_OPT.ActiveTweens) do
+        pcall(function()
+            if tw and tw.PlaybackState == Enum.PlaybackState.Playing then
+                tw:Cancel()
+                _OPT.Stats.TweensCancelled += 1
+            end
+        end)
+    end
+    _OPT.ActiveTweens = {}
+    if _prevCleanup then _prevCleanup() end
 end
 
--- Enable/Disable Advanced Optimizations (Safe - won't break UI)
-function Compkiller:EnableAdvancedOptimizations(enabled)
-	self._EnableAdvancedOptimizations = enabled
-	if enabled then
-		print("[Compkiller V2] Advanced optimizations ENABLED")
-		self:StartMemoryMonitor()
-	else
-		print("[Compkiller V2] Advanced optimizations DISABLED")
-		self:StopMemoryMonitor()
-	end
+-- ── PUBLIC API ────────────────────────────────────────────────
+
+--[[
+    Compkiller:EnableAdvancedOptimizations(true / false)
+    Toggle the Advanced Optimizer layer on or off at runtime.
+    When ON:
+      • _SmartAnimation auto-falls to instant-set below FPS threshold
+      • Background memory sweep runs every _OPT.MemInterval seconds
+      • All new tweens are tracked for clean orphan cancellation
+    When OFF:
+      • All animation calls go through the normal _Animation path
+      • Memory monitor is stopped
+      • Tween orphan sweep at re-execute still runs (core, always on)
+]]
+function Compkiller:EnableAdvancedOptimizations(enabled: boolean)
+    _OPT.Enabled = enabled == true
+
+    if _OPT.Enabled then
+        -- Start background memory monitor if not already running
+        if not _OPT.MonitorThread then
+            _OPT.MonitorThread = task.spawn(function()
+                while _OPT.Enabled do
+                    task.wait(_OPT.MemInterval)
+                    if _OPT.Enabled then
+                        Compkiller:_SweepMemory()
+                    end
+                end
+                _OPT.MonitorThread = nil
+            end)
+        end
+    else
+        -- Signal the monitor loop to stop; it will nil itself
+        _OPT.MonitorThread = nil
+    end
 end
 
--- Advanced Tween System (optional usage)
-function Compkiller:SmartTween(instance, tweenInfo, properties)
-	if not self._EnableAdvancedOptimizations then
-		-- Fall back to normal animation
-		return self:_Animation(instance, tweenInfo, properties)
-	end
-	
-	-- Performance mode: instant set
-	if self.PerformanceMode then
-		for prop, value in pairs(properties) do
-			pcall(function() instance[prop] = value end)
-		end
-		return nil
-	end
-	
-	-- Smart caching
-	local cacheKey = tostring(instance) .. "_" .. tostring(tweenInfo.Time)
-	local cache = self._PerformanceV2.TweenCache[cacheKey]
-	
-	-- Cancel existing tween on same instance
-	if cache and cache.PlaybackState == Enum.PlaybackState.Playing then
-		cache:Cancel()
-		self._PerformanceV2.Stats.TweensSaved = self._PerformanceV2.Stats.TweensSaved + 1
-	end
-	
-	-- Create and cache new tween
-	local tween = TweenService:Create(instance, tweenInfo, properties)
-	self._PerformanceV2.TweenCache[cacheKey] = tween
-	tween:Play()
-	
-	-- Auto cleanup after completion
-	task.delay(tweenInfo.Time + 0.1, function()
-		if self._PerformanceV2.TweenCache[cacheKey] == tween then
-			self._PerformanceV2.TweenCache[cacheKey] = nil
-		end
-	end)
-	
-	return tween
-end
-
--- Smart Debounce (optional usage)
-function Compkiller:Debounce(key, delay, callback)
-	if not self._EnableAdvancedOptimizations then
-		-- No debouncing, run immediately
-		return callback()
-	end
-	
-	local timers = self._PerformanceV2.DebounceTimers
-	local lastCall = timers[key]
-	
-	if lastCall and (tick() - lastCall) < delay then
-		self._PerformanceV2.Stats.DebouncedCalls = self._PerformanceV2.Stats.DebouncedCalls + 1
-		return false -- Debounced
-	end
-	
-	timers[key] = tick()
-	task.defer(callback)
-	return true
-end
-
--- Connection Pool Manager (optional usage)
-function Compkiller:ManagedConnection(key, connection)
-	if not self._EnableAdvancedOptimizations then
-		-- Just return the connection without managing
-		return connection
-	end
-	
-	local pool = self._PerformanceV2.ConnectionPool
-	
-	-- Disconnect old connection if exists
-	if pool[key] then
-		pcall(function()
-			if pool[key].Connected then
-				pool[key]:Disconnect()
-				self._PerformanceV2.Stats.ConnectionsCleaned = self._PerformanceV2.Stats.ConnectionsCleaned + 1
-			end
-		end)
-	end
-	
-	pool[key] = connection
-	return connection
-end
-
--- Batch Multiple Updates (optional usage)
-function Compkiller:BatchUpdate(batchKey, updateFunction, delay)
-	if not self._EnableAdvancedOptimizations then
-		return updateFunction()
-	end
-	
-	delay = delay or 0.05
-	local batcher = self._PerformanceV2.UpdateBatcher
-	
-	-- Cancel existing batch
-	if batcher[batchKey] then
-		task.cancel(batcher[batchKey])
-	end
-	
-	-- Schedule new batch
-	batcher[batchKey] = task.delay(delay, function()
-		pcall(updateFunction)
-		batcher[batchKey] = nil
-	end)
-end
-
--- Memory Monitor (auto-cleanup system)
-function Compkiller:StartMemoryMonitor()
-	if self._PerformanceV2.MemoryMonitor.Active then return end
-	
-	self._PerformanceV2.MemoryMonitor.Active = true
-	
-	task.spawn(function()
-		while self._PerformanceV2.MemoryMonitor.Active do
-			task.wait(self._PerformanceV2.MemoryMonitor.CleanupInterval)
-			
-			if self._EnableAdvancedOptimizations then
-				self:AutoCleanup()
-			end
-		end
-	end)
-end
-
-function Compkiller:StopMemoryMonitor()
-	self._PerformanceV2.MemoryMonitor.Active = false
-end
-
--- Auto Cleanup (called by memory monitor)
-function Compkiller:AutoCleanup()
-	local perf = self._PerformanceV2
-	local cleaned = 0
-	
-	-- Clean finished tweens
-	for key, tween in pairs(perf.TweenCache) do
-		if tween.PlaybackState == Enum.PlaybackState.Completed or
-		   tween.PlaybackState == Enum.PlaybackState.Cancelled then
-			perf.TweenCache[key] = nil
-			cleaned = cleaned + 1
-		end
-	end
-	
-	-- Clean old debounce timers
-	for key, time in pairs(perf.DebounceTimers) do
-		if tick() - time > 60 then -- 1 minute old
-			perf.DebounceTimers[key] = nil
-			cleaned = cleaned + 1
-		end
-	end
-	
-	perf.MemoryMonitor.LastCleanup = tick()
-	
-	if cleaned > 0 then
-		print(string.format("[Compkiller V2] Auto-cleanup: %d items freed", cleaned))
-	end
-end
-
--- Manual Full Cleanup
+--[[
+    Compkiller:CleanupAll()
+    Immediately cancel every tracked tween and run a full memory sweep.
+    Safe to call at any time, regardless of EnableAdvancedOptimizations state.
+]]
 function Compkiller:CleanupAll()
-	local perf = self._PerformanceV2
-	local stats = {tweens = 0, connections = 0}
-	
-	-- Stop all tweens
-	for key, tween in pairs(perf.TweenCache) do
-		pcall(function()
-			if tween.PlaybackState == Enum.PlaybackState.Playing then
-				tween:Cancel()
-			end
-		end)
-		stats.tweens = stats.tweens + 1
-	end
-	
-	-- Disconnect all connections
-	for key, connection in pairs(perf.ConnectionPool) do
-		pcall(function()
-			if connection.Connected then
-				connection:Disconnect()
-			end
-		end)
-		stats.connections = stats.connections + 1
-	end
-	
-	-- Clear all caches
-	perf.TweenCache = {}
-	perf.ConnectionPool = {}
-	perf.DebounceTimers = {}
-	perf.UpdateBatcher = {}
-	
-	print(string.format("[Compkiller V2] Full cleanup: %d tweens, %d connections", 
-		stats.tweens, stats.connections))
+    -- Cancel all active tweens right now
+    local cancelled = 0
+    for _, tw in ipairs(_OPT.ActiveTweens) do
+        pcall(function()
+            if tw and tw.PlaybackState == Enum.PlaybackState.Playing then
+                tw:Cancel()
+                cancelled += 1
+            end
+        end)
+    end
+    _OPT.ActiveTweens = {}
+    _OPT.Stats.TweensCancelled += cancelled
+
+    -- Run full memory sweep
+    Compkiller:_SweepMemory()
 end
 
--- Get Performance Stats
-function Compkiller:GetPerformanceStats()
-    local stats = self._PerformanceV2.Stats
+--[[
+    Compkiller:GetFPS() -> number
+    Returns the current rolling-average FPS (updated every frame).
+]]
+function Compkiller:GetFPS(): number
+    return math.floor(_OPT.FPS + 0.5)
+end
+
+--[[
+    Compkiller:GetOptimizerStats() -> table
+    Returns a snapshot of live optimizer stats.
+    {
+        FPS             : number,
+        Enabled         : boolean,
+        AnimThreshold   : number,
+        ActiveTweens    : number,
+        TweensCancelled : number,
+        InstantSets     : number,
+        MemorySweeps    : number,
+        LastSweepAt     : number,
+    }
+]]
+function Compkiller:GetOptimizerStats(): {}
     return {
-        TweensSaved = stats.TweensSaved,
-        ConnectionsCleaned = stats.ConnectionsCleaned,
-        DebouncedCalls = stats.DebouncedCalls,
-        ActiveTweens = self:CountTable(self._PerformanceV2.TweenCache),
-        ActiveConnections = self:CountTable(self._PerformanceV2.ConnectionPool)
+        FPS             = self:GetFPS(),
+        Enabled         = _OPT.Enabled,
+        AnimThreshold   = _OPT.AnimThreshold,
+        ActiveTweens    = #_OPT.ActiveTweens,
+        TweensCancelled = _OPT.Stats.TweensCancelled,
+        InstantSets     = _OPT.Stats.InstantSets,
+        MemorySweeps    = _OPT.Stats.MemorySweeps,
+        LastSweepAt     = _OPT.Stats.LastSweepAt,
     }
 end
 
+--[[
+    Compkiller:SetAnimThreshold(fps: number)
+    Change the FPS floor at which _SmartAnimation switches to instant-set.
+    Default is 45. Lower = more lenient, higher = more aggressive.
+    Example:  Compkiller:SetAnimThreshold(30)
+]]
+function Compkiller:SetAnimThreshold(fps: number)
+    _OPT.AnimThreshold = math.clamp(fps, 10, 144)
+end
 
--- [[ 🔴 ADVANCED SMART GUI OPTIMIZER 🔴 ]]
-function Compkiller:ActivateSmartEngine()
-    local Stats = game:GetService("Stats")
-    local RunService = game:GetService("RunService")
-    
-    -- 1. IDLE THROTTLING (Saves CPU when menu is hidden)
-    -- Stops visual updates if the menu is closed
-    task.spawn(function()
-        local MainGui = getgenv().RubicsX_UI
-        if MainGui then
-            MainGui:GetPropertyChangedSignal("Enabled"):Connect(function()
-                if not MainGui.Enabled then
-                    setfpscap(60) -- Limit FPS when menu is closed to save resources
-                else
-                    setfpscap(360) -- Unlock when opened
-                end
-            end)
+--[[
+    Compkiller:SetMemInterval(seconds: number)
+    Change how often (in seconds) the background memory sweep runs.
+    Default is 120 (2 minutes). Takes effect on next sweep cycle.
+    Example:  Compkiller:SetMemInterval(60)
+]]
+function Compkiller:SetMemInterval(seconds: number)
+    _OPT.MemInterval = math.max(10, seconds)
+end
+
+-- ── INTERNAL HELPERS ──────────────────────────────────────────
+
+-- Smart Animation: instant-set when Advanced is on AND FPS is low
+-- Falls back to normal _Animation otherwise. Called by _Animation callers.
+function Compkiller:_SmartAnimation(Self: Instance, Info: TweenInfo, Property: {[any]: any})
+    if _OPT.Enabled and _OPT.FPS < _OPT.AnimThreshold then
+        -- Instant-set all properties — zero TweenService cost
+        for prop, val in pairs(Property) do
+            pcall(function() Self[prop] = val end)
         end
-    end)
+        _OPT.Stats.InstantSets += 1
+        -- Return a safe dummy so any :Wait() call on the result doesn't error
+        local dummy = Instance.new("BindableEvent")
+        return {
+            Completed      = dummy.Event,
+            PlaybackState  = Enum.PlaybackState.Completed,
+        }
+    end
+    -- Normal path: create tween, track it, play it
+    local tween = TweenService:Create(Self, Info or TweenInfo.new(0.25), Property)
+    if _OPT.Enabled then
+        table.insert(_OPT.ActiveTweens, tween)
+    end
+    tween:Play()
+    return tween
+end
 
-    -- 2. SMART TWEEN MANAGER
-    -- Automatically disables Animations if FPS drops below 50
-    task.spawn(function()
-        local OriginalAnim = Compkiller._Animation
-        while true do
-            task.wait(1) -- Check every second
-            local CurrentFPS = workspace:GetRealPhysicsFPS()
-            
-            if CurrentFPS < 50 then
-                -- LAG DETECTED: Switch to "Instant Mode" (No CPU usage)
-                Compkiller._Animation = function(self, obj, info, props)
-                    for p,v in pairs(props) do obj[p] = v end
-                    return {Completed = {Wait = function() return true end}}
-                end
-            else
-                -- SMOOTH: Restore Animations
-                if Compkiller._Animation ~= OriginalAnim then
-                    Compkiller._Animation = OriginalAnim
-                end
-            end
+-- Internal memory sweep (called by monitor + CleanupAll)
+function Compkiller:_SweepMemory()
+    local before = #_OPT.ActiveTweens
+    local kept = {}
+    for _, tw in ipairs(_OPT.ActiveTweens) do
+        local state = pcall(function() return tw.PlaybackState end)
+        if state and tw.PlaybackState == Enum.PlaybackState.Playing then
+            table.insert(kept, tw)
         end
-    end)
-
-    -- 3. BACKGROUND VISUAL CLEANER
-    -- Removes heavy Shadows/Strokes if they are causing GPU lag
-    task.spawn(function()
-        task.wait(3) -- Wait for UI to load
-        local MainGui = CoreGui:FindFirstChild("RubicsX") or CoreGui:FindFirstChild("Compkiller")
-        if not MainGui then return end
-
-        -- If GPU lag is detected (Frame time > 16ms), strip heavy visuals
-        if Stats.PerformanceStats.GPU:GetValue() > 16 then
-            for _, v in pairs(MainGui:GetDescendants()) do
-                if v:IsA("UIStroke") or v:IsA("uishadow") or v:IsA("BlurEffect") then
-                    v.Enabled = false
-                end
-            end
-            warn("[SmartEngine] GPU Lag detected. Shadows/Strokes disabled.")
-        end
-    end)
+        -- Completed / Cancelled tweens are simply dropped (GC handles them)
+    end
+    _OPT.ActiveTweens = kept
+    _OPT.Stats.MemorySweeps += 1
+    _OPT.Stats.LastSweepAt  = tick()
 end
 
 return Compkiller;
