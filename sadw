@@ -358,33 +358,41 @@ local CurrentCamera: Camera? = cloneref(workspace.CurrentCamera);
 -- ========================================
 -- GLOBAL CLEANUP SYSTEM (Fix FPS drops on re-execute)
 -- ========================================
--- UserInputService connections and task threads persist across re-executions
--- because they are attached to global services, not to destroyed GUI instances.
--- This system tracks them all and disconnects/cancels them before a new GUI is built.
-
-if getgenv().__CK_CLEANUP then
-	pcall(getgenv().__CK_CLEANUP);
-end;
 
 local _CK_CONNECTIONS = {};
 local _CK_THREADS = {};
 
-getgenv().__CK_CLEANUP = function()
-	for _, conn in ipairs(_CK_CONNECTIONS) do
-		pcall(function() 
-			if conn and conn.Connected then
-				conn:Disconnect(); 
-			end
-		end);
+-- Safely run previous cleanup if it exists
+pcall(function()
+	local genv = getgenv and getgenv() or getfenv();
+	if genv and genv.__CK_CLEANUP_FN then
+		genv.__CK_CLEANUP_FN();
 	end;
-	for _, thread in ipairs(_CK_THREADS) do
-		pcall(function() task.cancel(thread); end);
-	end;
-	_CK_CONNECTIONS = {};
-	_CK_THREADS = {};
-end;
+end);
 
--- Track a UserInputService (or other global service) connection for cleanup
+-- Register new cleanup function for next re-execute
+pcall(function()
+	local genv = getgenv and getgenv() or getfenv();
+	if genv then
+		genv.__CK_CLEANUP_FN = function()
+			for _, conn in ipairs(_CK_CONNECTIONS) do
+				pcall(function()
+					if conn and conn.Connected then
+						conn:Disconnect();
+					end;
+				end);
+			end;
+			for _, thread in ipairs(_CK_THREADS) do
+				pcall(function()
+					task.cancel(thread);
+				end);
+			end;
+			_CK_CONNECTIONS = {};
+			_CK_THREADS = {};
+		end;
+	end;
+end);
+
 local function _TrackConn(conn)
 	if conn then
 		table.insert(_CK_CONNECTIONS, conn);
@@ -392,13 +400,13 @@ local function _TrackConn(conn)
 	return conn;
 end;
 
--- Track an infinite task thread for cleanup
 local function _TrackThread(thread)
 	if thread then
 		table.insert(_CK_THREADS, thread);
 	end;
 	return thread;
 end;
+
 -- ========================================
 -- END GLOBAL CLEANUP SYSTEM
 -- ========================================
