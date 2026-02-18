@@ -1,5 +1,4 @@
-print("new ver2")
-
+print("ver:2")
 if not game:IsLoaded() then game.Loaded:Wait() end
 
 local CoreGui       = game:GetService("CoreGui")
@@ -7211,7 +7210,7 @@ function Compkiller.new(Config : Window)
 			end;
 		end))
 
-		--[[local Parent: ScrollingFrame = UilistLayout.Parent;
+		local Parent: ScrollingFrame = UilistLayout.Parent;
 
 		Parent = Parent or Scrolling;
 
@@ -7238,7 +7237,7 @@ function Compkiller.new(Config : Window)
 			end;
 		end;
 
-		table.insert(WindowArgs.THREADS,task.spawn(Executable))]]
+		table.insert(WindowArgs.THREADS,task.spawn(Executable))
 	end;
 
 	function WindowArgs:DrawConfig(Configuration : TabConfigManager , Internal)
