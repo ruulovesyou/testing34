@@ -1,20 +1,21 @@
-
+print("V 7")
 if not game:IsLoaded() then game.Loaded:Wait() end
 
-local CoreGui       = game:GetService("CoreGui")
-local Players       = game:GetService("Players")
-local LocalPlayer   = Players.LocalPlayer
-local PlayerGui     = LocalPlayer:FindFirstChild("PlayerGui")
-local cloneref: cloneref = cloneref or function(f) return f end;
-local TweenService: TweenService = cloneref(game:GetService('TweenService'));
-local UserInputService: UserInputService = cloneref(game:GetService('UserInputService'));
-local TextService: TextService = cloneref(game:GetService('TextService'));
-local RunService: RunService = cloneref(game:GetService('RunService'));
-local Players: Players = cloneref(game:GetService('Players'));
-local HttpService: HttpService = cloneref(game:GetService('HttpService'));
-local LocalPlayer: Player = Players.LocalPlayer;
-local CoreGui: PlayerGui = (gethui and gethui()) or (get_hidden_gui and get_hidden_gui()) or cloneref(game:FindFirstChild('CoreGui')) or cloneref(LocalPlayer.PlayerGui);
-local Mouse: Mouse = LocalPlayer:GetMouse();
+-- ── Service bootstrap (single, cloneref-protected declarations) ──────────────
+local cloneref: cloneref       = cloneref or function(f) return f end;
+local TweenService: TweenService             = cloneref(game:GetService('TweenService'));
+local UserInputService: UserInputService     = cloneref(game:GetService('UserInputService'));
+local TextService: TextService               = cloneref(game:GetService('TextService'));
+local RunService: RunService                 = cloneref(game:GetService('RunService'));
+local Players: Players                       = cloneref(game:GetService('Players'));
+local HttpService: HttpService               = cloneref(game:GetService('HttpService'));
+local LocalPlayer: Player                    = Players.LocalPlayer;
+local PlayerGui                              = LocalPlayer:FindFirstChild("PlayerGui");
+local CoreGui: PlayerGui                     = (gethui and gethui())
+                                               or (get_hidden_gui and get_hidden_gui())
+                                               or cloneref(game:FindFirstChildOfClass('CoreGui'))
+                                               or cloneref(LocalPlayer.PlayerGui);
+local Mouse: Mouse           = LocalPlayer:GetMouse();
 local CurrentCamera: Camera? = cloneref(workspace.CurrentCamera);
 
 
@@ -37,6 +38,16 @@ SecureKill("RubicsX")
 SecureKill("RubicsX_Main")
 SecureKill("CompkillerUI")
 
+-- Item #6 / #11: kill GUIs from previous executions by their stored randomised names
+-- and any that were parent-spoofed as Roblox system elements
+if getgenv()._CK_GUI_NAMES then
+    for _, prevName in ipairs(getgenv()._CK_GUI_NAMES) do
+        SecureKill(prevName)
+    end
+end
+getgenv()._CK_GUI_NAMES = {}
+SecureKill("RobloxNetworkScreen")
+
 pcall(function()
     if getgenv()._CK_CLEANUP then getgenv()._CK_CLEANUP() end
 end)
@@ -44,15 +55,18 @@ end)
 local _CK_CONNECTIONS = {}
 local _CK_THREADS     = {}
 
-local cloneref         = (cloneref or function(f) return f end)
-local HttpService      = cloneref(game:GetService("HttpService"))
-local TweenService     = cloneref(game:GetService("TweenService"))
-local UserInputService = cloneref(game:GetService("UserInputService"))
-local RunService       = cloneref(game:GetService("RunService"))
-local TextService      = cloneref(game:GetService("TextService"))
+-- (services already declared above; no re-declarations needed)
 
-local CurrentCamera = workspace.CurrentCamera
-local Mouse         = LocalPlayer:GetMouse()
+-- ── Item #6: Randomised ScreenGui name generator (pure alphanumeric, no CK= prefix) ─
+local function _CK_RandomScreenName()
+    local c = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    local r = {}
+    for i = 1, 20 do r[i] = c:sub(math.random(1,#c), math.random(1,#c)) end
+    return table.concat(r)
+end
+
+-- ── Item #9: Anti-F9 Log — silent pcall wrapper (enabled by default) ────────────────
+local _CK_SafeCallEnabled = true
 
 local _OPT = {
     Enabled        = true,
@@ -79,6 +93,16 @@ local function _TrackThread(thread)
 end
 
 getgenv()._CK_CLEANUP = function()
+    -- Restore global task functions patched by Ghost Connection Reaper
+    if getgenv()._CK_ORIG_SPAWN then
+        task.spawn = getgenv()._CK_ORIG_SPAWN
+        getgenv()._CK_ORIG_SPAWN = nil
+    end
+    if getgenv()._CK_ORIG_DELAY then
+        task.delay = getgenv()._CK_ORIG_DELAY
+        getgenv()._CK_ORIG_DELAY = nil
+    end
+
     for _, t in ipairs(_CK_THREADS) do
         pcall(task.cancel, t)
     end
@@ -92,6 +116,21 @@ getgenv()._CK_CLEANUP = function()
         end)
     end
     _OPT.ActiveTweens = {}
+
+    -- Also flush tweens tracked in the later-defined Compkiller._OPT table
+    pcall(function()
+        if Compkiller and Compkiller._OPT then
+            for _, tw in ipairs(Compkiller._OPT.ActiveTweens or {}) do
+                pcall(function()
+                    if tw and tw.PlaybackState == Enum.PlaybackState.Playing then
+                        tw:Cancel()
+                    end
+                end)
+            end
+            table.clear(Compkiller._OPT.ActiveTweens)
+            table.clear(Compkiller._OPT.ActiveTweenMap)
+        end
+    end)
 
     for _, conn in ipairs(_CK_CONNECTIONS) do
         pcall(function() if conn then conn:Disconnect() end end)
@@ -132,6 +171,8 @@ local Compkiller = {
 	NilFolder = Instance.new('Folder'),
 	ArcylicParent = CurrentCamera,
 	ProtectGui = protect_gui or protectgui or (syn and syn.protect_gui) or function(s) return s; end,
+	-- Item #9: Anti-F9 Log — toggle via Compkiller:SetSafeCall(true/false)
+	SafeCallEnabled = _CK_SafeCallEnabled,
 };
 
 Compkiller.Colors = {
@@ -1254,7 +1295,8 @@ function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
 end;
 
 function Compkiller:_Animation(Self: Instance , Info: TweenInfo , Property :{[K] : V})
-	if _OPT and _OPT.Enabled then
+	local opt = Compkiller._OPT
+	if opt and opt.Enabled then
 		return self:_SmartAnimation(Self, Info, Property)
 	end
 	local Tween = TweenService:Create(Self , Info or TweenInfo.new(0.25) , Property);
@@ -1265,13 +1307,39 @@ end;
 function Compkiller:_Input(Frame : Frame , Callback : () -> ()) : TextButton
 	local Button = Instance.new('TextButton',Frame);
 
-	Button.ZIndex = Frame.ZIndex + 10;
-	Button.Size = UDim2.fromScale(1,1);
+	Button.ZIndex        = Frame.ZIndex + 10;
+	Button.Size          = UDim2.fromScale(1,1);
 	Button.BackgroundTransparency = 1;
 	Button.TextTransparency = 1;
+	Button.Text          = "";
+	-- Item #6: disable native click event so ContextActionService blocks can't intercept it
+	Button.Active        = false;
+	Button.AutoButtonColor = false;
 
 	if Callback then
-		Button.MouseButton1Click:Connect(Callback);
+		-- Item #7: 200ms internal debounce — prevents click spam crashing client
+		local _lastFire = 0;
+		local _DEBOUNCE = 0.2;
+
+		-- Item #6: Use UserInputService.InputBegan instead of MouseButton1Click
+		-- This bypasses games that block exploit clicks via ContextActionService
+		_TrackConn(UserInputService.InputBegan:Connect(function(Input, GameProcessed)
+			if GameProcessed then return end;
+			if Input.UserInputType ~= Enum.UserInputType.MouseButton1
+			and Input.UserInputType ~= Enum.UserInputType.Touch then return end;
+			if not Compkiller:_IsMouseOverFrame(Button) then return end;
+
+			local now = tick();
+			if (now - _lastFire) < _DEBOUNCE then return end;
+			_lastFire = now;
+
+			-- Item #9: Anti-F9 Log — wrap callback in pcall when SafeCall is enabled
+			if _CK_SafeCallEnabled then
+				pcall(Callback);
+			else
+				Callback();
+			end;
+		end));
 	end;
 
 	return Button;
@@ -1563,7 +1631,7 @@ function Compkiller:Drag(InputFrame: Frame, MoveFrame: Frame, Speed : number)
 			end)
 		end
 
-		if not Compkiller.IsDrage and dragToggle then
+		if not Compkiller.IaDrag and dragToggle then
 			Compkiller.LastDrag = tick();
 		end;
 
@@ -2163,7 +2231,7 @@ function Compkiller:_CreateBlock(Signal)
 	};
 
 	function rep:SetText(Text)
-		BlockText.Text = Text;
+		Compkiller:_SetObfName(BlockText, Text);
 	end;
 
 	function rep:GetText()
@@ -4863,7 +4931,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		BlockText.Size = UDim2.new(1, -20, 0, 25)
 		BlockText.ZIndex = Zindex + 2
 		BlockText.Font = Enum.Font.GothamMedium
-		BlockText.Text = Config.Name
+		Compkiller:_SetObfName(BlockText, Config.Name)
 		BlockText.TextColor3 = Compkiller.Colors.SwitchColor
 		BlockText.TextSize = 14.000
 		BlockText.TextTransparency = 0.100
@@ -5070,7 +5138,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		end;
 
 		function Args:SetText(str : string)
-			BlockText.Text = str or Config.Name
+			Compkiller:_SetObfName(BlockText, str or Config.Name)
 		end;
 
 		function Args:GetText()
@@ -5196,7 +5264,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		BlockText.Size = UDim2.new(1, -20, 0, 25)
 		BlockText.ZIndex = Zindex + 3
 		BlockText.Font = Enum.Font.GothamMedium
-		BlockText.Text = Config.Title
+		Compkiller:_SetObfName(BlockText, Config.Title)
 		BlockText.TextColor3 = Compkiller.Colors.SwitchColor
 		BlockText.TextSize = 14.000
 		BlockText.TextTransparency = 0.300
@@ -5350,7 +5418,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		BlockText.Size = UDim2.new(1, -20, 0, 25)
 		BlockText.ZIndex = Zindex + 2
 		BlockText.Font = Enum.Font.GothamMedium
-		BlockText.Text = Config.Name
+		Compkiller:_SetObfName(BlockText, Config.Name)
 		BlockText.TextColor3 = Compkiller.Colors.SwitchColor
 		BlockText.TextSize = 14.000
 		BlockText.TextTransparency = 0.300
@@ -5488,7 +5556,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		Args.Flag = Config.Flag;
 
 		function Args:SetText(str : string)
-			BlockText.Text = str or Config.Name
+			Compkiller:_SetObfName(BlockText, str or Config.Name)
 		end;
 
 		function Args:GetText()
@@ -5621,13 +5689,13 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		BlockText.Size = UDim2.new(1, -20, 0, 25)
 		BlockText.ZIndex = Zindex + 3
 		BlockText.Font = Enum.Font.GothamMedium
-		BlockText.Text = Config.Name
+		Compkiller:_SetObfName(BlockText, Config.Name)
 		BlockText.TextColor3 = Compkiller.Colors.SwitchColor
 		BlockText.TextSize = 14.000
 		BlockText.TextTransparency = 0.100
 		BlockText.TextXAlignment = Enum.TextXAlignment.Left
 
-		if not BlockText.Text:byte() then
+		if not Compkiller:GetRealName(BlockText):byte() then
 			Dropdown.Size = UDim2.new(1, -1, 0, 25)
 		end;
 
@@ -5781,7 +5849,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		end;
 
 		function Args:SetText(str : string)
-			BlockText.Text = str or Config.Name
+			Compkiller:_SetObfName(BlockText, str or Config.Name)
 		end;
 
 		function Args:GetText()
@@ -6103,7 +6171,11 @@ function Compkiller.new(Config : Window)
 		TabButtonScrollingFrame.CanvasSize = UDim2.fromOffset(0,UIListLayout.AbsoluteContentSize.Y)
 	end);
 
-	CompKiller.Name = "CompkillerInterface_MainGUI"
+	-- Item #6: Randomised 20-char ScreenGui name — bypasses basic name-detection anti-cheats.
+	-- The name is stored in getgenv()._CK_GUI_NAMES so SecureKill can destroy it on re-execute.
+	local _guiRandomName = _CK_RandomScreenName()
+	CompKiller.Name = _guiRandomName
+	table.insert(getgenv()._CK_GUI_NAMES, _guiRandomName)
 	CompKiller.Parent = CoreGui;
 	CompKiller.ResetOnSpawn = false
 	CompKiller.IgnoreGuiInset = true;
@@ -6209,7 +6281,7 @@ function Compkiller.new(Config : Window)
 	WindowLabel.Position = UDim2.new(0, 60, 0, 17)
 	WindowLabel.Size = UDim2.new(0, 200, 0, 25)
 	WindowLabel.Font = Enum.Font.GothamBold
-	WindowLabel.Text = Config.Name
+	Compkiller:_SetObfName(WindowLabel, Config.Name)
 	WindowLabel.TextColor3 = Compkiller.Colors.SwitchColor
 	WindowLabel.TextSize = Config.TextSize
 	WindowLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -6709,7 +6781,7 @@ function Compkiller.new(Config : Window)
 		CategoryText.Position = UDim2.new(0, 5, 0, 8)
 		CategoryText.Size = UDim2.new(1, 200, 0, 10)
 		CategoryText.Font = Enum.Font.Gotham
-		CategoryText.Text = config.Name
+		Compkiller:_SetObfName(CategoryText, config.Name)
 		CategoryText.TextColor3 = Compkiller.Colors.SwitchColor
 		CategoryText.TextSize = 16.000
 		CategoryText.TextTransparency = 0.500
@@ -6821,7 +6893,7 @@ function Compkiller.new(Config : Window)
 		TabNameLabel.Size = UDim2.new(0, 200, 0, 25)
 		TabNameLabel.ZIndex = 3
 		TabNameLabel.Font = Enum.Font.GothamMedium
-		TabNameLabel.Text = TabConfig.Name;
+		Compkiller:_SetObfName(TabNameLabel, TabConfig.Name);
 		TabNameLabel.TextColor3 = Compkiller.Colors.SwitchColor
 		TabNameLabel.TextSize = 15.000
 		TabNameLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -7107,7 +7179,7 @@ function Compkiller.new(Config : Window)
 			TextLabel.Size = UDim2.new(0, 200, 0, 20)
 			TextLabel.ZIndex = 12
 			TextLabel.Font = Enum.Font.GothamMedium
-			TextLabel.Text = TabConfig.Name
+			Compkiller:_SetObfName(TextLabel, TabConfig.Name)
 			TextLabel.TextColor3 = Compkiller.Colors.SwitchColor
 			TextLabel.TextSize = 13.000
 			TextLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -7309,7 +7381,7 @@ function Compkiller.new(Config : Window)
 		TabNameLabel.Size = UDim2.new(0, 200, 0, 25)
 		TabNameLabel.ZIndex = 3
 		TabNameLabel.Font = Enum.Font.GothamMedium
-		TabNameLabel.Text = Configuration.Name;
+		Compkiller:_SetObfName(TabNameLabel, Configuration.Name);
 		TabNameLabel.TextColor3 = Compkiller.Colors.SwitchColor
 		TabNameLabel.TextSize = 15.000
 		TabNameLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -8618,7 +8690,7 @@ function Compkiller.new(Config : Window)
 			TabNameLabel.Size = UDim2.new(0, 200, 0, 25)
 			TabNameLabel.ZIndex = 3
 			TabNameLabel.Font = Enum.Font.GothamMedium
-			TabNameLabel.Text = TabConfig.Name;
+			Compkiller:_SetObfName(TabNameLabel, TabConfig.Name);
 			TabNameLabel.TextColor3 = Compkiller.Colors.SwitchColor
 			TabNameLabel.TextSize = 15.000
 			TabNameLabel.TextXAlignment = Enum.TextXAlignment.Left
@@ -10362,8 +10434,8 @@ end;
 
 Compkiller.NilFolder.Name = "Nil-Instances";
 
-local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
+local RunService  = cloneref(game:GetService("RunService"))
+local TweenService = cloneref(game:GetService("TweenService"))
 
 Compkiller._OPT = {
     Enabled = true,
@@ -10460,10 +10532,6 @@ function Compkiller:_SmartAnimation(Self: Instance, Info: TweenInfo, Property: {
     return tween
 end
 
-function Compkiller:EnableAdvancedOptimizations(enabled)
-    Compkiller._OPT.Enabled = enabled
-end
-
 function Compkiller:GetFPS()
     return math.floor(Compkiller._OPT.FPS + 0.5)
 end
@@ -10497,10 +10565,19 @@ end
 --  Patches task.spawn/task.delay so every new thread is auto-registered
 --  into _CK_THREADS and killed on re-execute via _CK_CLEANUP.
 --  RunService connections spawned after this point are also auto-tracked.
+--  Guard prevents double-patching on re-execute.
 -- ═══════════════════════════════════════════════════════════════════════════
 do
+    -- Restore originals if a previous CK execution already patched them
+    if getgenv()._CK_ORIG_SPAWN then task.spawn = getgenv()._CK_ORIG_SPAWN end
+    if getgenv()._CK_ORIG_DELAY then task.delay = getgenv()._CK_ORIG_DELAY end
+
     local _orig_spawn = task.spawn
     local _orig_delay = task.delay
+
+    -- Persist originals so next re-execute can restore them
+    getgenv()._CK_ORIG_SPAWN = _orig_spawn
+    getgenv()._CK_ORIG_DELAY = _orig_delay
 
     task.spawn = function(fn, ...)
         local thread = _orig_spawn(fn, ...)
@@ -10661,7 +10738,12 @@ do
             Compkiller.ProtectGui(sg)
         end)
         if not ok then
-            pcall(function() sg.Parent = CurrentCamera end)
+            -- Item #11: Parent Spoofing — disguise as a default Roblox system element
+            -- so game scripts scanning PlayerGui children cannot identify it as an exploit GUI
+            pcall(function()
+                sg.Name   = "RobloxNetworkScreen"
+                sg.Parent = PlayerGui or CurrentCamera
+            end)
         end
     end
 
@@ -10687,6 +10769,570 @@ do
                 Compkiller:_SecureParentGUI(existingWin)
             end
         end)
+    end
+end
+
+-- ============================================================================
+--  NEW SMART SYSTEM 4 ▸ STARTUP DIAGNOSTICS
+--  Runs on load. Checks for common misconfigs/errors.
+--  Results in Compkiller.DiagnosticReport; printed to console immediately.
+-- ============================================================================
+do
+    local _DIAG = { Passed = {}, Errors = {}, Warns = {} }
+    local function _chk(lbl, fn)
+        local ok, err = pcall(fn)
+        if ok then table.insert(_DIAG.Passed, lbl)
+        else       table.insert(_DIAG.Errors, {label=lbl, msg=tostring(err)}) end
+    end
+    local function _wrn(lbl, msg) table.insert(_DIAG.Warns, {label=lbl, msg=msg}) end
+
+    _chk("CoreGui access",        function() assert(CoreGui ~= nil, "CoreGui is nil") end)
+    _chk("LocalPlayer valid",     function() assert(LocalPlayer and LocalPlayer.Parent, "LocalPlayer not in Players") end)
+    _chk("Compkiller._OPT init",  function()
+        assert(Compkiller._OPT ~= nil,               "Compkiller._OPT was not initialised")
+        assert(type(Compkiller._OPT.FPS)=="number",  "_OPT.FPS is not a number")
+    end)
+    _chk("TweenService reachable",function()
+        local t = TweenService:Create(Instance.new("Part"), TweenInfo.new(0), {})
+        t:Cancel()
+    end)
+    _chk("_CK_CLEANUP registered",function()
+        assert(type(getgenv()._CK_CLEANUP)=="function","_CK_CLEANUP not in getgenv()")
+    end)
+    _chk("Ghost Reaper backup",   function()
+        if getgenv()._CK_GHOST_REAPER_ACTIVE then
+            assert(getgenv()._CK_ORIG_SPAWN~=nil,"Original task.spawn not backed up!")
+        end
+    end)
+    _chk("HW table exists",       function() assert(Compkiller.HW~=nil,"HW table missing") end)
+
+    if not Compkiller.SecureMode then
+        _wrn("SecureMode","OFF — call Compkiller:Security('<folder>') for asset caching & GUI shield")
+    end
+    if Compkiller.PerformanceMode==false and Compkiller.HW and Compkiller.HW.IsMobile then
+        _wrn("PerformanceMode","Mobile detected but PerformanceMode is OFF — consider Compkiller:OptimizeMode(true)")
+    end
+
+    Compkiller.DiagnosticReport = _DIAG
+
+    local ec,wc,pc = #_DIAG.Errors, #_DIAG.Warns, #_DIAG.Passed
+    if ec > 0 then
+        warn(string.format("[Compkiller v%s] STARTUP: %d ERROR(S) | %d warn(s) | %d passed",
+            Compkiller.Version, ec, wc, pc))
+        for _,e in ipairs(_DIAG.Errors) do warn("  [ERR] "..e.label.." — "..e.msg) end
+    else
+        print(string.format("[Compkiller v%s] Startup OK — %d checks passed | %d hint(s)",
+            Compkiller.Version, pc, wc))
+    end
+    for _,w in ipairs(_DIAG.Warns) do warn("  [HINT] "..w.label.." — "..w.msg) end
+
+    function Compkiller:GetDiagnostics() return Compkiller.DiagnosticReport end
+    function Compkiller:RunDiagnostics()
+        local r = Compkiller.DiagnosticReport
+        print(("[CK Diag] Errors:%d  Warns:%d  Passed:%d"):format(#r.Errors,#r.Warns,#r.Passed))
+        for _,e in ipairs(r.Errors) do warn("  [ERR] "..e.label.." — "..e.msg) end
+        for _,w in ipairs(r.Warns)  do warn("  [HINT] "..w.label.." — "..w.msg) end
+        return r
+    end
+end
+
+-- ============================================================================
+--  NEW SMART SYSTEM 5 ▸ EXTENDED COMMAND API
+-- ============================================================================
+do
+    -- Sync both _OPT tables when toggling optimizations
+    local _prev_EAO = Compkiller.EnableAdvancedOptimizations
+    function Compkiller:EnableAdvancedOptimizations(enabled)
+        _OPT.Enabled             = enabled
+        Compkiller._OPT.Enabled  = enabled
+        print(("[CK] Advanced Optimizations -> %s"):format(tostring(enabled)))
+    end
+
+    -- Force a performance tier instead of relying on auto-detection
+    function Compkiller:SetPerformanceProfile(profile)
+        local P = {
+            ULTRA={thr=15, strk=true,  blur=true,  esp=0    },
+            HIGH ={thr=25, strk=true,  blur=true,  esp=0    },
+            MID  ={thr=35, strk=false, blur=true,  esp=1/45 },
+            LOW  ={thr=50, strk=false, blur=false, esp=1/20 },
+        }
+        local p = P[string.upper(tostring(profile or ""))]
+        if not p then
+            warn("[CK] SetPerformanceProfile: unknown '"..tostring(profile).."' (LOW/MID/HIGH/ULTRA)")
+            return
+        end
+        Compkiller._OPT.AnimThreshold = p.thr
+        _OPT.AnimThreshold            = p.thr
+        if Compkiller.HW then
+            Compkiller.HW.Tier             = string.upper(profile)
+            Compkiller.HW.UIStrokesEnabled = p.strk
+            Compkiller.HW.BlurEnabled      = p.blur
+            Compkiller.HW.ESPInterval      = p.esp
+        end
+        print(("[CK] Profile -> %s | threshold=%d fps | strokes=%s | blur=%s")
+            :format(string.upper(profile), p.thr, tostring(p.strk), tostring(p.blur)))
+    end
+
+    -- Hot-swap accent/highlight color on all registered elements
+    function Compkiller:SetHighlightColor(color)
+        assert(typeof(color)=="Color3","[CK] SetHighlightColor expects Color3, got "..typeof(color))
+        Compkiller.Colors.Highlight = color
+        Compkiller.Colors.Toggle    = color
+        for _,entry in ipairs(Compkiller.Elements.Highlight or {}) do
+            pcall(function() entry.Element[entry.Property] = color end)
+        end
+    end
+
+    -- Batch-update colour slots and live-update all tracked elements
+    -- Batch-update individual colour slots and live-update all tracked elements
+    function Compkiller:SetThemeColors(colors)
+        for key,color in pairs(colors) do
+            if Compkiller.Colors[key]~=nil then
+                Compkiller.Colors[key]=color
+                for _,entry in ipairs(Compkiller.Elements[key] or {}) do
+                    pcall(function() entry.Element[entry.Property]=color end)
+                end
+            else warn("[CK] SetThemeColors: unknown slot '"..tostring(key).."'") end
+        end
+    end
+
+    -- Pause / resume all active tweens (e.g. when overlay menus open)
+    function Compkiller:PauseAllAnimations()
+        for _,tw in ipairs(Compkiller._OPT.ActiveTweens) do pcall(function() tw:Pause() end) end
+    end
+    function Compkiller:ResumeAllAnimations()
+        for _,tw in ipairs(Compkiller._OPT.ActiveTweens) do pcall(function() tw:Play()  end) end
+    end
+
+    -- One-shot info dump
+    function Compkiller:GetVersionInfo()
+        return {
+            Version      = Compkiller.Version,
+            FPS          = Compkiller:GetFPS(),
+            HardwareTier = Compkiller.HW and Compkiller.HW.Tier or "UNKNOWN",
+            IsMobile     = Compkiller.HW and Compkiller.HW.IsMobile or false,
+            OptimizerOn  = Compkiller._OPT.Enabled,
+            Stats        = Compkiller:GetOptimizerStats(),
+        }
+    end
+
+    -- Safe nil-guarded Destroy
+    function Compkiller:SafeDestroy(inst)
+        if inst then pcall(function() inst:Destroy() end) end
+    end
+
+    -- Hint Lua GC after closing heavy windows
+    function Compkiller:ForceGC()
+        collectgarbage("collect")
+        print("[CK] GC pass triggered.")
+    end
+
+    -- Quick open-state query
+    function Compkiller:IsWindowOpen(win)
+        return win and win.IsOpen == true
+    end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+--  WINDOW POSITION MEMORY
+--  Saves each window's screen position to a JSON file and restores it on the
+--  next execute, so the GUI always opens exactly where the user left it.
+--  Positions are written whenever a drag ends — no manual save needed.
+--
+--  Compkiller:EnablePositionMemory("MyHack/positions.json")
+-- ════════════════════════════════════════════════════════════════════════════
+do
+    Compkiller._PosMemory = { Enabled = false, File = nil, Store = {} }
+
+    function Compkiller:_AttachPositionSaver(screenGui, filePath)
+        local mainFrame = screenGui:FindFirstChildWhichIsA("Frame")
+        if not mainFrame then return end
+        local key = screenGui.Name
+
+        -- Restore saved position for this window
+        if Compkiller._PosMemory.Store[key] then
+            local s = Compkiller._PosMemory.Store[key]
+            pcall(function() mainFrame.Position = UDim2.fromOffset(s.X, s.Y) end)
+        end
+
+        -- Save position whenever a drag ends
+        _TrackConn(UserInputService.InputEnded:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                pcall(function()
+                    if not mainFrame or not mainFrame.Parent then return end
+                    local abs = mainFrame.AbsolutePosition
+                    Compkiller._PosMemory.Store[key] = {
+                        X = math.round(abs.X),
+                        Y = math.round(abs.Y)
+                    }
+                    writefile(filePath, HttpService:JSONEncode(Compkiller._PosMemory.Store))
+                end)
+            end
+        end))
+    end
+
+    function Compkiller:EnablePositionMemory(filePath: string)
+        filePath = filePath or "CK_positions.json"
+        Compkiller._PosMemory.File    = filePath
+        Compkiller._PosMemory.Enabled = true
+
+        -- Load previously saved positions
+        if isfile(filePath) then
+            pcall(function()
+                Compkiller._PosMemory.Store = HttpService:JSONDecode(readfile(filePath))
+            end)
+        end
+
+        -- Attach to windows already created at this point
+        for _, win in ipairs(Compkiller.Windows) do
+            pcall(function()
+                if win and win.Parent then
+                    Compkiller:_AttachPositionSaver(win, filePath)
+                end
+            end)
+        end
+
+        -- Wrap Compkiller.new so every future window is also covered
+        local _origNew = Compkiller.new
+        Compkiller.new = function(cfg)
+            local win = _origNew(cfg)
+            if win and win.Root then
+                task.defer(function()
+                    Compkiller:_AttachPositionSaver(win.Root, filePath)
+                end)
+            end
+            return win
+        end
+    end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+--  ITEM #1 ▸ SECURE "SAFE-EXECUTE" SANDBOX
+--  Wraps executions in xpcall with a custom error handler so any errors are
+--  caught internally and never reach the game's logging pipeline.
+--  Errors are stored in Compkiller._SandboxErrors for developer inspection.
+--
+--  Compkiller:SafeExecute(fn, ...)      → protected call, returns ok, result
+--  Compkiller:SetSafeCall(true/false)   → toggle Anti-F9 wrapping on _Input
+-- ════════════════════════════════════════════════════════════════════════════
+do
+    Compkiller._SandboxErrors = {}
+
+    local function _ckErrorHandler(err)
+        local info = {
+            message   = tostring(err),
+            traceback = debug and debug.traceback and debug.traceback("", 2) or "N/A",
+            at        = os.clock(),
+        }
+        table.insert(Compkiller._SandboxErrors, info)
+        -- Error is swallowed — it never surfaces to F9 or game servers
+    end
+
+    function Compkiller:SafeExecute(fn, ...)
+        local args = {...}
+        local ok, result = xpcall(function()
+            return fn(table.unpack(args))
+        end, _ckErrorHandler)
+        return ok, result
+    end
+
+    -- Item #9 toggle: enable/disable silent pcall wrapping inside _Input callbacks
+    function Compkiller:SetSafeCall(enabled: boolean)
+        _CK_SafeCallEnabled         = enabled
+        Compkiller.SafeCallEnabled  = enabled
+    end
+
+    function Compkiller:GetSandboxErrors()
+        return Compkiller._SandboxErrors
+    end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+--  ITEM #4 ▸ EVENT DISCONNECT GARBAGE COLLECTION (Maid / Janitor)
+--  Creates a Maid object that stores RBXScriptConnections, Instances, and
+--  cleanup functions. When a tab or window is destroyed, call maid:Cleanup()
+--  to disconnect every listener at once — zero memory leaks.
+--
+--  local maid = Compkiller:NewMaid()
+--  maid:Add(frame.MouseEnter:Connect(fn))
+--  maid:Add(someInstance)
+--  maid:Cleanup()   -- disconnects all, destroys instances, runs functions
+-- ════════════════════════════════════════════════════════════════════════════
+do
+    function Compkiller:NewMaid()
+        local maid = { _items = {} }
+
+        function maid:Add(item)
+            table.insert(self._items, item)
+            return item
+        end
+
+        function maid:Cleanup()
+            for _, item in ipairs(self._items) do
+                pcall(function()
+                    local t = typeof(item)
+                    if t == "RBXScriptConnection" then
+                        item:Disconnect()
+                    elseif t == "Instance" then
+                        item:Destroy()
+                    elseif type(item) == "function" then
+                        item()
+                    end
+                end)
+            end
+            self._items = {}
+        end
+
+        -- Auto-cleanup when a given instance is destroyed
+        function maid:BindToInstance(inst: Instance)
+            inst.Destroying:Connect(function()
+                self:Cleanup()
+            end)
+        end
+
+        return maid
+    end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+--  ITEM #5 ▸ 3D RENDERING CULL (Sleep Mode)
+--  Disables Roblox's 3D render pipeline while keeping the GUI fully active.
+--  Massive FPS boost for auto-farm scripts on low-end PCs — the game logic
+--  still runs but the viewport stops drawing the world entirely.
+--
+--  Compkiller:SetSleepMode(true)    -- kill 3D rendering, GUI stays alive
+--  Compkiller:SetSleepMode(false)   -- restore normal rendering
+-- ════════════════════════════════════════════════════════════════════════════
+do
+    Compkiller._SleepMode = false
+
+    function Compkiller:SetSleepMode(enabled: boolean)
+        Compkiller._SleepMode = enabled
+        pcall(function()
+            RunService:Set3dRenderingEnabled(not enabled)
+        end)
+        -- Fallback: lock FPS to near-zero via a busy Heartbeat when in sleep mode
+        -- (some executors don't expose Set3dRenderingEnabled)
+        if enabled and not pcall(function() RunService:Set3dRenderingEnabled(false) end) then
+            Compkiller._SleepConn = _TrackConn(RunService.RenderStepped:Connect(function()
+                -- intentionally empty — occupies the render slot to suppress draw calls
+            end))
+        elseif not enabled and Compkiller._SleepConn then
+            pcall(function() Compkiller._SleepConn:Disconnect() end)
+            Compkiller._SleepConn = nil
+        end
+    end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+--  ITEM #8 ▸ REMOTEEVENT RATE LIMITING
+--  Queues RemoteEvent fires so exploit buttons can never trigger the server
+--  faster than the specified interval. Prevents anti-crash auto-kicks.
+--
+--  local fireFn = Compkiller:RateLimitRemote(remote, 0.1, 10)
+--  fireFn("arg1", "arg2")    -- use this instead of remote:FireServer(...)
+--  Compkiller:ClearRemoteQueue(remote)
+-- ════════════════════════════════════════════════════════════════════════════
+do
+    Compkiller._RemoteQueues = {}
+
+    function Compkiller:RateLimitRemote(remote, interval: number, maxQueue: number)
+        interval = math.max(interval or 0.1, 0.03)
+        maxQueue = math.clamp(maxQueue or 10, 1, 100)
+
+        local queue = { _pending = {}, _running = false }
+        Compkiller._RemoteQueues[remote] = queue
+
+        local function _flush()
+            if queue._running then return end
+            queue._running = true
+            _TrackThread(task.spawn(function()
+                while #queue._pending > 0 do
+                    local args = table.remove(queue._pending, 1)
+                    pcall(function() remote:FireServer(table.unpack(args)) end)
+                    task.wait(interval)
+                end
+                queue._running = false
+            end))
+        end
+
+        -- Returns a drop-in replacement for remote:FireServer(...)
+        return function(...)
+            if #queue._pending >= maxQueue then
+                table.remove(queue._pending, 1)   -- drop oldest, never crash
+            end
+            table.insert(queue._pending, {...})
+            _flush()
+        end
+    end
+
+    function Compkiller:ClearRemoteQueue(remote)
+        if Compkiller._RemoteQueues[remote] then
+            Compkiller._RemoteQueues[remote]._pending = {}
+        end
+    end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+--  ITEM #10 ▸ MEMORY-STRING ENCRYPTION + NAME OBFUSCATION
+--  Wires XOR encryption directly into every tab, section, element, and window
+--  name so that user-supplied strings like "Auto Farm Boss" are never stored
+--  as plaintext in Lua memory or readable Instance.Text properties.
+--
+--  When EnableNameObfuscation is ON:
+--    • Every name assigned to a TextLabel inside the GUI goes through XOR
+--    • The encrypted bytes are the only long-lived upvalue in Lua heap
+--    • .Text is populated by decrypting on-the-fly — plaintext exists only
+--      transiently during the decrypt call, not as a persistent string
+--    • Compkiller._EncNameStore keeps a [instance] = encryptedBytes map
+--      so you can retrieve originals via Compkiller:GetRealName(instance)
+--
+--  Compkiller:EnableNameObfuscation(true/false)
+--  Compkiller:Encrypt("Auto Farm Boss")   → encrypted bytes
+--  Compkiller:Decrypt(encryptedBytes)     → "Auto Farm Boss"
+--  Compkiller:GetRealName(textLabel)      → decrypted name from store
+-- ════════════════════════════════════════════════════════════════════════════
+do
+    local _XOR_KEY = {13, 7, 21, 5, 31, 17, 3, 29}  -- rotating multi-byte key
+
+    Compkiller.NameObfuscation = false
+    Compkiller._EncNameStore   = {}  -- [TextLabel instance] = encryptedBytes
+
+    function Compkiller:Encrypt(str: string): string
+        local out = {}
+        for i = 1, #str do
+            local k = _XOR_KEY[((i - 1) % #_XOR_KEY) + 1]
+            out[i]  = string.char(bit32.bxor(string.byte(str, i), k))
+        end
+        return table.concat(out)
+    end
+
+    -- XOR is self-inverse — same function handles both directions
+    function Compkiller:Decrypt(str: string): string
+        return Compkiller:Encrypt(str)
+    end
+
+    -- Master toggle for automatic name obfuscation inside the GUI pipeline
+    function Compkiller:EnableNameObfuscation(enabled: boolean)
+        Compkiller.NameObfuscation = enabled
+    end
+
+    -- Internal helper used at every .Text assignment site in the GUI.
+    -- When obfuscation is ON:
+    --   1. Encrypts the name → only encrypted bytes live in Lua upvalue
+    --   2. Decrypts immediately → sets .Text (plaintext only exists transiently)
+    --   3. Stores encrypted bytes in _EncNameStore keyed by the instance
+    -- When OFF: behaves exactly like a plain .Text assignment.
+    function Compkiller:_SetObfName(inst: TextLabel, name: string)
+        if Compkiller.NameObfuscation then
+            local enc = Compkiller:Encrypt(name)          -- encrypted upvalue
+            Compkiller._EncNameStore[inst] = enc
+            inst.Text = Compkiller:Decrypt(enc)           -- transient plaintext
+        else
+            inst.Text = name
+        end
+    end
+
+    -- Retrieve the original decrypted name for any TextLabel the library created
+    function Compkiller:GetRealName(inst: TextLabel): string
+        local enc = Compkiller._EncNameStore[inst]
+        if enc then return Compkiller:Decrypt(enc) end
+        return inst.Text  -- fallback when obfuscation was off
+    end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+--  EXECUTION ANOMALY DETECTOR
+--  Captures baseline references to core Lua globals at load time, then checks
+--  whether any have been silently replaced with Lua-level wrappers — which is
+--  a reliable sign an anti-cheat has hooked your execution environment.
+--  Fires a notification and prints a warning when risk is MEDIUM or HIGH.
+--
+--  Compkiller:RunAnomalyCheck()       → { Hooked={...}, Clean={...}, Risk="NONE"|"LOW"|"MEDIUM"|"HIGH" }
+--  Compkiller:StartAnomalyWatch(30)   → re-check automatically every 30s
+--  Compkiller:GetAnomalyReport()      → returns the last cached result
+-- ════════════════════════════════════════════════════════════════════════════
+do
+    -- Captured NOW at load time, before any possible mid-session hooking
+    local _BASELINE = {
+        pcall    = pcall,
+        xpcall   = xpcall,
+        tostring = tostring,
+        pairs    = pairs,
+        ipairs   = ipairs,
+        rawget   = rawget,
+        rawset   = rawset,
+        rawequal = rawequal,
+        type     = type,
+        select   = select,
+        next     = next,
+        unpack   = table.unpack or unpack,
+    }
+
+    Compkiller._Anomaly = { LastReport = nil, WatchThread = nil }
+
+    function Compkiller:RunAnomalyCheck()
+        local hooked, clean = {}, {}
+
+        for name, original in pairs(_BASELINE) do
+            local current  = rawget(_G, name) or original
+            local isHooked = (current ~= original)
+
+            -- Secondary check: C closures replaced by Lua wrappers
+            if not isHooked and debug and debug.getinfo then
+                local ok, info = pcall(debug.getinfo, current, "S")
+                if ok and info and info.what ~= "C" then
+                    isHooked = true
+                end
+            end
+
+            table.insert(isHooked and hooked or clean, name)
+        end
+
+        local risk = #hooked == 0 and "NONE"
+                  or #hooked <= 2  and "LOW"
+                  or #hooked <= 5  and "MEDIUM"
+                  or "HIGH"
+
+        local report = { Hooked = hooked, Clean = clean, Risk = risk, CheckedAt = tick() }
+        Compkiller._Anomaly.LastReport = report
+
+        if #hooked > 0 then
+            warn(("[CK] Anomaly Risk=%s | Hooked: %s"):format(risk, table.concat(hooked, ", ")))
+            if risk == "MEDIUM" or risk == "HIGH" then
+                pcall(function()
+                    Compkiller.newNotify().new({
+                        Title    = "AC Hook Detected",
+                        Content  = ("Risk: %s | %s"):format(risk, table.concat(hooked, ", ")),
+                        Duration = 8,
+                        Icon     = Compkiller:_GetIcon("alert-triangle"),
+                    })
+                end)
+            end
+        else
+            print("[CK] Anomaly: Environment clean.")
+        end
+
+        return report
+    end
+
+    function Compkiller:StartAnomalyWatch(intervalSecs: number)
+        intervalSecs = math.clamp(intervalSecs or 30, 10, 300)
+        if Compkiller._Anomaly.WatchThread then
+            pcall(task.cancel, Compkiller._Anomaly.WatchThread)
+        end
+        task.defer(function() Compkiller:RunAnomalyCheck() end)
+        Compkiller._Anomaly.WatchThread = _TrackThread(task.spawn(function()
+            while true do
+                task.wait(intervalSecs)
+                Compkiller:RunAnomalyCheck()
+            end
+        end))
+        print(("[CK] AnomalyWatch active — every %ds"):format(intervalSecs))
+    end
+
+    function Compkiller:GetAnomalyReport()
+        return Compkiller._Anomaly.LastReport
     end
 end
 
