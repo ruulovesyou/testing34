@@ -1,4 +1,8 @@
-print("V 7")
+print("v7")
+
+
+
+
 if not game:IsLoaded() then game.Loaded:Wait() end
 
 -- ── Service bootstrap (single, cloneref-protected declarations) ──────────────
@@ -2151,6 +2155,52 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 		return OptionButton;
 	end;
 end;
+
+-- ════════════════════════════════════════════════════════════════════════════
+--  ITEM #10 ▸ MEMORY-STRING ENCRYPTION + NAME OBFUSCATION
+--  Must be defined here — before _CreateBlock — because _SetObfName is called
+--  at every .Text assignment site inside the GUI pipeline starting at line ~2234.
+--  Defining it at the bottom of the file caused a "nil value" crash on load.
+-- ════════════════════════════════════════════════════════════════════════════
+do
+    local _XOR_KEY = {13, 7, 21, 5, 31, 17, 3, 29}  -- rotating multi-byte key
+
+    Compkiller.NameObfuscation = false
+    Compkiller._EncNameStore   = {}  -- [TextLabel instance] = encryptedBytes
+
+    function Compkiller:Encrypt(str: string): string
+        local out = {}
+        for i = 1, #str do
+            local k = _XOR_KEY[((i - 1) % #_XOR_KEY) + 1]
+            out[i]  = string.char(bit32.bxor(string.byte(str, i), k))
+        end
+        return table.concat(out)
+    end
+
+    function Compkiller:Decrypt(str: string): string
+        return Compkiller:Encrypt(str)
+    end
+
+    function Compkiller:EnableNameObfuscation(enabled: boolean)
+        Compkiller.NameObfuscation = enabled
+    end
+
+    function Compkiller:_SetObfName(inst: TextLabel, name: string)
+        if Compkiller.NameObfuscation then
+            local enc = Compkiller:Encrypt(name)
+            Compkiller._EncNameStore[inst] = enc
+            inst.Text = Compkiller:Decrypt(enc)
+        else
+            inst.Text = name
+        end
+    end
+
+    function Compkiller:GetRealName(inst: TextLabel): string
+        local enc = Compkiller._EncNameStore[inst]
+        if enc then return Compkiller:Decrypt(enc) end
+        return inst.Text
+    end
+end
 
 function Compkiller:_CreateBlock(Signal)
 	local GlobalBlock = Instance.new("Frame")
@@ -10841,7 +10891,6 @@ end
 -- ============================================================================
 do
     -- Sync both _OPT tables when toggling optimizations
-    local _prev_EAO = Compkiller.EnableAdvancedOptimizations
     function Compkiller:EnableAdvancedOptimizations(enabled)
         _OPT.Enabled             = enabled
         Compkiller._OPT.Enabled  = enabled
@@ -11173,73 +11222,6 @@ do
     end
 end
 
--- ════════════════════════════════════════════════════════════════════════════
---  ITEM #10 ▸ MEMORY-STRING ENCRYPTION + NAME OBFUSCATION
---  Wires XOR encryption directly into every tab, section, element, and window
---  name so that user-supplied strings like "Auto Farm Boss" are never stored
---  as plaintext in Lua memory or readable Instance.Text properties.
---
---  When EnableNameObfuscation is ON:
---    • Every name assigned to a TextLabel inside the GUI goes through XOR
---    • The encrypted bytes are the only long-lived upvalue in Lua heap
---    • .Text is populated by decrypting on-the-fly — plaintext exists only
---      transiently during the decrypt call, not as a persistent string
---    • Compkiller._EncNameStore keeps a [instance] = encryptedBytes map
---      so you can retrieve originals via Compkiller:GetRealName(instance)
---
---  Compkiller:EnableNameObfuscation(true/false)
---  Compkiller:Encrypt("Auto Farm Boss")   → encrypted bytes
---  Compkiller:Decrypt(encryptedBytes)     → "Auto Farm Boss"
---  Compkiller:GetRealName(textLabel)      → decrypted name from store
--- ════════════════════════════════════════════════════════════════════════════
-do
-    local _XOR_KEY = {13, 7, 21, 5, 31, 17, 3, 29}  -- rotating multi-byte key
-
-    Compkiller.NameObfuscation = false
-    Compkiller._EncNameStore   = {}  -- [TextLabel instance] = encryptedBytes
-
-    function Compkiller:Encrypt(str: string): string
-        local out = {}
-        for i = 1, #str do
-            local k = _XOR_KEY[((i - 1) % #_XOR_KEY) + 1]
-            out[i]  = string.char(bit32.bxor(string.byte(str, i), k))
-        end
-        return table.concat(out)
-    end
-
-    -- XOR is self-inverse — same function handles both directions
-    function Compkiller:Decrypt(str: string): string
-        return Compkiller:Encrypt(str)
-    end
-
-    -- Master toggle for automatic name obfuscation inside the GUI pipeline
-    function Compkiller:EnableNameObfuscation(enabled: boolean)
-        Compkiller.NameObfuscation = enabled
-    end
-
-    -- Internal helper used at every .Text assignment site in the GUI.
-    -- When obfuscation is ON:
-    --   1. Encrypts the name → only encrypted bytes live in Lua upvalue
-    --   2. Decrypts immediately → sets .Text (plaintext only exists transiently)
-    --   3. Stores encrypted bytes in _EncNameStore keyed by the instance
-    -- When OFF: behaves exactly like a plain .Text assignment.
-    function Compkiller:_SetObfName(inst: TextLabel, name: string)
-        if Compkiller.NameObfuscation then
-            local enc = Compkiller:Encrypt(name)          -- encrypted upvalue
-            Compkiller._EncNameStore[inst] = enc
-            inst.Text = Compkiller:Decrypt(enc)           -- transient plaintext
-        else
-            inst.Text = name
-        end
-    end
-
-    -- Retrieve the original decrypted name for any TextLabel the library created
-    function Compkiller:GetRealName(inst: TextLabel): string
-        local enc = Compkiller._EncNameStore[inst]
-        if enc then return Compkiller:Decrypt(enc) end
-        return inst.Text  -- fallback when obfuscation was off
-    end
-end
 
 -- ════════════════════════════════════════════════════════════════════════════
 --  EXECUTION ANOMALY DETECTOR
