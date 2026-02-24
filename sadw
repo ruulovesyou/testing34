@@ -1,38 +1,28 @@
-print("v7")
-
-
-
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 
--- ── Service bootstrap (single, cloneref-protected declarations) ──────────────
-local cloneref: cloneref       = cloneref or function(f) return f end;
-local TweenService: TweenService             = cloneref(game:GetService('TweenService'));
-local UserInputService: UserInputService     = cloneref(game:GetService('UserInputService'));
-local TextService: TextService               = cloneref(game:GetService('TextService'));
-local RunService: RunService                 = cloneref(game:GetService('RunService'));
-local Players: Players                       = cloneref(game:GetService('Players'));
-local HttpService: HttpService               = cloneref(game:GetService('HttpService'));
-local LocalPlayer: Player                    = Players.LocalPlayer;
-local PlayerGui                              = LocalPlayer:FindFirstChild("PlayerGui");
-local CoreGui: PlayerGui                     = (gethui and gethui())
-                                               or (get_hidden_gui and get_hidden_gui())
-                                               or cloneref(game:FindFirstChildOfClass('CoreGui'))
-                                               or cloneref(LocalPlayer.PlayerGui);
-local Mouse: Mouse           = LocalPlayer:GetMouse();
-local CurrentCamera: Camera? = cloneref(workspace.CurrentCamera);
+local cloneref = cloneref or function(f) return f end
+local TweenService = cloneref(game:GetService('TweenService'))
+local UserInputService = cloneref(game:GetService('UserInputService'))
+local TextService = cloneref(game:GetService('TextService'))
+local RunService = cloneref(game:GetService('RunService'))
+local Players = cloneref(game:GetService('Players'))
+local HttpService = cloneref(game:GetService('HttpService'))
 
+local LocalPlayer = Players.LocalPlayer
+local PlayerGui = LocalPlayer:FindFirstChild("PlayerGui")
+local CoreGui = (gethui and gethui())
+                or (get_hidden_gui and get_hidden_gui())
+                or cloneref(game:FindFirstChildOfClass('CoreGui'))
+                or cloneref(LocalPlayer.PlayerGui)
+
+local Mouse = LocalPlayer:GetMouse()
+local CurrentCamera = cloneref(workspace.CurrentCamera)
 
 local function SecureKill(target)
     pcall(function()
         local c = CoreGui:FindFirstChild(target)
         if c then c:Destroy() end
-    end)
-    pcall(function()
-        if PlayerGui then
-            local c = PlayerGui:FindFirstChild(target)
-            if c then c:Destroy() end
-        end
     end)
 end
 
