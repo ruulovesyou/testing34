@@ -1,28 +1,46 @@
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 
-local cloneref = cloneref or function(f) return f end
-local TweenService = cloneref(game:GetService('TweenService'))
-local UserInputService = cloneref(game:GetService('UserInputService'))
-local TextService = cloneref(game:GetService('TextService'))
-local RunService = cloneref(game:GetService('RunService'))
-local Players = cloneref(game:GetService('Players'))
-local HttpService = cloneref(game:GetService('HttpService'))
+-- ── Service bootstrap (single, cloneref-protected declarations) ──────────────
+local cloneref: cloneref = cloneref or function(f) return f end;
 
-local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:FindFirstChild("PlayerGui")
-local CoreGui = (gethui and gethui())
-                or (get_hidden_gui and get_hidden_gui())
-                or cloneref(game:FindFirstChildOfClass('CoreGui'))
-                or cloneref(LocalPlayer.PlayerGui)
+-- Safely get services with fallbacks
+local function safeGetService(name)
+    local success, result = pcall(function()
+        return cloneref(game:GetService(name))
+    end)
+    return success and result or game:GetService(name)
+end
 
-local Mouse = LocalPlayer:GetMouse()
-local CurrentCamera = cloneref(workspace.CurrentCamera)
+local TweenService: TweenService = safeGetService('TweenService');
+local UserInputService: UserInputService = safeGetService('UserInputService');
+local TextService: TextService = safeGetService('TextService');
+local RunService: RunService = safeGetService('RunService');
+local Players: Players = safeGetService('Players');
+local HttpService: HttpService = safeGetService('HttpService');
+
+local LocalPlayer: Player = Players.LocalPlayer;
+local PlayerGui = pcall(function() return LocalPlayer:FindFirstChild("PlayerGui") end) and LocalPlayer:FindFirstChild("PlayerGui") or nil;
+
+local CoreGui: PlayerGui = (gethui and pcall(gethui) and gethui())
+                           or (get_hidden_gui and pcall(get_hidden_gui) and get_hidden_gui())
+                           or (pcall(function() return cloneref(game:FindFirstChildOfClass('CoreGui')) end) and cloneref(game:FindFirstChildOfClass('CoreGui')))
+                           or LocalPlayer.PlayerGui;
+
+local Mouse: Mouse = LocalPlayer:GetMouse();
+local CurrentCamera: Camera? = workspace.CurrentCamera;
+
 
 local function SecureKill(target)
     pcall(function()
         local c = CoreGui:FindFirstChild(target)
         if c then c:Destroy() end
+    end)
+    pcall(function()
+        if PlayerGui then
+            local c = PlayerGui:FindFirstChild(target)
+            if c then c:Destroy() end
+        end
     end)
 end
 
@@ -162,8 +180,11 @@ local Compkiller = {
 	},
 	PerformanceMode = false,
 	WindowsNil = {},
-	NilFolder = Instance.new('Folder'),
-	ArcylicParent = CurrentCamera,
+	NilFolder = (function()
+		local success, folder = pcall(function() return Instance.new('Folder') end)
+		return success and folder or nil
+	end)(),
+	ArcylicParent = CurrentCamera or workspace.CurrentCamera,
 	ProtectGui = protect_gui or protectgui or (syn and syn.protect_gui) or function(s) return s; end,
 	-- Item #9: Anti-F9 Log — toggle via Compkiller:SetSafeCall(true/false)
 	SafeCallEnabled = _CK_SafeCallEnabled,
@@ -11307,5 +11328,10 @@ do
         return Compkiller._Anomaly.LastReport
     end
 end
+
+-- Final validation before return
+assert(type(Compkiller) == "table", "Compkiller failed to initialize as table")
+assert(type(Compkiller.newNotify) == "function", "Compkiller.newNotify not found")
+assert(type(Compkiller.new) == "function", "Compkiller.new not found")
 
 return Compkiller
