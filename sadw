@@ -2,41 +2,9 @@ local _CK_DEBUG = false   -- internal boot flag (used before Compkiller table ex
 local function _CKLog(msg)
     local enabled = _CK_DEBUG
         or (type(Compkiller) == "table" and Compkiller.Debug == true)
-    if not enabled then return end
-
-    if msg == nil or msg == "dump" then
-        if type(Compkiller) ~= "table" or not Compkiller.GetOptimizerStats then return end
-        local ok, stats = pcall(function() return Compkiller:GetOptimizerStats() end)
-        if not ok then return end
-        print(table.concat({
-            "╔══════════════════════════════════════════",
-            "║  Compkiller v" .. tostring(Compkiller.Version) .. " — Runtime Stats",
-            "╠══════════════════════════════════════════",
-            "║  Hardware Tier   : " .. tostring(Compkiller.HardwareTier   or "N/A"),
-            "║  Hardware FPS    : " .. tostring(Compkiller.HardwareFPS    or "N/A"),
-            "║  GUI Shield      : " .. tostring(Compkiller.GuiShieldMethod or "N/A"),
-            "║  Performance Mode: " .. tostring(Compkiller.PerformanceMode),
-            "╠══════════════════════════════════════════",
-            "║  Live FPS        : " .. tostring(stats.FPS),
-            "║  Anim Threshold  : " .. tostring(stats.AnimThreshold) .. " fps",
-            "║  Smart Anim ON   : " .. tostring(stats.Enabled),
-            "║  Active Tweens   : " .. tostring(stats.ActiveTweens),
-            "╠══════════════════════════════════════════",
-            "║  Tweens Cancelled: " .. tostring(stats.TweensCancelled),
-            "║  Instant Sets    : " .. tostring(stats.InstantSets),
-            "║  Dedup Cancels   : " .. tostring(stats.DedupCancels),
-            "║  Memory Sweeps   : " .. tostring(stats.MemorySweeps),
-            "║  Tracked Threads : " .. tostring(#_CK_THREADS),
-            "║  Tracked Conns   : " .. tostring(#_CK_CONNECTIONS),
-            "║  GC Memory (KB)  : " .. tostring(math.floor((collectgarbage("count") or 0) + 0.5)),
-            "╠══════════════════════════════════════════",
-            "║  Windows Open    : " .. tostring(#Compkiller.Windows),
-            "╚══════════════════════════════════════════",
-        }, "\n"))
-        return
+    if enabled then
+        print("[CK] " .. tostring(msg))
     end
-
-    print("[CK] " .. tostring(msg))
 end
 
 local _CK_VERSION = "5.4.0"
@@ -46,7 +14,6 @@ _CKLog(string.format("✦ Loading v%s (%s) — %s",
     os.date and os.date("%Y-%m-%d %H:%M:%S") or "unknown time"))
 
 if not game:IsLoaded() then game.Loaded:Wait() end
-
 
 local CoreGui       = game:GetService("CoreGui")
 local Players       = game:GetService("Players")
@@ -10907,7 +10874,36 @@ function Compkiller:SetSmartAnimations(enabled: boolean)
     return _OPT.Enabled
 end
 
-
+function Compkiller:DumpStats()
+    local stats = self:GetOptimizerStats()
+    local lines = {
+        "╔══════════════════════════════════════════",
+        "║  Compkiller v" .. self.Version .. " — Runtime Stats",
+        "╠══════════════════════════════════════════",
+        "║  Hardware Tier   : " .. tostring(self.HardwareTier or "N/A"),
+        "║  Hardware FPS    : " .. tostring(self.HardwareFPS  or "N/A"),
+        "║  GUI Shield      : " .. tostring(self.GuiShieldMethod or "N/A"),
+        "║  Performance Mode: " .. tostring(self.PerformanceMode),
+        "╠══════════════════════════════════════════",
+        "║  Live FPS        : " .. stats.FPS,
+        "║  Anim Threshold  : " .. stats.AnimThreshold .. " fps",
+        "║  Smart Anim ON   : " .. tostring(stats.Enabled),
+        "║  Active Tweens   : " .. stats.ActiveTweens,
+        "╠══════════════════════════════════════════",
+        "║  Tweens Cancelled: " .. stats.TweensCancelled,
+        "║  Instant Sets    : " .. stats.InstantSets,
+        "║  Dedup Cancels   : " .. stats.DedupCancels,
+        "║  Memory Sweeps   : " .. stats.MemorySweeps,
+        "║  Tracked Threads : " .. #_CK_THREADS,
+        "║  Tracked Conns   : " .. #_CK_CONNECTIONS,
+        "║  GC Memory (KB)  : " .. tostring(math.floor((collectgarbage("count") or 0) + 0.5)),
+        "╠══════════════════════════════════════════",
+        "║  Windows Open    : " .. #self.Windows,
+        "╚══════════════════════════════════════════",
+    }
+    _CKLog("dump")
+    return stats
+end
 
 
 function Compkiller:HardReset()
