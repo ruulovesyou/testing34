@@ -1,5 +1,5 @@
 --[[
-    Compkiller Interface (Smart Performance Edition v5.2)
+    Compkiller Interface (Smart Performance Edition v5.3)
     - Single-Execution Guard: Destroys ALL old GUI instances before loading a new one.
     - Thread & Connection Scrubber: Kills old loops so they never run 2x, 3x, 4x.
     - FPS Guard: Rolling sampler + SmartAnimation keep FPS stable on re-execute.
@@ -18,16 +18,23 @@
 -- ══════════════════════════════════════════════════════════════════════════════
 -- VERSION BANNER  (update _CK_VERSION each release)
 -- ══════════════════════════════════════════════════════════════════════════════
-local _CK_VERSION = "5.2.0"
+local _CK_VERSION = "5.3.0"
 local _CK_BUILD   = "Smart-Perf-Edition"
-print(string.format(
-    "[Compkiller] ✦ Loading v%s (%s) — %s",
-    _CK_VERSION,
-    _CK_BUILD,
-    os.date and os.date("%Y-%m-%d %H:%M:%S") or "unknown time"
-))
+_CKLog(string.format("✦ Loading v%s (%s) — %s",
+    _CK_VERSION, _CK_BUILD,
+    os.date and os.date("%Y-%m-%d %H:%M:%S") or "unknown time"))
 
 if not game:IsLoaded() then game.Loaded:Wait() end
+
+-- ── DEBUG LOG GATE ────────────────────────────────────────────────────────────
+-- Set _CK_DEBUG = true to see all internal Compkiller messages in the output.
+-- Set _CK_DEBUG = false (default) for a completely silent injection.
+local _CK_DEBUG = false
+local function _CKLog(msg)
+    if _CK_DEBUG then
+        print("[CK] " .. tostring(msg))
+    end
+end
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- [5] STARTUP DIAGNOSTICS — runs first so failures are caught before UI builds
@@ -67,9 +74,9 @@ do
         f:Destroy()
     end)
 
-    print("[Compkiller] ── Startup Diagnostics ──────────────────────────")
-    for _, line in ipairs(DIAG) do print(line) end
-    print("[Compkiller] ── Diagnostics complete ──────────────────────────")
+    _CKLog("── Startup Diagnostics")
+    for _, line in ipairs(DIAG) do _CKLog(line) end
+    _CKLog("── Diagnostics complete")
 end
 
 -- ── SERVICE REFS (needed before cleanup so SecureKill can run) ────────────────
@@ -205,7 +212,7 @@ local function _ckCancel(thread)
     pcall(task.cancel, thread)
 end
 
-print("[Compkiller] Ghost Connection Reaper active — _ckSpawn/_ckDelay/_ckDefer wrappers ready.")
+_CKLog("Ghost Connection Reaper active — wrappers ready.")
 
 -- ── SERVICE REFS (virtualized for executor compatibility) ─────────────────────
 local cloneref         = (cloneref or function(f) return f end)
@@ -264,10 +271,8 @@ do
             end
         end
 
-        print(string.format(
-            "[Compkiller] Hardware Tier: %s (avg %.1f fps over %d frames)",
-            _HW_TIER, _HW_FPS_RAW, #_hwSamples
-        ))
+        _CKLog(string.format("Hardware Tier: %s (avg %.1f fps / %d frames)",
+            _HW_TIER, _HW_FPS_RAW, #_hwSamples))
     end)
     -- Track so cleanup can disconnect it
     table.insert(_CK_CONNECTIONS, _hwConn)
@@ -313,10 +318,7 @@ do
         _GUI_SHIELD_METHOD = "PlayerGui"
     end
 
-    print(string.format(
-        "[Compkiller] GUI Shield: using '%s' as safe parent container.",
-        _GUI_SHIELD_METHOD
-    ))
+    _CKLog(string.format("GUI Shield: using '%s' as safe parent.", _GUI_SHIELD_METHOD))
 end
 
 -- ── GUI NAME ENCRYPTION ──────────────────────────────────────────────────────
@@ -386,7 +388,7 @@ local function _ShieldParent(screenGui)
     pcall(function()
         local encName = _EncryptGuiName()
         screenGui.Name = encName
-        print("[CK:GuiEncrypt] ScreenGui renamed → " .. encName)
+        _CKLog("GuiEncrypt: renamed → " .. encName)
     end)
     -- Apply executor protect_gui mask
     pcall(function()
@@ -488,7 +490,7 @@ end
 
 
 local Compkiller = {
-	Version = '5.2.0',
+	Version = '5.3.0',
 	Logo = "rbxassetid://120245531583106",
 	Windows = {},
 	Scale = {
@@ -527,14 +529,14 @@ do
         -- Soften stroke colors to reduce GPU load on UIStroke
         Compkiller.Colors.StrokeColor     = Color3.fromRGB(0, 0, 0)  -- transparent black
         Compkiller.Colors.HighStrokeColor = Color3.fromRGB(0, 0, 0)
-        print("[Compkiller] Low-end device detected — PerformanceMode ON, strokes reduced.")
+        _CKLog("Low-end device — PerformanceMode ON, strokes reduced.")
     elseif _HW_TIER == "MEDIUM" then
         -- Keep blur but reduce its effect (done inside _Blur via SecurityConfig flag)
         Compkiller.PerformanceMode = false
-        print("[Compkiller] Mid-range device — standard mode with reduced blur depth.")
+        _CKLog("Mid-range device — standard mode.")
     else
         Compkiller.PerformanceMode = false
-        print("[Compkiller] High-end device — all effects enabled.")
+        _CKLog("High-end device — all effects enabled.")
     end
     -- Expose tier publicly so scripts can read it
     Compkiller.HardwareTier    = _HW_TIER
@@ -11049,7 +11051,7 @@ function Compkiller:ForceGC()
     collectgarbage("collect")
     local after  = math.floor((collectgarbage("count") or 0) + 0.5)
     local freed  = math.max(0, before - after)
-    print(string.format("[CK:ForceGC] GC complete — freed ~%d KB (before=%d KB, after=%d KB)", freed, before, after))
+    _CKLog(string.format("ForceGC: freed ~%d KB (before=%d, after=%d)", freed, before, after))
     return freed
 end
 
@@ -11058,29 +11060,29 @@ function Compkiller:SetHardwareTier(tier: string)
     local valid = {HIGH = true, MEDIUM = true, LOW = true}
     tier = tostring(tier):upper()
     if not valid[tier] then
-        warn("[CK:SetHardwareTier] Invalid tier '" .. tier .. "'. Use HIGH / MEDIUM / LOW.")
+        _CKLog("SetHardwareTier: invalid tier '" .. tier .. "'. Use HIGH/MEDIUM/LOW.")
         return
     end
     self.HardwareTier = tier
     if tier == "LOW" then
         self.PerformanceMode = true
         _OPT.AnimThreshold   = 60     -- instant-set everything
-        print("[CK:SetHardwareTier] → LOW  (PerformanceMode ON, animations disabled)")
+        _CKLog("SetHardwareTier → LOW")
     elseif tier == "MEDIUM" then
         self.PerformanceMode = false
         _OPT.AnimThreshold   = 40
-        print("[CK:SetHardwareTier] → MEDIUM (animations reduced)")
+        _CKLog("SetHardwareTier → MEDIUM")
     else
         self.PerformanceMode = false
         _OPT.AnimThreshold   = 30     -- default threshold
-        print("[CK:SetHardwareTier] → HIGH  (all effects enabled)")
+        _CKLog("SetHardwareTier → HIGH")
     end
 end
 
 -- Toggle whether _Animation routes through _SmartAnimation
 function Compkiller:SetSmartAnimations(enabled: boolean)
     _OPT.Enabled = (enabled == true)
-    print(string.format("[CK:SetSmartAnimations] SmartAnimation %s", _OPT.Enabled and "ENABLED" or "DISABLED"))
+    _CKLog("SetSmartAnimations: " .. (_OPT.Enabled and "ENABLED" or "DISABLED"))
 end
 
 -- Dump a full formatted stat block to the output console
@@ -11121,30 +11123,14 @@ end
 -- ════════════════════════════════════════════════════════════════════════════════════
 
 -- ── [8a] SMART SINGLE-EXECUTION GUARD ────────────────────────────────────────────
--- Upgrades the static SecureKill at the top with a runtime callable that also
--- cancels all tracked background tasks, then rebuilds state fresh.
--- Called automatically on re-inject (via getgenv()._CK_CLEANUP at top of script).
+-- Runtime-callable alias for the top-of-script Smart Single Execution guard.
+-- Destroys all owned GUIs (by attribute tag + name registry) and cancels every
+-- tracked thread, connection, tween, and raw coroutine.
 function Compkiller:HardReset()
-    print("[CK:HardReset] Tearing down all active UI and background tasks...")
-    -- Kill known ScreenGuis
-    for _, name in ipairs({
-        "CompkillerInterface_MainGUI","Compkiller","RubicsX","RubicsX_Main","CompkillerUI"
-    }) do
-        pcall(function()
-            local g = game:GetService("CoreGui"):FindFirstChild(name)
-            if g then g:Destroy() end
-        end)
-        pcall(function()
-            local p = LocalPlayer:FindFirstChild("PlayerGui")
-            if p then
-                local g = p:FindFirstChild(name)
-                if g then g:Destroy() end
-            end
-        end)
-    end
-    -- Run full cleanup
+    _CKLog("HardReset: tearing down...")
+    _SmartKillGUIs()
     pcall(getgenv()._CK_CLEANUP)
-    print("[CK:HardReset] Done. Re-inject to reload.")
+    _CKLog("HardReset: done.")
 end
 
 
@@ -11179,10 +11165,8 @@ do
         local saved = self:LoadWindowPosition()
         if saved then
             MainFrame.Position = saved
-            print(string.format(
-                "[CK:PosMem] Restored window to (%.2f, %d, %.2f, %d)",
-                saved.X.Scale, saved.X.Offset, saved.Y.Scale, saved.Y.Offset
-            ))
+            _CKLog(string.format("PosMem: restored to (%.0f, %d, %.0f, %d)",
+                saved.X.Scale, saved.X.Offset, saved.Y.Scale, saved.Y.Offset))
         end
 
         -- Auto-save on every drag release
@@ -11267,56 +11251,132 @@ do
 end
 
 
--- ── [8e] 3D RENDERING CULL ───────────────────────────────────────────────────────
--- Suspends the Roblox 3D engine by collapsing the camera FOV and disabling
--- scene rendering. Useful during auto-farm loops that don't need visuals.
--- Call :RenderResume() to restore. Stores original values in getgenv() so
--- re-inject does not permanently break the camera.
+-- ── [8e] SMART 3D RENDERING MANAGER ─────────────────────────────────────────────
+-- Two modes:
+--
+--   AUTO MODE (:StartRenderManager())
+--     Mirrors the window focus state:
+--       Window loses focus → 3D suppressed + FPS capped to 10 (saves CPU/GPU)
+--       Window regains focus → 3D restored + FPS cap lifted to 360
+--     This is the recommended mode for background auto-farming.
+--
+--   MANUAL MODE (:RenderCull() / :RenderResume())
+--     Caller explicitly suppresses or restores 3D at any time.
+--
+--   Both modes save original camera state in getgenv() so re-inject never
+--   permanently breaks the camera.
 do
-    local _CULL_KEY = "_CK_CULL_STATE"
+    local _CULL_KEY    = "_CK_CULL_STATE"
+    local _RENDER_CONN = "_CK_RENDER_CONNS"
 
-    function Compkiller:RenderCull()
-        if getgenv()[_CULL_KEY] then
-            print("[CK:RenderCull] Already culled — call :RenderResume() first.")
-            return
-        end
+    -- ── Shared helpers ────────────────────────────────────────────────────────
+    local function _SaveCameraState()
         local cam = workspace.CurrentCamera
-        -- Save originals safely
         local origFOV, origType, origCFrame
         pcall(function()
             origFOV    = cam.FieldOfView
             origType   = cam.CameraType
             origCFrame = cam.CFrame
         end)
-        getgenv()[_CULL_KEY] = {
-            fov    = origFOV   or 70,
-            ctype  = origType  or Enum.CameraType.Custom,
-            cf     = origCFrame,
+        return {
+            fov   = origFOV   or 70,
+            ctype = origType  or Enum.CameraType.Custom,
+            cf    = origCFrame,
         }
-        -- Move camera inside a wall so the 3D scene is fully occluded.
-        -- FOV=1 alone is not enough on all hardware; burying the CFrame is.
-        pcall(function()
-            cam.CameraType  = Enum.CameraType.Scriptable
-            cam.FieldOfView = 1
-            cam.CFrame      = CFrame.new(0, -1e6, 0)  -- far below the map
-        end)
-        print("[CK:RenderCull] 3D rendering suppressed (camera relocated).")
     end
 
-    function Compkiller:RenderResume()
-        local state = getgenv()[_CULL_KEY]
-        if not state then
-            print("[CK:RenderResume] Nothing to resume.")
-            return
-        end
+    local function _SuppressRender()
+        pcall(function()
+            local cam       = workspace.CurrentCamera
+            cam.CameraType  = Enum.CameraType.Scriptable
+            cam.FieldOfView = 1
+            cam.CFrame      = CFrame.new(0, -1e6, 0)
+        end)
+        -- Cap FPS to 10 to free CPU during background farming
+        pcall(function() setfpscap(10) end)
+    end
+
+    local function _RestoreRender(state)
         pcall(function()
             local cam       = workspace.CurrentCamera
             cam.CameraType  = state.ctype
             cam.FieldOfView = state.fov
             if state.cf then cam.CFrame = state.cf end
         end)
+        -- Restore full FPS
+        pcall(function() setfpscap(360) end)
+    end
+
+    -- ── Manual API ────────────────────────────────────────────────────────────
+    function Compkiller:RenderCull()
+        if getgenv()[_CULL_KEY] then
+            _CKLog("RenderCull: already active.")
+            return
+        end
+        getgenv()[_CULL_KEY] = _SaveCameraState()
+        _SuppressRender()
+        _CKLog("RenderCull: 3D suppressed.")
+    end
+
+    function Compkiller:RenderResume()
+        local state = getgenv()[_CULL_KEY]
+        if not state then
+            _CKLog("RenderResume: nothing to resume.")
+            return
+        end
+        _RestoreRender(state)
         getgenv()[_CULL_KEY] = nil
-        print("[CK:RenderResume] 3D rendering restored.")
+        _CKLog("RenderResume: 3D restored.")
+    end
+
+    -- ── Auto Focus Manager ────────────────────────────────────────────────────
+    function Compkiller:StartRenderManager()
+        -- Disconnect any previous render manager connections
+        self:StopRenderManager()
+
+        local conns = {}
+
+        -- Window loses focus → suppress rendering (background farming mode)
+        local c1 = _TrackConn(UserInputService.WindowFocusReleased:Connect(function()
+            if not getgenv()[_CULL_KEY] then
+                getgenv()[_CULL_KEY] = _SaveCameraState()
+            end
+            _SuppressRender()
+            _CKLog("RenderManager: focus lost — 3D suppressed, FPS capped.")
+        end))
+        table.insert(conns, c1)
+
+        -- Window regains focus → restore rendering
+        local c2 = _TrackConn(UserInputService.WindowFocused:Connect(function()
+            local state = getgenv()[_CULL_KEY]
+            if state then
+                _RestoreRender(state)
+                getgenv()[_CULL_KEY] = nil
+            end
+            _CKLog("RenderManager: focus gained — 3D restored.")
+        end))
+        table.insert(conns, c2)
+
+        getgenv()[_RENDER_CONN] = conns
+        _CKLog("RenderManager: auto focus tracking started.")
+    end
+
+    function Compkiller:StopRenderManager()
+        -- Restore 3D if currently suppressed
+        local state = getgenv()[_CULL_KEY]
+        if state then
+            _RestoreRender(state)
+            getgenv()[_CULL_KEY] = nil
+        end
+        -- Disconnect focus listeners
+        local conns = getgenv()[_RENDER_CONN]
+        if type(conns) == "table" then
+            for _, c in ipairs(conns) do
+                pcall(function() c:Disconnect() end)
+            end
+        end
+        getgenv()[_RENDER_CONN] = nil
+        _CKLog("RenderManager: stopped.")
     end
 end
 
@@ -11360,7 +11420,7 @@ do
 
     function RateLimiter:Flush()
         self._queue = {}
-        print("[CK:RateLimiter] Queue flushed.")
+        _CKLog("RateLimiter: queue flushed.")
     end
 
     function Compkiller:NewRateLimiter(interval: number)
@@ -11407,14 +11467,14 @@ do
 
     function Compkiller:StartAnomalyDetector(interval: number)
         if _DETECTOR_THREAD then
-            print("[CK:Anomaly] Detector already running.")
+            _CKLog("Anomaly: detector already running.")
             return
         end
         interval = math.max(2, interval or 5)
 
         -- Capture baseline NOW (lazy), after executor has finished its own hooks
         _BASELINE = _captureBaseline()
-        print(string.format("[CK:Anomaly] Baseline captured. Scanning every %ds.", interval))
+        _CKLog(string.format("Anomaly: baseline captured, scanning every %ds.", interval))
 
         _DETECTOR_THREAD = _ckSpawn(function()
             while _DETECTOR_THREAD do
@@ -11441,7 +11501,7 @@ do
             pcall(task.cancel, _DETECTOR_THREAD)
             _DETECTOR_THREAD = nil
             _BASELINE        = nil
-            print("[CK:Anomaly] Detector stopped.")
+            _CKLog("Anomaly: detector stopped.")
         end
     end
 end
