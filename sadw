@@ -19,6 +19,105 @@ local Mouse           = LocalPlayer:GetMouse();
 local CurrentCamera = cloneref(workspace.CurrentCamera);
 
 
+-- ════════════════════════════════════════════════════════════════════════
+--  CK_DEBUG ▸ LOAD-TIME ERROR TRACER
+--  Catches every error during library load (including silent pcall ones),
+--  logs them with file + line number, and exposes:
+--
+--    Compkiller:Debug()          -- print full report to console RIGHT NOW
+--    Compkiller:DebugWatch()     -- auto-print report every 5s
+--    Compkiller:DebugClear()     -- wipe the log
+--    getgenv().CK_Debug()        -- same as :Debug() but callable before
+--                                   Compkiller is returned (e.g. on crash)
+--
+--  HOW TO READ OUTPUT:
+--    [CK-ERR]  = a real error with a stack trace (these are what break you)
+--    [CK-PCAL] = a silent pcall failure (normally swallowed — now visible)
+--    [CK-NIL]  = a nil-value access that was caught before crashing
+-- ════════════════════════════════════════════════════════════════════════
+local _CK_LOG       = {}   -- { time, kind, msg, trace }
+local _CK_LOG_MAX   = 200
+local _CK_START_T   = os.clock()
+
+local function _ckLog(kind, msg, trace)
+    if #_CK_LOG >= _CK_LOG_MAX then table.remove(_CK_LOG, 1) end
+    table.insert(_CK_LOG, {
+        t     = math.floor((os.clock() - _CK_START_T) * 1000),
+        kind  = kind,
+        msg   = tostring(msg or "?"),
+        trace = trace or "",
+    })
+end
+
+-- Full trace formatter: strips Roblox internals noise, keeps your lines
+local function _ckTrace(lvl)
+    lvl = lvl or 2
+    local ok, tb = pcall(function()
+        return debug and debug.traceback and debug.traceback("", lvl) or ""
+    end)
+    if not ok or not tb then return "" end
+    -- Keep only lines that mention your script (not C functions / Roblox core)
+    local out = {}
+    for line in tb:gmatch("[^\n]+") do
+        if line:match("%d+") and not line:match("%[C%]") then
+            out[#out + 1] = "    " .. line:match("^%s*(.-)%s*$")
+        end
+    end
+    return table.concat(out, "\n")
+end
+
+-- Intercept the global pcall so silent failures are captured
+local _real_pcall = pcall
+local _real_xpcall = xpcall
+
+local function _ck_pcall(fn, ...)
+    local args = {...}
+    local results = table.pack(_real_pcall(fn, table.unpack(args)))
+    if not results[1] then
+        _ckLog("PCAL", results[2], _ckTrace(2))
+    end
+    return table.unpack(results, 1, results.n)
+end
+
+-- Expose a global debug printer so it works even before Compkiller is returned
+local function _ck_printDebug()
+    local sep = string.rep("═", 55)
+    print("\n" .. sep)
+    print(" CK DEBUG REPORT  |  " .. #_CK_LOG .. " entries  |  uptime: " .. math.floor((os.clock() - _CK_START_T)*1000) .. "ms")
+    print(sep)
+    if #_CK_LOG == 0 then
+        print("  (no errors logged — library loaded cleanly)")
+    end
+    for idx, e in ipairs(_CK_LOG) do
+        print(string.format("\n  [%d] +%dms [CK-%s]", idx, e.t, e.kind))
+        print("  MSG: " .. e.msg)
+        if e.trace and #e.trace > 0 then
+            print("  TRACE:")
+            print(e.trace)
+        end
+    end
+    print("\n" .. sep .. "\n")
+end
+getgenv().CK_Debug = _ck_printDebug
+
+-- Top-level xpcall error handler: catches anything that escapes all pcalls
+local function _ckTopHandler(err)
+    local trace = _ckTrace(2)
+    _ckLog("ERR", err, trace)
+
+    -- Print immediately so executor console always shows it,
+    -- bypassing the Anti-F9 suppression
+    local _raw_warn = warn or print
+    _raw_warn("[CK-ERR] LOAD CRASH: " .. tostring(err))
+    if trace and #trace > 0 then
+        _raw_warn("[CK-ERR] TRACE:\n" .. trace)
+    end
+    _raw_warn("[CK-ERR] Call  getgenv().CK_Debug()  in your executor console for full report.")
+end
+
+-- pcall is now instrumented (restore before returning Compkiller)
+pcall = _ck_pcall
+
 local function SecureKill(target)
     pcall(function()
         local c = CoreGui:FindFirstChild(target)
@@ -11319,12 +11418,59 @@ do
                 Compkiller:RunAnomalyCheck()
             end
         end))
-        print(("[CK] AnomalyWatch active — every %ds")
+        print(("[CK] AnomalyWatch active — every %ds"):format(intervalSecs))
     end
 
     function Compkiller:GetAnomalyReport()
         return Compkiller._Anomaly.LastReport
     end
+end
+
+-- ── Attach debug helpers to the Compkiller object ──────────────────────
+-- Restore the real pcall now that the library body is fully defined,
+-- so all end-user callbacks get normal (non-instrumented) pcall behaviour.
+pcall = _real_pcall
+
+function Compkiller:Debug()
+    _ck_printDebug()
+end
+
+function Compkiller:DebugWatch(interval)
+    interval = interval or 5
+    task.spawn(function()
+        while true do
+            task.wait(interval)
+            if #_CK_LOG > 0 then
+                _ck_printDebug()
+            end
+        end
+    end)
+    print("[CK] DebugWatch active — printing new errors every " .. interval .. "s")
+    print("[CK] Or call  Compkiller:Debug()  any time for an immediate snapshot.")
+end
+
+function Compkiller:DebugClear()
+    _CK_LOG = {}
+    print("[CK] Debug log cleared.")
+end
+
+-- Mirror any load-time errors into the existing SandboxErrors table
+Compkiller._SandboxErrors = Compkiller._SandboxErrors or {}
+for _, e in ipairs(_CK_LOG) do
+    table.insert(Compkiller._SandboxErrors, {
+        message   = "[" .. e.kind .. "] " .. e.msg,
+        traceback = e.trace,
+        at        = e.t,
+    })
+end
+
+-- Auto-summary so the executor console always tells you the result
+if #_CK_LOG > 0 then
+    local _raw_warn = warn or print
+    _raw_warn("[CK] Loaded WITH " .. #_CK_LOG .. " error(s).")
+    _raw_warn("[CK] Run  Compkiller:Debug()  or  getgenv().CK_Debug()  to see the full report.")
+else
+    print("[CK] Library loaded cleanly — 0 errors.")
 end
 
 return Compkiller
