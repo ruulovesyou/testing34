@@ -1,4 +1,4 @@
-local _CK_DEBUG = false   -- internal boot flag (used before Compkiller table exists)
+local _CK_DEBUG = true   -- internal boot flag (used before Compkiller table exists)
 local function _CKLog(msg)
     local enabled = _CK_DEBUG
         or (type(Compkiller) == "table" and Compkiller.Debug == true)
@@ -11238,6 +11238,235 @@ do
             _CKLog("Anomaly: detector stopped.")
         end
     end
+end
+
+-- ── MISSING API IMPLEMENTATIONS ─────────────────────────────────────────────
+
+-- SetPerformanceProfile: maps named profiles to tier + threshold
+function Compkiller:SetPerformanceProfile(profile)
+	local p = tostring(profile):upper()
+	if p == "LOW" then
+		self.PerformanceMode = true
+		_OPT.AnimThreshold   = 60
+		self.HardwareTier    = "LOW"
+	elseif p == "MEDIUM" then
+		self.PerformanceMode = false
+		_OPT.AnimThreshold   = 40
+		self.HardwareTier    = "MEDIUM"
+	else
+		self.PerformanceMode = false
+		_OPT.AnimThreshold   = 30
+		self.HardwareTier    = "HIGH"
+	end
+	_CKLog("SetPerformanceProfile: " .. p)
+	return self.HardwareTier
+end
+
+-- PauseAllAnimations: instantly stops _SmartAnimation routing, instant-sets only
+function Compkiller:PauseAllAnimations()
+	_OPT._AnimPaused = true
+	_OPT.Enabled     = false
+	_CKLog("PauseAllAnimations: animations paused.")
+end
+
+-- ResumeAllAnimations: re-enables animation routing
+function Compkiller:ResumeAllAnimations()
+	_OPT._AnimPaused = false
+	_OPT.Enabled     = true
+	_CKLog("ResumeAllAnimations: animations resumed.")
+end
+
+-- RunDiagnostics: performs a live one-shot capability check, caches + returns results
+do
+	local _DIAG_CACHE = nil
+
+	local _DIAG_CHECKS = {
+		{ "cloneref",        function() assert(type(cloneref) == "function") end },
+		{ "getgenv",         function() assert(type(getgenv) == "function") end },
+		{ "get_hidden_gui",  function() assert(type(get_hidden_gui) == "function") end },
+		{ "task.cancel",     function() assert(type(task.cancel) == "function") end },
+		{ "TweenService",    function() assert(game:GetService("TweenService") ~= nil) end },
+		{ "RunService",      function() assert(game:GetService("RunService") ~= nil) end },
+		{ "Instance.new",    function() local f = Instance.new("Folder"); f:Destroy() end },
+		{ "HttpService",     function() assert(game:GetService("HttpService") ~= nil) end },
+		{ "CoreGui",         function() assert(game:GetService("CoreGui") ~= nil) end },
+	}
+
+	function Compkiller:RunDiagnostics()
+		local results = {}
+		local passed, failed = 0, 0
+		for _, check in ipairs(_DIAG_CHECKS) do
+			local ok, err = pcall(check[2])
+			results[check[1]] = { pass = ok, err = ok and nil or tostring(err) }
+			if ok then passed += 1 else failed += 1 end
+		end
+		results._passed = passed
+		results._failed = failed
+		_DIAG_CACHE = results
+		_CKLog(string.format("RunDiagnostics: %d passed, %d failed.", passed, failed))
+		return results
+	end
+
+	function Compkiller:GetDiagnostics()
+		if not _DIAG_CACHE then
+			return self:RunDiagnostics()
+		end
+		return _DIAG_CACHE
+	end
+end
+
+-- GetVersionInfo: returns a table of version metadata
+function Compkiller:GetVersionInfo()
+	return {
+		Version      = self.Version,
+		HardwareTier = self.HardwareTier,
+		HardwareFPS  = self.HardwareFPS,
+		GuiShield    = self.GuiShieldMethod,
+		PerfMode     = self.PerformanceMode,
+		SmartAnim    = _OPT.Enabled,
+		AnimThreshold= _OPT.AnimThreshold,
+	}
+end
+
+-- SetSafeCall / GetSandboxErrors: pcall wrapper toggle with error accumulator
+do
+	local _SAFE_CALL_ENABLED = false
+	local _SANDBOX_ERRORS    = {}
+
+	function Compkiller:SetSafeCall(enabled)
+		_SAFE_CALL_ENABLED = (enabled == true)
+		_CKLog("SetSafeCall: " .. (_SAFE_CALL_ENABLED and "ON" or "OFF"))
+	end
+
+	function Compkiller:SafeCall(fn, ...)
+		if not _SAFE_CALL_ENABLED then
+			return fn(...)
+		end
+		local args = {...}
+		local ok, result = pcall(function() return fn(table.unpack(args)) end)
+		if not ok then
+			table.insert(_SANDBOX_ERRORS, { time = tick(), err = tostring(result) })
+			_CKLog("SafeCall caught: " .. tostring(result))
+		end
+		return ok, result
+	end
+
+	function Compkiller:GetSandboxErrors()
+		return _SANDBOX_ERRORS
+	end
+end
+
+-- RunAnomalyCheck / GetAnomalyReport: one-shot tamper scan (no background thread)
+do
+	local _ANOMALY_REPORT = nil
+
+	local _ANOMALY_WATCH = {
+		{ _G,     "rawget",        "rawget"        },
+		{ _G,     "rawset",        "rawset"        },
+		{ _G,     "pcall",         "pcall"         },
+		{ _G,     "xpcall",        "xpcall"        },
+		{ _G,     "tostring",      "tostring"      },
+		{ _G,     "type",          "type"          },
+		{ math,   "floor",         "math.floor"    },
+		{ string, "format",        "string.format" },
+		{ table,  "insert",        "table.insert"  },
+	}
+
+	local function _captureSnap()
+		local snap = {}
+		for _, w in ipairs(_ANOMALY_WATCH) do
+			local ok, val = pcall(rawget, w[1], w[2])
+			snap[w[3]] = ok and val or nil
+		end
+		return snap
+	end
+
+	local _BASE_SNAP = _captureSnap()
+
+	function Compkiller:RunAnomalyCheck()
+		local tampered = {}
+		local clean    = {}
+		for _, w in ipairs(_ANOMALY_WATCH) do
+			local ok, cur = pcall(rawget, w[1], w[2])
+			if ok and _BASE_SNAP[w[3]] ~= nil and cur ~= _BASE_SNAP[w[3]] then
+				table.insert(tampered, w[3])
+			else
+				table.insert(clean, w[3])
+			end
+		end
+		_ANOMALY_REPORT = {
+			tampered  = tampered,
+			clean     = clean,
+			checkedAt = tick(),
+			safe      = (#tampered == 0),
+		}
+		_CKLog(string.format("RunAnomalyCheck: %d tampered, %d clean.", #tampered, #clean))
+		return _ANOMALY_REPORT
+	end
+
+	function Compkiller:GetAnomalyReport()
+		if not _ANOMALY_REPORT then
+			return self:RunAnomalyCheck()
+		end
+		return _ANOMALY_REPORT
+	end
+end
+
+-- EnableNameObfuscation: toggle runtime re-obfuscation of ScreenGui name
+function Compkiller:EnableNameObfuscation(enabled)
+	if enabled == false then
+		_CKLog("EnableNameObfuscation: OFF (static name retained).")
+		return
+	end
+	pcall(function()
+		for _, win in ipairs(self.Windows) do
+			local sg = win and win._ScreenGui
+			if sg and sg.Parent then
+				local newName = _EncryptGuiName and _EncryptGuiName() or sg.Name
+				sg.Name = newName
+				_CKLog("EnableNameObfuscation: renamed → " .. newName)
+			end
+		end
+	end)
+end
+
+-- IsWindowOpen: returns true if the given window object is in Windows table
+function Compkiller:IsWindowOpen(win)
+	if not win then return false end
+	for _, w in ipairs(self.Windows) do
+		if w == win then return true end
+	end
+	return false
+end
+
+-- IsMobileTier: returns true when running on a low-power / mobile device
+function Compkiller:IsMobileTier()
+	local isMobile = (self.HardwareTier == "LOW")
+		or (UserInputService and UserInputService.TouchEnabled and not UserInputService.MouseEnabled)
+	return isMobile
+end
+
+-- SetSleepMode: drastically reduces CPU use when UI is backgrounded
+do
+	local _SLEEP_ACTIVE = false
+	local _SLEEP_PREV_THRESHOLD = nil
+
+	function Compkiller:SetSleepMode(enabled)
+		if enabled and not _SLEEP_ACTIVE then
+			_SLEEP_ACTIVE           = true
+			_SLEEP_PREV_THRESHOLD   = _OPT.AnimThreshold
+			_OPT.AnimThreshold      = 999
+			_OPT.Enabled            = false
+			pcall(function() setfpscap(10) end)
+			_CKLog("SetSleepMode: ON — animations paused, FPS capped to 10.")
+		elseif not enabled and _SLEEP_ACTIVE then
+			_SLEEP_ACTIVE      = false
+			_OPT.AnimThreshold = _SLEEP_PREV_THRESHOLD or 30
+			_OPT.Enabled       = true
+			pcall(function() setfpscap(360) end)
+			_CKLog("SetSleepMode: OFF — restored.")
+		end
+	end
 end
 
 return Compkiller;
