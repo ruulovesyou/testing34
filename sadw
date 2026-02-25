@@ -1,28 +1,5 @@
---[[
-    Compkiller Interface (Smart Performance Edition v5.4)
-    - Single-Execution Guard: Destroys ALL old GUI instances before loading a new one.
-    - Thread & Connection Scrubber: Kills old loops so they never run 2x, 3x, 4x.
-    - FPS Guard: Rolling sampler + SmartAnimation keep FPS stable on re-execute.
-    - Tween Orphan Killer: Cancels leaked tweens from previous executions.
-    - Clean State Reset: NOTIFY_CACHE, Windows table, and FPS samples all reset cleanly.
-    ── NEW IN v4 ──────────────────────────────────────────────────────────────────
-    [1] _SmartAnimation       — FPS-aware tween system with instant-set fallback
-    [2] Ghost Connection Reaper (Zero-Leak) — task/conn override + auto cleanup
-    [3] Hardware-Aware Graphics Tiering — FPS-sampled quality scaler at startup
-    [4] Instance Protection / GUI Shield — safest-parent picker + parent spoofing
-    [5] Startup Diagnostics — executor capability report before UI loads
-    [6] Extended Command API — GC, tier override, anim toggle, stat dump
-    [7] Advanced Background Functions — pos memory, sandbox, janitor, 3D cull, rate limiter, anomaly detector
---]]
-
--- ── DEBUG LOG GATE ────────────────────────────────────────────────────────────
--- Two ways to enable logs:
---   1. From INSIDE the lib file:  change _CK_DEBUG = true below
---   2. From your MAIN SCRIPT:     Compkiller.Debug = true   (after require)
---                                  OR  Compkiller:SetDebug(true)
 local _CK_DEBUG = false   -- internal boot flag (used before Compkiller table exists)
 local function _CKLog(msg)
-    -- Check both the local boot flag and the public Compkiller.Debug flag
     local enabled = _CK_DEBUG
         or (type(Compkiller) == "table" and Compkiller.Debug == true)
     if enabled then
@@ -30,9 +7,6 @@ local function _CKLog(msg)
     end
 end
 
--- ══════════════════════════════════════════════════════════════════════════════
--- VERSION BANNER  (update _CK_VERSION each release)
--- ══════════════════════════════════════════════════════════════════════════════
 local _CK_VERSION = "5.4.0"
 local _CK_BUILD   = "Smart-Perf-Edition"
 _CKLog(string.format("✦ Loading v%s (%s) — %s",
@@ -41,72 +15,15 @@ _CKLog(string.format("✦ Loading v%s (%s) — %s",
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 
--- ══════════════════════════════════════════════════════════════════════════════
--- [5] STARTUP DIAGNOSTICS — runs first so failures are caught before UI builds
--- ══════════════════════════════════════════════════════════════════════════════
-do
-    local DIAG = {}
-    local function _check(label, fn)
-        local ok, err = pcall(fn)
-        local status = ok and "✔ PASS" or ("✘ FAIL — " .. tostring(err))
-        DIAG[#DIAG + 1] = string.format("  [%s]  %s", status, label)
-        return ok
-    end
 
-    -- executor capability checks
-    _check("cloneref available",         function() assert(type(cloneref) == "function") end)
-    _check("getgenv available",          function() assert(type(getgenv) == "function") end)
-    _check("task.cancel available",      function() assert(type(task.cancel) == "function") end)
-    _check("get_hidden_gui available",   function() assert(type(get_hidden_gui) == "function") end)
-    _check("HttpService reachable",      function()
-        local hs = (cloneref or function(s) return s end)(game:GetService("HttpService"))
-        assert(hs ~= nil)
-    end)
-    _check("TweenService reachable",     function()
-        local ts = (cloneref or function(s) return s end)(game:GetService("TweenService"))
-        assert(ts ~= nil)
-    end)
-    _check("RunService.Heartbeat",       function()
-        local rs = (cloneref or function(s) return s end)(game:GetService("RunService"))
-        assert(rs.Heartbeat ~= nil)
-    end)
-    _check("CoreGui accessible",         function()
-        local cg = game:GetService("CoreGui")
-        assert(cg ~= nil)
-    end)
-    _check("Instance.new functional",    function()
-        local f = Instance.new("Folder")
-        f:Destroy()
-    end)
-
-    _CKLog("── Startup Diagnostics")
-    for _, line in ipairs(DIAG) do _CKLog(line) end
-    _CKLog("── Diagnostics complete")
-end
-
--- ── SERVICE REFS (needed before cleanup so SecureKill can run) ────────────────
 local CoreGui       = game:GetService("CoreGui")
 local Players       = game:GetService("Players")
 local LocalPlayer   = Players.LocalPlayer
 local PlayerGui     = LocalPlayer:FindFirstChild("PlayerGui")
 
--- ══════════════════════════════════════════════════════════════════════════════
--- ADVANCED SMART SINGLE EXECUTION GUARD
---   Step 1 — Kill every ScreenGui we own, identified by a stamped attribute
---             OR by the legacy known-name list (backwards compatible).
---   Step 2 — Cancel every background thread/connection from the old run via
---             getgenv()._CK_CLEANUP (our unified cleanup registered at bottom).
---   Step 3 — Kill any raw coroutines left in getgenv()._CK_COROUTINE_REGISTRY.
---   Step 4 — Wipe the global coroutine registry so this new execution owns it.
--- All steps are pcall-wrapped so a partial old state never crashes the new load.
--- ══════════════════════════════════════════════════════════════════════════════
-local _CK_GUI_TAG    = "_CK_OWNED_GUI"   -- attribute stamped on every ScreenGui we create
-local _CK_LEGACY_NAMES = {               -- backwards-compat name kill list
-    "CompkillerInterface_MainGUI",
-    "Compkiller", "RubicsX", "RubicsX_Main", "CompkillerUI",
-}
+local _CK_GUI_TAG = "__rbxCoreInst"   -- attribute stamped on every ScreenGui we create
+local _CK_LEGACY_NAMES = {}
 
--- ── Step 1: Destroy all owned ScreenGuis across every possible parent ─────────
 local function _SmartKillGUIs()
     local parents = {}
     pcall(function() parents[#parents+1] = CoreGui end)
@@ -121,13 +38,11 @@ local function _SmartKillGUIs()
         pcall(function()
             for _, child in ipairs(parent:GetChildren()) do
                 pcall(function()
-                    -- Kill by our ownership attribute tag
                     if child:IsA("ScreenGui") and child:GetAttribute(_CK_GUI_TAG) then
                         child:Destroy()
                         return
                     end
                 end)
-                -- Kill by legacy known names (old executions without the tag)
                 pcall(function()
                     for _, name in ipairs(_CK_LEGACY_NAMES) do
                         if child.Name == name then
@@ -141,14 +56,12 @@ local function _SmartKillGUIs()
     end
 end
 
--- ── Step 2: Run old unified cleanup (threads, connections, tweens) ────────────
 pcall(function()
-    if getgenv()._CK_CLEANUP then getgenv()._CK_CLEANUP() end
+    if getgenv().__rbxClnSvc then getgenv().__rbxClnSvc() end
 end)
 
--- ── Step 3: Kill raw coroutines from old execution's registry ────────────────
 pcall(function()
-    local reg = getgenv()._CK_COROUTINE_REGISTRY
+    local reg = getgenv().__rbxCoReg
     if type(reg) == "table" then
         for _, co in ipairs(reg) do
             pcall(function()
@@ -160,13 +73,10 @@ pcall(function()
     end
 end)
 
--- ── Step 4: Install fresh coroutine registry for this execution ───────────────
-getgenv()._CK_COROUTINE_REGISTRY = {}
+getgenv().__rbxCoReg = {}
 
--- Run the smart GUI killer now
 _SmartKillGUIs()
 
--- ── Legacy SecureKill shim (kept so any code referencing it still works) ──────
 local function SecureKill(target)
     pcall(function()
         local c = CoreGui:FindFirstChild(target)
@@ -180,19 +90,10 @@ local function SecureKill(target)
     end)
 end
 
--- ── THREAD / CONNECTION SCRUBBER ──────────────────────────────────────────────
 
 local _CK_CONNECTIONS = {}
 local _CK_THREADS     = {}
 
--- ══════════════════════════════════════════════════════════════════════════════
--- [2] GHOST CONNECTION REAPER — Zero-Leak Edition
---     Wraps task.spawn / task.delay / task.defer with tracking versions stored
---     as local helpers (_ckSpawn, _ckDelay, _ckDefer). The global `task` table
---     is NEVER replaced — doing so breaks Roblox's internal scheduler.
---     All library code below uses the _ck* wrappers instead of raw task calls.
---     On re-execute, _CK_CLEANUP iterates _CK_THREADS and cancels every one.
--- ══════════════════════════════════════════════════════════════════════════════
 local function _ckTrackThread(thread)
     if type(thread) == "thread" then
         table.insert(_CK_THREADS, thread)
@@ -200,7 +101,6 @@ local function _ckTrackThread(thread)
     return thread
 end
 
--- Safe tracked wrappers — use these everywhere inside the library
 local function _ckSpawn(fn, ...)
     return _ckTrackThread(task.spawn(fn, ...))
 end
@@ -219,7 +119,6 @@ end
 
 _CKLog("Ghost Connection Reaper active — wrappers ready.")
 
--- ── SERVICE REFS (virtualized for executor compatibility) ─────────────────────
 local cloneref         = (cloneref or function(f) return f end)
 local HttpService      = cloneref(game:GetService("HttpService"))
 local TweenService     = cloneref(game:GetService("TweenService"))
@@ -230,20 +129,10 @@ local TextService      = cloneref(game:GetService("TextService"))
 local CurrentCamera = workspace.CurrentCamera
 local Mouse         = LocalPlayer:GetMouse()
 
--- ══════════════════════════════════════════════════════════════════════════════
--- [3] HARDWARE-AWARE GRAPHICS TIERING
---     Samples FPS for ~30 frames at startup to tier graphical intensity:
---       TIER_HIGH   (>=55 fps) -- full blur, full strokes, all effects on
---       TIER_MEDIUM (35-54 fps)-- reduced blur intensity
---       TIER_LOW    (<35 fps)  -- no blur, no UIStroke, minimal effects
---     Results stored in _HW_TIER (read by Compkiller after init).
--- ══════════════════════════════════════════════════════════════════════════════
 local _HW_TIER      = "HIGH"   -- default; overwritten after sample
 local _HW_FPS_RAW   = 60
 
 do
-    -- Non-blocking: collect samples in background, tier is applied once enough
-    -- data arrives. UI loads immediately with default HIGH tier meanwhile.
     local _hwSamples = {}
     local _hwConn
     _hwConn = RunService.Heartbeat:Connect(function(dt)
@@ -264,7 +153,6 @@ do
             _HW_TIER = "LOW"
         end
 
-        -- Apply tier retroactively once measured
         if Compkiller then
             Compkiller.HardwareTier = _HW_TIER
             Compkiller.HardwareFPS  = math.floor(_HW_FPS_RAW + 0.5)
@@ -279,23 +167,13 @@ do
         _CKLog(string.format("Hardware Tier: %s (avg %.1f fps / %d frames)",
             _HW_TIER, _HW_FPS_RAW, #_hwSamples))
     end)
-    -- Track so cleanup can disconnect it
     table.insert(_CK_CONNECTIONS, _hwConn)
 end
 
--- ══════════════════════════════════════════════════════════════════════════════
--- [4] INSTANCE PROTECTION -- GUI Shield
---     Finds the safest hidden container for the ScreenGui:
---       Priority 1: get_hidden_gui()   (executor-provided hidden layer)
---       Priority 2: CoreGui            (survives most scanner loops)
---       Priority 3: PlayerGui          (fallback)
---     Also applies protect_gui if available to mask from game scanners.
--- ══════════════════════════════════════════════════════════════════════════════
 local _GUI_PARENT
 local _GUI_SHIELD_METHOD = "PlayerGui"
 
 do
-    -- Priority 1 -- executor hidden GUI layer
     local ok1, hgui = pcall(function()
         return get_hidden_gui and get_hidden_gui()
     end)
@@ -304,7 +182,6 @@ do
         _GUI_SHIELD_METHOD = "get_hidden_gui"
     end
 
-    -- Priority 2 -- CoreGui (requires executor permission)
     if not _GUI_PARENT then
         local ok2 = pcall(function()
             local probe = Instance.new("ScreenGui")
@@ -317,7 +194,6 @@ do
         end
     end
 
-    -- Priority 3 -- PlayerGui fallback
     if not _GUI_PARENT then
         _GUI_PARENT        = PlayerGui
         _GUI_SHIELD_METHOD = "PlayerGui"
@@ -326,15 +202,9 @@ do
     _CKLog(string.format("GUI Shield: using '%s' as safe parent.", _GUI_SHIELD_METHOD))
 end
 
--- ── GUI NAME ENCRYPTION ──────────────────────────────────────────────────────
--- Generates an obfuscated ScreenGui name that blends into Roblox system names.
--- Anti-cheats scanning for script/exploit keywords will find nothing suspicious.
--- Format: mimics internal Roblox GUI service names (e.g. "RbxGui_[hex]_Svc")
--- A different name is generated every inject; old name stored for smart kill.
 local _CK_ENCRYPTED_NAMES = {}   -- registry of all encrypted names this run
 
 local function _EncryptGuiName()
-    -- Prefix pool — indistinguishable from Roblox internal systems
     local prefixes = {
         "RbxGui", "CoreUISvc", "TopbarPlus", "RbxHud",
         "SystemUI", "RenderSvc", "InputSvc", "GuiSvc",
@@ -345,7 +215,6 @@ local function _EncryptGuiName()
         "Module", "System", "Runtime", "Instance",
     }
 
-    -- Seed with tick() + math.random for uniqueness per inject
     local seed   = math.floor(tick() * 1000) % 0xFFFF
     local hexPart = string.format("%04X", seed)
     local rndSuffix = math.random(1, #suffixes)
@@ -353,22 +222,20 @@ local function _EncryptGuiName()
 
     local name = prefixes[rndPrefix] .. "_" .. hexPart .. "_" .. suffixes[rndSuffix]
 
-    -- Register so smart kill can find it next inject
     table.insert(_CK_ENCRYPTED_NAMES, name)
     pcall(function()
-        local reg = getgenv()._CK_GUI_NAME_REGISTRY
+        local reg = getgenv().__rbxGuiReg
         if type(reg) ~= "table" then
-            getgenv()._CK_GUI_NAME_REGISTRY = {}
+            getgenv().__rbxGuiReg = {}
         end
-        table.insert(getgenv()._CK_GUI_NAME_REGISTRY, name)
+        table.insert(getgenv().__rbxGuiReg, name)
     end)
 
     return name
 end
 
--- On every new execution, kill any GUIs from the old encrypted name registry
 pcall(function()
-    local reg = getgenv()._CK_GUI_NAME_REGISTRY
+    local reg = getgenv().__rbxGuiReg
     if type(reg) == "table" then
         for _, oldName in ipairs(reg) do
             pcall(function()
@@ -383,19 +250,15 @@ pcall(function()
             end)
         end
     end
-    getgenv()._CK_GUI_NAME_REGISTRY = {}   -- reset for this run
+    getgenv().__rbxGuiReg = {}   -- reset for this run
 end)
 
--- Applies shield when parenting the ScreenGui
--- Now also assigns an encrypted name before parenting
 local function _ShieldParent(screenGui)
-    -- Assign encrypted obfuscated name (replaces static "CompkillerInterface_MainGUI")
     pcall(function()
         local encName = _EncryptGuiName()
         screenGui.Name = encName
         _CKLog("GuiEncrypt: renamed → " .. encName)
     end)
-    -- Apply executor protect_gui mask
     pcall(function()
         local _protectFn = protect_gui or protectgui or (syn and syn.protect_gui)
         if _protectFn then _protectFn(screenGui) end
@@ -403,8 +266,6 @@ local function _ShieldParent(screenGui)
     pcall(function() screenGui.Parent = _GUI_PARENT end)
 end
 
--- ── OPTIMIZER STATE ───────────────────────────────────────────────────────────
--- Declared early so _Animation can read it. Full API is wired at the bottom.
 local _OPT = {
     Enabled        = false,   -- use Compkiller:EnableAdvancedOptimizations(true) to turn on
     AnimThreshold  = 30,      -- hard floor; below this, skip TweenService entirely
@@ -429,15 +290,12 @@ local function _TrackThread(thread)
     return thread
 end
 
--- ── UNIFIED CLEANUP (stored globally so next execution can call it) ───────────
-getgenv()._CK_CLEANUP = function()
-    -- 1. Cancel all tracked background threads
+getgenv().__rbxClnSvc = function()
     for _, t in ipairs(_CK_THREADS) do
         pcall(task.cancel, t)
     end
     _CK_THREADS = {}
 
-    -- 2. Cancel all orphaned tweens
     for _, tw in ipairs(_OPT.ActiveTweens) do
         pcall(function()
             if tw and tw.PlaybackState == Enum.PlaybackState.Playing then
@@ -447,39 +305,31 @@ getgenv()._CK_CLEANUP = function()
     end
     _OPT.ActiveTweens = {}
 
-    -- 3. Disconnect all tracked signal connections
     for _, conn in ipairs(_CK_CONNECTIONS) do
         pcall(function() if conn then conn:Disconnect() end end)
     end
     _CK_CONNECTIONS = {}
 
-    -- 4. Destroy the random-named Notification ScreenGui (can't be killed by name)
     pcall(function()
         if Compkiller and Compkiller.NOTIFY_CACHE and Compkiller.NOTIFY_CACHE._gui then
             Compkiller.NOTIFY_CACHE._gui:Destroy()
         end
     end)
-    -- Clear both caches — their root instances are destroyed by SecureKill / above.
-    -- This forces a clean rebuild on the next execution instead of returning dead refs.
     if Compkiller then
         Compkiller.NOTIFY_CACHE     = nil
         Compkiller.__KEYBINDS_CACHE = nil
         Compkiller.Windows          = {}
         Compkiller.WindowsNil       = {}
     end
-    -- NOTE: The main "CompkillerInterface_MainGUI" window is killed by SecureKill
-    -- at the top of the script (before this cleanup runs), which is correct.
 
-    -- 5. Reset FPS sampler — prevents stale samples from skewing the rolling average
     _OPT.FpsSamples    = {}
     _OPT.FPS           = 60
     _OPT.MonitorThread = nil
     _OPT.ActiveTweenMap = {}
     _OPT._DummyTween   = nil   -- rebuilt at bottom of next execution
 
-    -- 6. Kill raw coroutines in the registry and reset it
     pcall(function()
-        local reg = getgenv()._CK_COROUTINE_REGISTRY
+        local reg = getgenv().__rbxCoReg
         if type(reg) == "table" then
             for _, co in ipairs(reg) do
                 pcall(function()
@@ -489,7 +339,7 @@ getgenv()._CK_CLEANUP = function()
                 end)
             end
         end
-        getgenv()._CK_COROUTINE_REGISTRY = {}
+        getgenv().__rbxCoReg = {}
     end)
 end
 
@@ -527,24 +377,19 @@ Compkiller.Colors = {
 	HighStrokeColor = Color3.fromRGB(55, 56, 63),
 };
 
--- ── HARDWARE TIERING APPLICATION ─────────────────────────────────────────────
--- Apply tier results to PerformanceMode and blur defaults right after Colors.
 do
     if _HW_TIER == "LOW" then
         Compkiller.PerformanceMode = true   -- disables blur in _Blur()
-        -- Soften stroke colors to reduce GPU load on UIStroke
         Compkiller.Colors.StrokeColor     = Color3.fromRGB(0, 0, 0)  -- transparent black
         Compkiller.Colors.HighStrokeColor = Color3.fromRGB(0, 0, 0)
         _CKLog("Low-end device — PerformanceMode ON, strokes reduced.")
     elseif _HW_TIER == "MEDIUM" then
-        -- Keep blur but reduce its effect (done inside _Blur via SecurityConfig flag)
         Compkiller.PerformanceMode = false
         _CKLog("Mid-range device — standard mode.")
     else
         Compkiller.PerformanceMode = false
         _CKLog("High-end device — all effects enabled.")
     end
-    -- Expose tier publicly so scripts can read it
     Compkiller.HardwareTier    = _HW_TIER
     Compkiller.HardwareFPS     = math.floor(_HW_FPS_RAW + 0.5)
     Compkiller.GuiShieldMethod = _GUI_SHIELD_METHOD
@@ -1586,11 +1431,10 @@ function Compkiller:OptimizeMode(v)
 	Compkiller.PerformanceMode = v;
 end;
 
--- Toggle debug log output. Call from your main script after loading the lib.
 function Compkiller:SetDebug(enabled: boolean)
 	self.Debug = (enabled == true)
 	_CK_DEBUG  = self.Debug   -- sync boot flag too
-	print("[CK] Debug logging " .. (self.Debug and "ENABLED" or "DISABLED"))
+	_CKLog("Debug logging " .. (self.Debug and "ENABLED" or "DISABLED"))
 	return self.Debug
 end
 
@@ -1663,7 +1507,6 @@ function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
 end;
 
 function Compkiller:_Animation(Self: Instance , Info: TweenInfo , Property :{[K] : V})
-	-- Route through SmartAnimation when the optimizer is active
 	if _OPT and _OPT.Enabled then
 		return self:_SmartAnimation(Self, Info, Property)
 	end
@@ -3382,9 +3225,6 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 end;
 
 function Compkiller:_DrawKeybinds(Window: ScreenGui)
-	-- Only reuse the cache if the keybind Frame is still alive inside a valid window.
-	-- After re-execute the old ScreenGui is destroyed; the stale cache would return
-	-- a parented-to-nil Frame, which is what causes the ghost black-square panel.
 	if Compkiller.__KEYBINDS_CACHE and Compkiller.__KEYBINDS_CACHE.Root
 		and Compkiller.__KEYBINDS_CACHE.Root.Parent ~= nil then
 		return Compkiller.__KEYBINDS_CACHE;
@@ -6524,9 +6364,7 @@ function Compkiller.new(Config : Window)
 	CompKiller.IgnoreGuiInset = true;
 	CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global;
 
-	-- Smart Single-Exec: stamp ownership tag + apply encrypted name via GUI Shield
 	pcall(function() CompKiller:SetAttribute(_CK_GUI_TAG, true) end)
-	-- [4] GUI Shield: encrypted name + safest parent + protect_gui mask
 	_ShieldParent(CompKiller);
 
 	WindowArgs.Root = CompKiller;
@@ -7265,7 +7103,6 @@ function Compkiller.new(Config : Window)
 		UICorner.CornerRadius = UDim.new(0, 4)
 		UICorner.Parent = Highlight
 
-		-- Creating Container --
 
 		local ContainerTab = Instance.new("Frame")
 		local MainFrame = Instance.new("Frame")
@@ -7647,7 +7484,6 @@ function Compkiller.new(Config : Window)
 			end;
 		end))
 
-		--[[local Parent: ScrollingFrame = UilistLayout.Parent;
 
 		Parent = Parent or Scrolling;
 
@@ -8906,7 +8742,6 @@ function Compkiller.new(Config : Window)
 			Left.BottomImage = ""
 			Left.ScrollBarThickness = 0
 			Left.TopImage = ""
-			--Left.AutomaticCanvasSize = Enum.AutomaticSize.Y;
 			Left.CanvasSize = UDim2.new(0, 0, 0, 0)
 
 			UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
@@ -8931,7 +8766,6 @@ function Compkiller.new(Config : Window)
 			Right.Size = UDim2.new(0.5, -3, 1, 0)
 			Right.ZIndex = 8
 			Right.BottomImage = ""
-			--Right.AutomaticCanvasSize = Enum.AutomaticSize.Y;
 			Right.CanvasSize = UDim2.new(0, 0, 0, 0)
 			Right.ScrollBarThickness = 0
 			Right.TopImage = ""
@@ -9104,7 +8938,6 @@ function Compkiller.new(Config : Window)
 			Left.BottomImage = ""
 			Left.ScrollBarThickness = 0
 			Left.TopImage = ""
-			--Left.AutomaticCanvasSize = Enum.AutomaticSize.Y;
 			Left.CanvasSize = UDim2.new(0, 0, 0, 0)
 
 
@@ -9132,7 +8965,6 @@ function Compkiller.new(Config : Window)
 			Right.BottomImage = ""
 			Right.ScrollBarThickness = 0
 			Right.TopImage = ""
-			--Right.AutomaticCanvasSize = Enum.AutomaticSize.Y;
 			Right.CanvasSize = UDim2.new(0, 0, 0, 0)
 
 			Upvalue.Left = Left;
@@ -9384,8 +9216,6 @@ function Compkiller.new(Config : Window)
 			end;
 		end);
 
-		--TabArgs.LeftThread();
-		--TabArgs.RightThread();
 
 		function TabArgs:DrawSection(config: Section)
 			config = Compkiller.__CONFIG(config,{
@@ -9659,9 +9489,6 @@ function Compkiller.new(Config : Window)
 				refreshScale();
 			end);
 
-			-- If the section was configured to start collapsed, flip IsOpen now
-			-- and let the existing refresh/chevron rotation handle the visual state.
-			-- This uses the real internal machinery — no fake ContentContainer search.
 			if config.Closed then
 				IsOpen = false
 				SectionClose.Rotation = -180  -- chevron already points "up" when open; point down when closed
@@ -10548,9 +10375,6 @@ function Compkiller:Loader(IconId,Duration)
 end;
 
 function Compkiller.newNotify()
-	-- Return cache only if the underlying ScreenGui is still alive.
-	-- On re-execute the old ScreenGui gets destroyed by SecureKill; the stale
-	-- cache pointer would return a dead reference and break all notifications.
 	if Compkiller.NOTIFY_CACHE and Compkiller.NOTIFY_CACHE._gui
 		and Compkiller.NOTIFY_CACHE._gui.Parent ~= nil then
 		return Compkiller.NOTIFY_CACHE;
@@ -10810,43 +10634,15 @@ end;
 Compkiller.NilFolder.Name = "Nil-Instances";
 
 
--- ============================================================
---  ADVANCED GUI OPTIMIZER  (v5 — proactive, always noticeable)
 --
---  WHAT MAKES IT FEEL DIFFERENT (even at 60fps):
 --
---  1. ADAPTIVE DURATION SCALING
---     Every tween duration is scaled by live FPS ratio:
---       60fps → 100% original duration
---       45fps →  75% duration  (noticeably snappier)
---       30fps →  50% duration  (very snappy)
---       <30fps → instant-set   (no TweenService at all)
---     You feel this on every open/close/hover/toggle.
 --
---  2. TWEEN DEDUPLICATION
---     If an instance+property is already being tweened and a new
---     tween fires for the same target, the old one is cancelled first.
---     Stops "fighting tweens" on rapid hover-in/hover-out/toggle.
---     Visible as smoother response with no stuttering.
 --
---  3. INSTANT-SET FALLBACK (below AnimThreshold, default 30fps)
---     Zero TweenService allocation. Uses a shared persistent stub
---     so there are zero extra Instance allocations per call.
 --
 --  4. BACKGROUND SWEEP
---     Cancels completed/orphaned tweens from ActiveTweens list.
---     Safety net — auto-removal on Completed handles most cases.
 --
---  API (unchanged from before):
---    Compkiller:EnableAdvancedOptimizations(true/false)
---    Compkiller:CleanupAll()
 --    Compkiller:GetFPS()
---    Compkiller:GetOptimizerStats()  -- now includes DedupCancels
---    Compkiller:SetAnimThreshold(fps)
---    Compkiller:SetMemInterval(secs)
--- ============================================================
 
--- ── ALWAYS-ON FPS SAMPLER (running-sum, O(1) per frame) ──────
 do
     local _runSum = 0
     local _fpsSamplerConn = RunService.Heartbeat:Connect(function(dt)
@@ -10861,7 +10657,6 @@ do
     table.insert(_CK_CONNECTIONS, _fpsSamplerConn)
 end
 
--- ── PUBLIC API ────────────────────────────────────────────────
 
 function Compkiller:EnableAdvancedOptimizations(enabled: boolean)
     _OPT.Enabled = (enabled == true)
@@ -10885,14 +10680,12 @@ function Compkiller:EnableAdvancedOptimizations(enabled: boolean)
     else
         _OPT.MonitorThread = nil
     end
-    print("[CK] AdvancedOptimizations: " .. (_OPT.Enabled and "ON" or "OFF")
+    _CKLog("AdvancedOptimizations: " .. (_OPT.Enabled and "ON" or "OFF")
         .. " | Threshold=" .. _OPT.AnimThreshold .. "fps"
         .. " | MemInterval=" .. _OPT.MemInterval .. "s")
     return _OPT.Enabled
 end
 
--- CleanupAll: force-cancel every tracked tween + wipe dedup map.
--- GUI animations snap to their final values immediately.
 function Compkiller:CleanupAll()
     local cancelled = 0
     for key, tw in pairs(_OPT.ActiveTweenMap) do
@@ -10913,18 +10706,16 @@ function Compkiller:CleanupAll()
     _OPT.ActiveTweens = {}
     _OPT.Stats.TweensCancelled += cancelled
     Compkiller:_SweepMemory()
-    print("[CK] CleanupAll: cancelled " .. cancelled .. " tweens.")
+    _CKLog("CleanupAll: cancelled " .. cancelled .. " tweens.")
     return cancelled
 end
 
 function Compkiller:GetFPS(): number
     local fps = math.floor(_OPT.FPS + 0.5)
-    print("[CK] GetFPS: " .. fps .. " fps")
+    _CKLog("GetFPS: " .. fps .. " fps")
     return fps
 end
 
--- GetOptimizerStats: now includes DedupCancels so you can see
--- how many redundant tweens were stopped.
 function Compkiller:GetOptimizerStats()
     return {
         FPS             = self:GetFPS(),
@@ -10941,26 +10732,22 @@ end
 
 function Compkiller:SetAnimThreshold(fps: number)
     _OPT.AnimThreshold = math.clamp(math.floor(fps), 10, 144)
-    print("[CK] SetAnimThreshold: " .. _OPT.AnimThreshold .. " fps")
+    _CKLog("SetAnimThreshold: " .. _OPT.AnimThreshold .. " fps")
     return _OPT.AnimThreshold
 end
 
 function Compkiller:SetMemInterval(seconds: number)
     _OPT.MemInterval = math.max(10, seconds)
-    print("[CK] SetMemInterval: " .. _OPT.MemInterval .. "s")
+    _CKLog("SetMemInterval: " .. _OPT.MemInterval .. "s")
     return _OPT.MemInterval
 end
 
--- ── INTERNAL — _SmartAnimation ───────────────────────────────
 --
---  Tier 1 (FPS >= AnimThreshold): adaptive duration + dedup cancel
---  Tier 2 (FPS <  AnimThreshold): instant property-set, no TweenService
 --
 function Compkiller:_SmartAnimation(Self: Instance, Info: TweenInfo, Property: {[any]: any})
     local currentFPS = _OPT.FPS
     local threshold  = _OPT.AnimThreshold
 
-    -- ── TIER 2: INSTANT-SET ───────────────────────────────────
     if currentFPS < threshold then
         for prop, val in pairs(Property) do
             pcall(function() Self[prop] = val end)
@@ -10969,17 +10756,11 @@ function Compkiller:_SmartAnimation(Self: Instance, Info: TweenInfo, Property: {
         return _OPT._DummyTween
     end
 
-    -- ── TIER 1: ADAPTIVE TWEEN ────────────────────────────────
 
-    -- Scale duration by live FPS ratio (clamped to 50%–100% of original).
-    -- At 60fps: scale=1.0  → full duration.
-    -- At 45fps: scale=0.75 → 75% — noticeably snappier.
-    -- At 30fps: scale=0.5  → 50% — very snappy (just above instant-set floor).
     local baseDuration = (Info and Info.Time) or 0.25
     local fpsScale     = math.clamp(currentFPS / 60, 0.5, 1.0)
     local newDuration  = math.max(0.05, baseDuration * fpsScale)
 
-    -- Preserve original easing if supplied, just change the time.
     local newInfo
     if Info then
         newInfo = TweenInfo.new(
@@ -10994,8 +10775,6 @@ function Compkiller:_SmartAnimation(Self: Instance, Info: TweenInfo, Property: {
         newInfo = TweenInfo.new(newDuration)
     end
 
-    -- DEDUPLICATION: cancel any existing tween for the same instance+property.
-    -- Prevents "fighting tweens" when hover/toggle events fire rapidly.
     for prop in pairs(Property) do
         local dedupKey = tostring(Self) .. "|" .. prop
         local existing = _OPT.ActiveTweenMap[dedupKey]
@@ -11009,7 +10788,6 @@ function Compkiller:_SmartAnimation(Self: Instance, Info: TweenInfo, Property: {
         end
     end
 
-    -- Create, register, and play the scaled tween.
     local tween = TweenService:Create(Self, newInfo, Property)
     table.insert(_OPT.ActiveTweens, tween)
     for prop in pairs(Property) do
@@ -11017,7 +10795,6 @@ function Compkiller:_SmartAnimation(Self: Instance, Info: TweenInfo, Property: {
     end
     tween:Play()
 
-    -- Auto-clean on natural completion — keeps ActiveTweens list tight.
     tween.Completed:Connect(function()
         local idx = table.find(_OPT.ActiveTweens, tween)
         if idx then table.remove(_OPT.ActiveTweens, idx) end
@@ -11032,7 +10809,6 @@ function Compkiller:_SmartAnimation(Self: Instance, Info: TweenInfo, Property: {
     return tween
 end
 
--- ── INTERNAL — _SweepMemory ──────────────────────────────────
 function Compkiller:_SweepMemory()
     local kept = {}
     for _, tw in ipairs(_OPT.ActiveTweens) do
@@ -11046,7 +10822,6 @@ function Compkiller:_SweepMemory()
     _OPT.Stats.LastSweepAt  = tick()
 end
 
--- ── DUMMY TWEEN STUB (one per execution, reused for all instant-sets) ─
 do
     local _dummyBE   = Instance.new("BindableEvent")
     _dummyBE.Name    = "CK_DummyTween"
@@ -11062,16 +10837,6 @@ do
 end
 
 
--- ════════════════════════════════════════════════════════════════════════════════════
--- [6] EXTENDED COMMAND API — Optimization Controls
---     Manual knobs exposed on the Compkiller object:
---       :ForceGC()               — forces a full Lua garbage collection cycle
---       :SetHardwareTier(tier)   — override auto-detected tier ("HIGH"/"MEDIUM"/"LOW")
---       :SetSmartAnimations(bool)— toggle _SmartAnimation routing on/off at runtime
---       :DumpStats()             — prints a full execution / optimizer stat block
--- ════════════════════════════════════════════════════════════════════════════════════
-
--- Force a full GC pass and report memory delta
 function Compkiller:ForceGC()
     local before = math.floor((collectgarbage("count") or 0) + 0.5)
     collectgarbage("collect")
@@ -11081,40 +10846,37 @@ function Compkiller:ForceGC()
     return freed
 end
 
--- Manually override the hardware tier at runtime
 function Compkiller:SetHardwareTier(tier: string)
     local valid = {HIGH = true, MEDIUM = true, LOW = true}
     tier = tostring(tier):upper()
     if not valid[tier] then
-        print("[CK] SetHardwareTier: invalid tier '" .. tier .. "'. Use HIGH/MEDIUM/LOW.")
+        _CKLog("SetHardwareTier: invalid tier '" .. tier .. "'. Use HIGH/MEDIUM/LOW.")
         return false
     end
     self.HardwareTier = tier
     if tier == "LOW" then
         self.PerformanceMode = true
         _OPT.AnimThreshold   = 60     -- instant-set everything
-        print("[CK] SetHardwareTier → LOW  | PerformanceMode=true | Threshold=60fps")
+        _CKLog("SetHardwareTier → LOW  | PerformanceMode=true | Threshold=60fps")
     elseif tier == "MEDIUM" then
         self.PerformanceMode = false
         _OPT.AnimThreshold   = 40
-        print("[CK] SetHardwareTier → MEDIUM | PerformanceMode=false | Threshold=40fps")
+        _CKLog("SetHardwareTier → MEDIUM | PerformanceMode=false | Threshold=40fps")
     else
         self.PerformanceMode = false
         _OPT.AnimThreshold   = 30     -- default threshold
-        print("[CK] SetHardwareTier → HIGH  | PerformanceMode=false | Threshold=30fps")
+        _CKLog("SetHardwareTier → HIGH  | PerformanceMode=false | Threshold=30fps")
     end
     return self.HardwareTier
 end
 
--- Toggle whether _Animation routes through _SmartAnimation
 function Compkiller:SetSmartAnimations(enabled: boolean)
     _OPT.Enabled = (enabled == true)
-    print("[CK] SetSmartAnimations: " .. (_OPT.Enabled and "ENABLED" or "DISABLED")
+    _CKLog("SetSmartAnimations: " .. (_OPT.Enabled and "ENABLED" or "DISABLED")
         .. " | Threshold=" .. _OPT.AnimThreshold .. "fps")
     return _OPT.Enabled
 end
 
--- Dump a full formatted stat block to the output console
 function Compkiller:DumpStats()
     local stats = self:GetOptimizerStats()
     local lines = {
@@ -11142,34 +10904,22 @@ function Compkiller:DumpStats()
         "║  Windows Open    : " .. #self.Windows,
         "╚══════════════════════════════════════════",
     }
-    for _, line in ipairs(lines) do print(line) end
+    print(table.concat(lines, "\n"))
     return stats
 end
 
 
--- ════════════════════════════════════════════════════════════════════════════════════
--- [7/8] ADVANCED BACKGROUND FUNCTIONS
--- ════════════════════════════════════════════════════════════════════════════════════
-
--- ── [8a] SMART SINGLE-EXECUTION GUARD ────────────────────────────────────────────
--- Runtime-callable alias for the top-of-script Smart Single Execution guard.
--- Destroys all owned GUIs (by attribute tag + name registry) and cancels every
--- tracked thread, connection, tween, and raw coroutine.
 function Compkiller:HardReset()
     _CKLog("HardReset: tearing down...")
     _SmartKillGUIs()
-    pcall(getgenv()._CK_CLEANUP)
+    pcall(getgenv().__rbxClnSvc)
     _CKLog("HardReset: done.")
 end
 
 
--- ── [8b] WINDOW POSITION MEMORY ──────────────────────────────────────────────────
--- Persists the last dragged position of the main window across re-injects
--- by storing it in getgenv(). Hooks into the Drag function's InputEnded event.
 do
-    local _POS_KEY = "_CK_WIN_POS"
+    local _POS_KEY = "__rbxWPos"
 
-    -- Read saved position (returns UDim2 or nil)
     function Compkiller:LoadWindowPosition()
         local raw = getgenv()[_POS_KEY]
         if raw and type(raw) == "table" then
@@ -11178,7 +10928,6 @@ do
         return nil
     end
 
-    -- Save a UDim2 position
     function Compkiller:SaveWindowPosition(pos: UDim2)
         if not pos then return end
         getgenv()[_POS_KEY] = {
@@ -11187,8 +10936,6 @@ do
         }
     end
 
-    -- Hook: called by newWindow after Drag is set up on MainFrame
-    -- Restores saved pos and wires auto-save on drag-end
     function Compkiller:_ApplyPositionMemory(MainFrame: Frame, MovementFrame: Frame)
         -- Restore
         local saved = self:LoadWindowPosition()
@@ -11198,7 +10945,6 @@ do
                 saved.X.Scale, saved.X.Offset, saved.Y.Scale, saved.Y.Offset))
         end
 
-        -- Auto-save on every drag release
         _TrackConn(UserInputService.InputEnded:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch then
@@ -11209,12 +10955,9 @@ do
 end
 
 
--- ── [8c] SAFE-EXECUTE SANDBOX ────────────────────────────────────────────────────
--- Runs a function silently. Errors are caught and optionally forwarded to a
--- callback — they never bubble up to the game's error handler / server logs.
 function Compkiller:SafeExec(fn, onError)
     if type(fn) ~= "function" then
-        print("[CK] SafeExec: argument must be a function, got " .. type(fn))
+        _CKLog("SafeExec: argument must be a function, got " .. type(fn))
         return false, "invalid argument"
     end
     local ok, err = xpcall(fn, function(e)
@@ -11228,14 +10971,10 @@ function Compkiller:SafeExec(fn, onError)
             pcall(onError, err)
         end
     end
-    -- always returns: true/false, error string or nil
     return ok, ok and nil or tostring(err)
 end
 
 
--- ── [8d] EVENT JANITOR ───────────────────────────────────────────────────────────
--- Lightweight Janitor class. Create one per logical group of connections/instances.
--- Call :Destroy() to bulk-clean everything registered in that group.
 do
     local Janitor = {}
     Janitor.__index = Janitor
@@ -11244,25 +10983,21 @@ do
         return setmetatable({ _items = {} }, Janitor)
     end
 
-    -- Register a connection (anything with :Disconnect())
     function Janitor:Add(connection)
         table.insert(self._items, { type = "conn", ref = connection })
         return connection
     end
 
-    -- Register an Instance for :Destroy()
     function Janitor:AddInstance(instance)
         table.insert(self._items, { type = "inst", ref = instance })
         return instance
     end
 
-    -- Register an arbitrary cleanup function
     function Janitor:AddFn(fn)
         table.insert(self._items, { type = "fn", ref = fn })
         return fn
     end
 
-    -- Destroy everything registered
     function Janitor:Destroy()
         for _, item in ipairs(self._items) do
             pcall(function()
@@ -11278,32 +11013,20 @@ do
         self._items = {}
     end
 
-    -- Expose factory on Compkiller
     function Compkiller:NewJanitor()
         return Janitor.new()
     end
 end
 
 
--- ── [8e] SMART 3D RENDERING MANAGER ─────────────────────────────────────────────
 -- Two modes:
 --
---   AUTO MODE (:StartRenderManager())
---     Mirrors the window focus state:
---       Window loses focus → 3D suppressed + FPS capped to 10 (saves CPU/GPU)
---       Window regains focus → 3D restored + FPS cap lifted to 360
---     This is the recommended mode for background auto-farming.
 --
---   MANUAL MODE (:RenderCull() / :RenderResume())
---     Caller explicitly suppresses or restores 3D at any time.
 --
---   Both modes save original camera state in getgenv() so re-inject never
---   permanently breaks the camera.
 do
-    local _CULL_KEY    = "_CK_CULL_STATE"
-    local _RENDER_CONN = "_CK_RENDER_CONNS"
+    local _CULL_KEY    = "__rbxCullSt"
+    local _RENDER_CONN = "__rbxRndConn"
 
-    -- ── Shared helpers ────────────────────────────────────────────────────────
     local function _SaveCameraState()
         local cam = workspace.CurrentCamera
         local origFOV, origType, origCFrame
@@ -11326,7 +11049,6 @@ do
             cam.FieldOfView = 1
             cam.CFrame      = CFrame.new(0, -1e6, 0)
         end)
-        -- Cap FPS to 10 to free CPU during background farming
         pcall(function() setfpscap(10) end)
     end
 
@@ -11341,7 +11063,6 @@ do
         pcall(function() setfpscap(360) end)
     end
 
-    -- ── Manual API ────────────────────────────────────────────────────────────
     function Compkiller:RenderCull()
         if getgenv()[_CULL_KEY] then
             _CKLog("RenderCull: already active.")
@@ -11363,14 +11084,11 @@ do
         _CKLog("RenderResume: 3D restored.")
     end
 
-    -- ── Auto Focus Manager ────────────────────────────────────────────────────
     function Compkiller:StartRenderManager()
-        -- Disconnect any previous render manager connections
         self:StopRenderManager()
 
         local conns = {}
 
-        -- Window loses focus → suppress rendering (background farming mode)
         local c1 = _TrackConn(UserInputService.WindowFocusReleased:Connect(function()
             if not getgenv()[_CULL_KEY] then
                 getgenv()[_CULL_KEY] = _SaveCameraState()
@@ -11380,7 +11098,6 @@ do
         end))
         table.insert(conns, c1)
 
-        -- Window regains focus → restore rendering
         local c2 = _TrackConn(UserInputService.WindowFocused:Connect(function()
             local state = getgenv()[_CULL_KEY]
             if state then
@@ -11392,17 +11109,15 @@ do
         table.insert(conns, c2)
 
         getgenv()[_RENDER_CONN] = conns
-        print("[CK] StartRenderManager: active — focus-loss will suppress 3D + cap FPS to 10.")
+        _CKLog("StartRenderManager: active — focus-loss will suppress 3D + cap FPS to 10.")
     end
 
     function Compkiller:StopRenderManager()
-        -- Restore 3D if currently suppressed
         local state = getgenv()[_CULL_KEY]
         if state then
             _RestoreRender(state)
             getgenv()[_CULL_KEY] = nil
         end
-        -- Disconnect focus listeners
         local conns = getgenv()[_RENDER_CONN]
         if type(conns) == "table" then
             for _, c in ipairs(conns) do
@@ -11410,17 +11125,12 @@ do
             end
         end
         getgenv()[_RENDER_CONN] = nil
-        print("[CK] StopRenderManager: stopped, 3D restored.")
+        _CKLog("StopRenderManager: stopped, 3D restored.")
     end
 end
 
 
--- ── [8f] REMOTEEVENT RATE LIMITER ────────────────────────────────────────────────
--- Wraps RemoteEvent:FireServer() calls through a token-bucket queue.
--- Prevents spam-kick by enforcing a minimum gap between server requests.
 -- Usage:
---   local limiter = Compkiller:NewRateLimiter(0.25)  -- min 0.25s between fires
---   limiter:Fire(remote, arg1, arg2)
 do
     local RateLimiter = {}
     RateLimiter.__index = RateLimiter
@@ -11463,16 +11173,10 @@ do
 end
 
 
--- ── [8g] ANOMALY DETECTOR ────────────────────────────────────────────────────────
--- Monitors core Lua globals for tampering by comparing live values against a
--- baseline captured at StartAnomalyDetector() time (lazy — not at load time,
--- which avoids false positives from executor pre-hooks).
--- Call :StartAnomalyDetector() to begin, :StopAnomalyDetector() to stop.
 do
     local _DETECTOR_THREAD = nil
     local _BASELINE        = nil   -- populated lazily on first Start call
 
-    -- Keys to monitor: {global_table, key, friendly_label}
     local _WATCH = {
         { _G,      "rawget",        "rawget"        },
         { _G,      "rawset",        "rawset"        },
@@ -11506,7 +11210,6 @@ do
         end
         interval = math.max(2, interval or 5)
 
-        -- Capture baseline NOW (lazy), after executor has finished its own hooks
         _BASELINE = _captureBaseline()
         _CKLog(string.format("Anomaly: baseline captured, scanning every %ds.", interval))
 
