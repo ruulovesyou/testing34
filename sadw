@@ -11293,7 +11293,7 @@ end
 do
     Compkiller._RemoteQueues = {}
 
-    function Compkiller, interval, maxQueue)
+    function Compkiller:RateLimitRemote(remote, interval, maxQueue)
         interval = math.max(interval or 0.1, 0.03)
         maxQueue = math.clamp(maxQueue or 10, 1, 100)
 
@@ -11474,3 +11474,8 @@ else
 end
 
 return Compkiller
+
+
+
+
+
