@@ -15,6 +15,15 @@
     [7] Advanced Background Functions — pos memory, sandbox, janitor, 3D cull, rate limiter, anomaly detector
 --]]
 
+-- ── DEBUG LOG GATE ────────────────────────────────────────────────────────────
+-- Set _CK_DEBUG = true to see all internal messages. false = silent injection.
+local _CK_DEBUG = false
+local function _CKLog(msg)
+    if _CK_DEBUG then
+        print("[CK] " .. tostring(msg))
+    end
+end
+
 -- ══════════════════════════════════════════════════════════════════════════════
 -- VERSION BANNER  (update _CK_VERSION each release)
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -25,16 +34,6 @@ _CKLog(string.format("✦ Loading v%s (%s) — %s",
     os.date and os.date("%Y-%m-%d %H:%M:%S") or "unknown time"))
 
 if not game:IsLoaded() then game.Loaded:Wait() end
-
--- ── DEBUG LOG GATE ────────────────────────────────────────────────────────────
--- Set _CK_DEBUG = true to see all internal Compkiller messages in the output.
--- Set _CK_DEBUG = false (default) for a completely silent injection.
-local _CK_DEBUG = false
-local function _CKLog(msg)
-    if _CK_DEBUG then
-        print("[CK] " .. tostring(msg))
-    end
-end
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- [5] STARTUP DIAGNOSTICS — runs first so failures are caught before UI builds
