@@ -22,7 +22,7 @@ local function safeInit(name, func)
 end
 
 -- ── Service bootstrap (single, cloneref-protected declarations) ──────────────
-local cloneref: cloneref = cloneref or function(f) return f end;
+local cloneref = cloneref or function(f) return f end;
 
 -- Safely get services with fallbacks
 local function safeGetService(name)
@@ -37,25 +37,25 @@ local function safeGetService(name)
     return success and result or nil
 end
 
-local TweenService: TweenService = safeGetService('TweenService') or game:GetService('TweenService');
-local UserInputService: UserInputService = safeGetService('UserInputService') or game:GetService('UserInputService');
-local TextService: TextService = safeGetService('TextService') or game:GetService('TextService');
-local RunService: RunService = safeGetService('RunService') or game:GetService('RunService');
-local Players: Players = safeGetService('Players') or game:GetService('Players');
-local HttpService: HttpService = safeGetService('HttpService') or game:GetService('HttpService');
+local TweenService = safeGetService('TweenService') or game:GetService('TweenService');
+local UserInputService = safeGetService('UserInputService') or game:GetService('UserInputService');
+local TextService = safeGetService('TextService') or game:GetService('TextService');
+local RunService = safeGetService('RunService') or game:GetService('RunService');
+local Players = safeGetService('Players') or game:GetService('Players');
+local HttpService = safeGetService('HttpService') or game:GetService('HttpService');
 
 assert(TweenService, "Failed to get TweenService")
 assert(UserInputService, "Failed to get UserInputService")
 assert(Players, "Failed to get Players")
 
-local LocalPlayer: Player = Players.LocalPlayer;
+local LocalPlayer = Players.LocalPlayer;
 assert(LocalPlayer, "LocalPlayer is nil - game may not be fully loaded")
 local PlayerGui = (function()
     local success, result = pcall(function() return LocalPlayer:FindFirstChild("PlayerGui") end)
     return success and result or nil
 end)();
 
-local CoreGui: PlayerGui = (function()
+local CoreGui = (function()
     -- Try gethui
     if gethui then
         local success, result = pcall(gethui)
@@ -78,8 +78,8 @@ local CoreGui: PlayerGui = (function()
     return LocalPlayer.PlayerGui
 end)();
 
-local Mouse: Mouse = LocalPlayer:GetMouse();
-local CurrentCamera: Camera? = workspace.CurrentCamera or workspace:WaitForChild("Camera", 5) or workspace.Camera;
+local Mouse = LocalPlayer:GetMouse();
+local CurrentCamera = workspace.CurrentCamera or workspace:WaitForChild("Camera", 5) or workspace.Camera;
 
 
 local function SecureKill(target)
@@ -1313,8 +1313,7 @@ function Compkiller:_SetNilP(Ins: Instance , Parent: Instance)
 	Ins.Parent = Parent or Compkiller.NilFolder;
 end;
 
-function Compkiller:_GetIcon(name : string , font_aws) : string
-	if Compkiller.SecureMode then
+function Compkiller:_GetIcon(name : string , font_aws).SecureMode then
 		local AssetId;
 
 		if font_aws then
@@ -1339,24 +1338,20 @@ function Compkiller:_GetIcon(name : string , font_aws) : string
 	return Compkiller.Lucide['lucide-'..tostring(name)] or Compkiller.Lucide[name] or Compkiller.Lucide[tostring(name)] or Compkiller.FontAwesome[name] or name;
 end;
 
-function Compkiller:_RandomString() : string
-	return "CK="..string.char(math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102));
+function Compkiller:_RandomString()"CK="..string.char(math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102));
 end;
 
-function Compkiller:_IsMouseOverFrame(Frame : Frame) : boolean
-	if not Frame then
-		return;
+function Compkiller:_IsMouseOverFrame(Frame : Frame);
 	end;
 
-	local AbsPos: Vector2, AbsSize: Vector2 = Frame.AbsolutePosition, Frame.AbsoluteSize;
+	local AbsPos, AbsSize = Frame.AbsolutePosition, Frame.AbsoluteSize;
 
 	if Mouse.X >= AbsPos.X and Mouse.X <= AbsPos.X + AbsSize.X and Mouse.Y >= AbsPos.Y and Mouse.Y <= AbsPos.Y + AbsSize.Y then
 		return true;
 	end;
 end;
 
-function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
-	local mult: number = 10 ^ (numDecimalPlaces or 0);
+function Compkiller:_Rounding(num: number, numDecimalPlaces: number)= 10 ^ (numDecimalPlaces or 0);
 	return math.floor(num * mult + 0.5) / mult;
 end;
 
@@ -1411,8 +1406,7 @@ function Compkiller:_Input(Frame : Frame , Callback : () -> ()) : TextButton
 	return Button;
 end;
 
-function Compkiller:GetCalculatePosition(planePos: number, planeNormal: number, rayOrigin: number, rayDirection: number) : number
-	local n = planeNormal;
+function Compkiller:GetCalculatePosition(planePos: number, planeNormal: number, rayOrigin: number, rayDirection: number)= planeNormal;
 	local d = rayDirection;
 	local v = rayOrigin - planePos;
 
@@ -1423,8 +1417,7 @@ function Compkiller:GetCalculatePosition(planePos: number, planeNormal: number, 
 	return rayOrigin + (a * rayDirection);
 end;
 
-function Compkiller:_Blur(element : Frame , WindowRemote) : RBXScriptSignal
-	if Compkiller.SecureMode and not Compkiller.SecurityConfig.BlurEnabled then
+function Compkiller:_Blur(element : Frame , WindowRemote).SecureMode and not Compkiller.SecurityConfig.BlurEnabled then
 		return game.Changed:Connect(function() end);
 	end;
 
@@ -1669,9 +1662,9 @@ function Compkiller.__CONFIG(config , default)
 end;
 
 function Compkiller:Drag(InputFrame: Frame, MoveFrame: Frame, Speed : number)
-	local dragToggle: boolean = false;
-	local dragStart: Vector3 = nil;
-	local startPos: UDim2 = nil;
+	local dragToggle = false;
+	local dragStart = nil;
+	local startPos = nil;
 	local Tween = TweenInfo.new(Speed);
 
 	local updateInput = function(input)
@@ -2230,8 +2223,7 @@ do
     Compkiller.NameObfuscation = false
     Compkiller._EncNameStore   = {}  -- [TextLabel instance] = encryptedBytes
 
-    function Compkiller:Encrypt(str: string): string
-        local out = {}
+    function Compkiller:Encrypt(str: string)= {}
         for i = 1, #str do
             local k = _XOR_KEY[((i - 1) % #_XOR_KEY) + 1]
             out[i]  = string.char(bit32.bxor(string.byte(str, i), k))
@@ -2239,8 +2231,7 @@ do
         return table.concat(out)
     end
 
-    function Compkiller:Decrypt(str: string): string
-        return Compkiller:Encrypt(str)
+    function Compkiller:Decrypt(str: string):Encrypt(str)
     end
 
     function Compkiller:EnableNameObfuscation(enabled: boolean)
@@ -2257,8 +2248,7 @@ do
         end
     end
 
-    function Compkiller:GetRealName(inst: TextLabel): string
-        local enc = Compkiller._EncNameStore[inst]
+    function Compkiller:GetRealName(inst: TextLabel)= Compkiller._EncNameStore[inst]
         if enc then return Compkiller:Decrypt(enc) end
         return inst.Text
     end
@@ -2436,8 +2426,7 @@ Compkiller.Hash = function(str: string)
 	return "ck-"..tostring(math.round(hex + 15))..tostring(dh);
 end;
 
-function Compkiller:CacheImage(id: string) : string
-	if not Compkiller.SecureMode or not id or not id:byte() then
+function Compkiller:CacheImage(id: string).SecureMode or not id or not id:byte() then
 		return id or "";
 	end;
 
@@ -2514,7 +2503,7 @@ function Compkiller:PreloadIcons()
 			end);
 		end;
 	else
-		local ContentProvider: ContentProvider = cloneref(game:GetService('ContentProvider'));
+		local ContentProvider = cloneref(game:GetService('ContentProvider'));
 
 		for i,v in next , RequiredAssets do
 			ContentProvider:Preload(v);
@@ -3909,7 +3898,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		});
 
 		local Helper = Value:AddLink("Helper" , Config.Default);
-		local Button: ImageButton = Helper.InfoButton;
+		local Button = Helper.InfoButton;
 
 		Helper.Text.Parent = Window;
 
@@ -4000,7 +3989,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			Callback = function() end
 		});
 
-		local ColorPicker:Frame , ColorFrame: Frame = Value:AddLink('ColorPicker' , Config.Default);
+		local ColorPicker, ColorFrame = Value:AddLink('ColorPicker' , Config.Default);
 
 		local Button = Compkiller:_Input(ColorPicker);
 
@@ -4089,7 +4078,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 	end;
 
 	function Args:AddOption()
-		local Element: ImageButton = Value:AddLink("Option");
+		local Element = Value:AddLink("Option");
 		local BaseZ_Index = math.random(1,15) * 100;
 
 		local Signal = Compkiller.__SIGNAL(false);
@@ -4782,7 +4771,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		Block:SetVisible(Signal:GetValue());
 
-		local ColorPicker:Frame , ColorFrame: Frame = Block:AddLink('ColorPicker' , Config.Default);
+		local ColorPicker, ColorFrame = Block:AddLink('ColorPicker' , Config.Default);
 
 		local Button = Compkiller:_Input(ColorPicker);
 
@@ -7406,7 +7395,7 @@ function Compkiller.new(Config : Window)
 			end;
 		end))
 
-		local Parent: ScrollingFrame = UilistLayout.Parent;
+		local Parent = UilistLayout.Parent;
 
 		Parent = Parent or Scrolling;
 
@@ -9993,8 +9982,7 @@ function Compkiller:_Path(...)
 	return table.concat(args, "/");
 end;
 
-function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunctions
-	ConfigManager = Compkiller.__CONFIG(ConfigManager , {
+function Compkiller:ConfigManager(ConfigManager: ConfigManager)= Compkiller.__CONFIG(ConfigManager , {
 		Directory = "Compkiller",
 		Config = "Software"
 	});
