@@ -2,9 +2,41 @@ local _CK_DEBUG = false   -- internal boot flag (used before Compkiller table ex
 local function _CKLog(msg)
     local enabled = _CK_DEBUG
         or (type(Compkiller) == "table" and Compkiller.Debug == true)
-    if enabled then
-        print("[CK] " .. tostring(msg))
+    if not enabled then return end
+
+    if msg == nil or msg == "dump" then
+        if type(Compkiller) ~= "table" or not Compkiller.GetOptimizerStats then return end
+        local ok, stats = pcall(function() return Compkiller:GetOptimizerStats() end)
+        if not ok then return end
+        print(table.concat({
+            "╔══════════════════════════════════════════",
+            "║  Compkiller v" .. tostring(Compkiller.Version) .. " — Runtime Stats",
+            "╠══════════════════════════════════════════",
+            "║  Hardware Tier   : " .. tostring(Compkiller.HardwareTier   or "N/A"),
+            "║  Hardware FPS    : " .. tostring(Compkiller.HardwareFPS    or "N/A"),
+            "║  GUI Shield      : " .. tostring(Compkiller.GuiShieldMethod or "N/A"),
+            "║  Performance Mode: " .. tostring(Compkiller.PerformanceMode),
+            "╠══════════════════════════════════════════",
+            "║  Live FPS        : " .. tostring(stats.FPS),
+            "║  Anim Threshold  : " .. tostring(stats.AnimThreshold) .. " fps",
+            "║  Smart Anim ON   : " .. tostring(stats.Enabled),
+            "║  Active Tweens   : " .. tostring(stats.ActiveTweens),
+            "╠══════════════════════════════════════════",
+            "║  Tweens Cancelled: " .. tostring(stats.TweensCancelled),
+            "║  Instant Sets    : " .. tostring(stats.InstantSets),
+            "║  Dedup Cancels   : " .. tostring(stats.DedupCancels),
+            "║  Memory Sweeps   : " .. tostring(stats.MemorySweeps),
+            "║  Tracked Threads : " .. tostring(#_CK_THREADS),
+            "║  Tracked Conns   : " .. tostring(#_CK_CONNECTIONS),
+            "║  GC Memory (KB)  : " .. tostring(math.floor((collectgarbage("count") or 0) + 0.5)),
+            "╠══════════════════════════════════════════",
+            "║  Windows Open    : " .. tostring(#Compkiller.Windows),
+            "╚══════════════════════════════════════════",
+        }, "\n"))
+        return
     end
+
+    print("[CK] " .. tostring(msg))
 end
 
 local _CK_VERSION = "5.4.0"
@@ -21,7 +53,7 @@ local Players       = game:GetService("Players")
 local LocalPlayer   = Players.LocalPlayer
 local PlayerGui     = LocalPlayer:FindFirstChild("PlayerGui")
 
-local _CK_GUI_TAG = "__rbxCoreInst"   -- attribute stamped on every ScreenGui we create
+local _CK_GUI_TAG = "__rbxCoreInst"
 local _CK_LEGACY_NAMES = {}
 
 local function _SmartKillGUIs()
@@ -7484,6 +7516,7 @@ function Compkiller.new(Config : Window)
 			end;
 		end))
 
+		--[[local Parent: ScrollingFrame = UilistLayout.Parent;
 
 		Parent = Parent or Scrolling;
 
@@ -10680,9 +10713,7 @@ function Compkiller:EnableAdvancedOptimizations(enabled: boolean)
     else
         _OPT.MonitorThread = nil
     end
-    _CKLog("AdvancedOptimizations: " .. (_OPT.Enabled and "ON" or "OFF")
-        .. " | Threshold=" .. _OPT.AnimThreshold .. "fps"
-        .. " | MemInterval=" .. _OPT.MemInterval .. "s")
+    _CKLog("AdvancedOptimizations: " .. (_OPT.Enabled and "ON" or "OFF") .. " | Threshold=" .. _OPT.AnimThreshold .. "fps" .. " | MemInterval=" .. _OPT.MemInterval .. "s")
     return _OPT.Enabled
 end
 
@@ -10857,56 +10888,26 @@ function Compkiller:SetHardwareTier(tier: string)
     if tier == "LOW" then
         self.PerformanceMode = true
         _OPT.AnimThreshold   = 60     -- instant-set everything
-        _CKLog("SetHardwareTier → LOW  | PerformanceMode=true | Threshold=60fps")
+        _CKLog("SetHardwareTier: LOW | PerformanceMode=true | Threshold=60fps")
     elseif tier == "MEDIUM" then
         self.PerformanceMode = false
         _OPT.AnimThreshold   = 40
-        _CKLog("SetHardwareTier → MEDIUM | PerformanceMode=false | Threshold=40fps")
+        _CKLog("SetHardwareTier: MEDIUM | PerformanceMode=false | Threshold=40fps")
     else
         self.PerformanceMode = false
         _OPT.AnimThreshold   = 30     -- default threshold
-        _CKLog("SetHardwareTier → HIGH  | PerformanceMode=false | Threshold=30fps")
+        _CKLog("SetHardwareTier: HIGH | PerformanceMode=false | Threshold=30fps")
     end
     return self.HardwareTier
 end
 
 function Compkiller:SetSmartAnimations(enabled: boolean)
     _OPT.Enabled = (enabled == true)
-    _CKLog("SetSmartAnimations: " .. (_OPT.Enabled and "ENABLED" or "DISABLED")
-        .. " | Threshold=" .. _OPT.AnimThreshold .. "fps")
+    _CKLog("SetSmartAnimations: " .. (_OPT.Enabled and "ENABLED" or "DISABLED") .. " | Threshold=" .. _OPT.AnimThreshold .. "fps")
     return _OPT.Enabled
 end
 
-function Compkiller:DumpStats()
-    local stats = self:GetOptimizerStats()
-    local lines = {
-        "╔══════════════════════════════════════════",
-        "║  Compkiller v" .. self.Version .. " — Runtime Stats",
-        "╠══════════════════════════════════════════",
-        "║  Hardware Tier   : " .. tostring(self.HardwareTier or "N/A"),
-        "║  Hardware FPS    : " .. tostring(self.HardwareFPS  or "N/A"),
-        "║  GUI Shield      : " .. tostring(self.GuiShieldMethod or "N/A"),
-        "║  Performance Mode: " .. tostring(self.PerformanceMode),
-        "╠══════════════════════════════════════════",
-        "║  Live FPS        : " .. stats.FPS,
-        "║  Anim Threshold  : " .. stats.AnimThreshold .. " fps",
-        "║  Smart Anim ON   : " .. tostring(stats.Enabled),
-        "║  Active Tweens   : " .. stats.ActiveTweens,
-        "╠══════════════════════════════════════════",
-        "║  Tweens Cancelled: " .. stats.TweensCancelled,
-        "║  Instant Sets    : " .. stats.InstantSets,
-        "║  Dedup Cancels   : " .. stats.DedupCancels,
-        "║  Memory Sweeps   : " .. stats.MemorySweeps,
-        "║  Tracked Threads : " .. #_CK_THREADS,
-        "║  Tracked Conns   : " .. #_CK_CONNECTIONS,
-        "║  GC Memory (KB)  : " .. tostring(math.floor((collectgarbage("count") or 0) + 0.5)),
-        "╠══════════════════════════════════════════",
-        "║  Windows Open    : " .. #self.Windows,
-        "╚══════════════════════════════════════════",
-    }
-    print(table.concat(lines, "\n"))
-    return stats
-end
+
 
 
 function Compkiller:HardReset()
@@ -11109,7 +11110,7 @@ do
         table.insert(conns, c2)
 
         getgenv()[_RENDER_CONN] = conns
-        _CKLog("StartRenderManager: active — focus-loss will suppress 3D + cap FPS to 10.")
+        _CKLog("StartRenderManager: active.")
     end
 
     function Compkiller:StopRenderManager()
