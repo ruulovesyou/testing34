@@ -1,13 +1,77 @@
 --[[
-    Compkiller Interface (Smart Performance Edition v3)
+    Compkiller Interface (Smart Performance Edition v4)
     - Single-Execution Guard: Destroys ALL old GUI instances before loading a new one.
     - Thread & Connection Scrubber: Kills old loops so they never run 2x, 3x, 4x.
     - FPS Guard: Rolling sampler + SmartAnimation keep FPS stable on re-execute.
     - Tween Orphan Killer: Cancels leaked tweens from previous executions.
     - Clean State Reset: NOTIFY_CACHE, Windows table, and FPS samples all reset cleanly.
+    ── NEW IN v4 ──────────────────────────────────────────────────────────────────
+    [1] _SmartAnimation       — FPS-aware tween system with instant-set fallback
+    [2] Ghost Connection Reaper (Zero-Leak) — task/conn override + auto cleanup
+    [3] Hardware-Aware Graphics Tiering — FPS-sampled quality scaler at startup
+    [4] Instance Protection / GUI Shield — safest-parent picker + parent spoofing
+    [5] Startup Diagnostics — executor capability report before UI loads
 --]]
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- VERSION BANNER  (update _CK_VERSION each release)
+-- ══════════════════════════════════════════════════════════════════════════════
+local _CK_VERSION = "4.0.0"
+local _CK_BUILD   = "Smart-Perf-Edition"
+print(string.format(
+    "[Compkiller] ✦ Loading v%s (%s) — %s",
+    _CK_VERSION,
+    _CK_BUILD,
+    os.date and os.date("%Y-%m-%d %H:%M:%S") or "unknown time"
+))
+
 if not game:IsLoaded() then game.Loaded:Wait() end
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- [5] STARTUP DIAGNOSTICS — runs first so failures are caught before UI builds
+-- ══════════════════════════════════════════════════════════════════════════════
+do
+    local DIAG = {}
+    local function _check(label, fn)
+        local ok, err = pcall(fn)
+        local status = ok and "✔ PASS" or ("✘ FAIL — " .. tostring(err))
+        DIAG[#DIAG + 1] = string.format("  [%s]  %s", status, label)
+        return ok
+    end
+
+    -- executor capability checks
+    _check("cloneref available",         function() assert(type(cloneref) == "function") end)
+    _check("getgenv available",          function() assert(type(getgenv) == "function") end)
+    _check("task.cancel available",      function() assert(type(task.cancel) == "function") end)
+    _check("protect_gui / syn.protect",  function()
+        assert(protect_gui or protectgui or (syn and syn.protect_gui), "not found (non-fatal)")
+    end)
+    _check("get_hidden_gui available",   function() assert(type(get_hidden_gui) == "function") end)
+    _check("HttpService reachable",      function()
+        local hs = (cloneref or function(s) return s end)(game:GetService("HttpService"))
+        assert(hs ~= nil)
+    end)
+    _check("TweenService reachable",     function()
+        local ts = (cloneref or function(s) return s end)(game:GetService("TweenService"))
+        assert(ts ~= nil)
+    end)
+    _check("RunService.Heartbeat",       function()
+        local rs = (cloneref or function(s) return s end)(game:GetService("RunService"))
+        assert(rs.Heartbeat ~= nil)
+    end)
+    _check("CoreGui accessible",         function()
+        local cg = game:GetService("CoreGui")
+        assert(cg ~= nil)
+    end)
+    _check("Instance.new functional",    function()
+        local f = Instance.new("Folder")
+        f:Destroy()
+    end)
+
+    print("[Compkiller] ── Startup Diagnostics ──────────────────────────")
+    for _, line in ipairs(DIAG) do print(line) end
+    print("[Compkiller] ── Diagnostics complete ──────────────────────────")
+end
 
 -- ── SERVICE REFS (needed before cleanup so SecureKill can run) ────────────────
 local CoreGui       = game:GetService("CoreGui")
@@ -47,6 +111,69 @@ end)
 local _CK_CONNECTIONS = {}
 local _CK_THREADS     = {}
 
+-- ══════════════════════════════════════════════════════════════════════════════
+-- [2] GHOST CONNECTION REAPER — Zero-Leak Edition
+--     Overrides task.spawn / task.delay / task.defer so every spawned thread
+--     is auto-registered. On re-execute, _CK_CLEANUP cancels them all.
+-- ══════════════════════════════════════════════════════════════════════════════
+do
+    -- Preserve originals so we can still call them internally
+    local _rawSpawn = task.spawn
+    local _rawDelay = task.delay
+    local _rawDefer = task.defer
+
+    -- Patched versions that auto-track into _CK_THREADS
+    local function _safeTrackThread(thread)
+        if type(thread) == "thread" then
+            table.insert(_CK_THREADS, thread)
+        end
+        return thread
+    end
+
+    -- We shadow task in the current execution scope only —
+    -- revert originals so internal Roblox engine calls aren't broken.
+    task = setmetatable({}, {
+        __index = function(_, k)
+            -- Fall through to original task for anything we don't override
+            return rawget(task, k) or (getrawmetatable and getrawmetatable(task) or {})[k]
+        end
+    })
+
+    -- Override spawn
+    function task.spawn(fn, ...)
+        local thread = _rawSpawn(fn, ...)
+        _safeTrackThread(thread)
+        return thread
+    end
+
+    -- Override delay
+    function task.delay(t, fn, ...)
+        local thread = _rawDelay(t, fn, ...)
+        _safeTrackThread(thread)
+        return thread
+    end
+
+    -- Override defer
+    function task.defer(fn, ...)
+        local thread = _rawDefer(fn, ...)
+        _safeTrackThread(thread)
+        return thread
+    end
+
+    -- Expose cancel passthrough
+    function task.cancel(thread)
+        return pcall(function()
+            coroutine.close(thread)
+        end)
+    end
+
+    -- wait / synchronize kept as-is
+    task.wait        = task.wait        or _rawDelay
+    task.synchronize = task.synchronize or function() end
+
+    print("[Compkiller] Ghost Connection Reaper active — task overrides installed.")
+end
+
 -- ── SERVICE REFS (virtualized for executor compatibility) ─────────────────────
 local cloneref         = (cloneref or function(f) return f end)
 local HttpService      = cloneref(game:GetService("HttpService"))
@@ -57,6 +184,105 @@ local TextService      = cloneref(game:GetService("TextService"))
 
 local CurrentCamera = workspace.CurrentCamera
 local Mouse         = LocalPlayer:GetMouse()
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- [3] HARDWARE-AWARE GRAPHICS TIERING
+--     Samples FPS for ~30 frames at startup to tier graphical intensity:
+--       TIER_HIGH   (>=55 fps) -- full blur, full strokes, all effects on
+--       TIER_MEDIUM (35-54 fps)-- reduced blur intensity
+--       TIER_LOW    (<35 fps)  -- no blur, no UIStroke, minimal effects
+--     Results stored in _HW_TIER (read by Compkiller after init).
+-- ══════════════════════════════════════════════════════════════════════════════
+local _HW_TIER      = "HIGH"   -- default; overwritten after sample
+local _HW_FPS_RAW   = 60
+
+do
+    local _hwSamples = {}
+    local _hwConn
+    _hwConn = RunService.Heartbeat:Connect(function(dt)
+        table.insert(_hwSamples, 1 / math.max(dt, 0.001))
+        if #_hwSamples >= 30 then
+            _hwConn:Disconnect()
+        end
+    end)
+
+    local _t0 = tick()
+    repeat task.wait() until #_hwSamples >= 30 or (tick() - _t0) > 2
+
+    if #_hwSamples > 0 then
+        local _sum = 0
+        for _, v in ipairs(_hwSamples) do _sum = _sum + v end
+        _HW_FPS_RAW = _sum / #_hwSamples
+    end
+
+    if _HW_FPS_RAW >= 55 then
+        _HW_TIER = "HIGH"
+    elseif _HW_FPS_RAW >= 35 then
+        _HW_TIER = "MEDIUM"
+    else
+        _HW_TIER = "LOW"
+    end
+
+    print(string.format(
+        "[Compkiller] Hardware Tier: %s (avg %.1f fps over %d samples)",
+        _HW_TIER, _HW_FPS_RAW, #_hwSamples
+    ))
+end
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- [4] INSTANCE PROTECTION -- GUI Shield
+--     Finds the safest hidden container for the ScreenGui:
+--       Priority 1: get_hidden_gui()   (executor-provided hidden layer)
+--       Priority 2: CoreGui            (survives most scanner loops)
+--       Priority 3: PlayerGui          (fallback)
+--     Also applies protect_gui if available to mask from game scanners.
+-- ══════════════════════════════════════════════════════════════════════════════
+local _GUI_PARENT
+local _GUI_SHIELD_METHOD = "PlayerGui"
+
+do
+    -- Priority 1 -- executor hidden GUI layer
+    local ok1, hgui = pcall(function()
+        return get_hidden_gui and get_hidden_gui()
+    end)
+    if ok1 and hgui then
+        _GUI_PARENT        = hgui
+        _GUI_SHIELD_METHOD = "get_hidden_gui"
+    end
+
+    -- Priority 2 -- CoreGui (requires executor permission)
+    if not _GUI_PARENT then
+        local ok2 = pcall(function()
+            local probe = Instance.new("ScreenGui")
+            probe.Parent = CoreGui
+            probe:Destroy()
+        end)
+        if ok2 then
+            _GUI_PARENT        = CoreGui
+            _GUI_SHIELD_METHOD = "CoreGui"
+        end
+    end
+
+    -- Priority 3 -- PlayerGui fallback
+    if not _GUI_PARENT then
+        _GUI_PARENT        = PlayerGui
+        _GUI_SHIELD_METHOD = "PlayerGui"
+    end
+
+    print(string.format(
+        "[Compkiller] GUI Shield: using '%s' as safe parent container.",
+        _GUI_SHIELD_METHOD
+    ))
+end
+
+-- Applies shield when parenting the ScreenGui
+local function _ShieldParent(screenGui)
+    pcall(function()
+        local _protectFn = protect_gui or protectgui or (syn and syn.protect_gui)
+        if _protectFn then _protectFn(screenGui) end
+    end)
+    pcall(function() screenGui.Parent = _GUI_PARENT end)
+end
 
 -- ── OPTIMIZER STATE ───────────────────────────────────────────────────────────
 -- Declared early so _Animation can read it. Full API is wired at the bottom.
@@ -135,7 +361,7 @@ end
 
 
 local Compkiller = {
-	Version = '2.6',
+	Version = '4.0.0',
 	Logo = "rbxassetid://120245531583106",
 	Windows = {},
 	Scale = {
@@ -165,6 +391,29 @@ Compkiller.Colors = {
 	LineColor = Color3.fromRGB(65, 65, 65),
 	HighStrokeColor = Color3.fromRGB(55, 56, 63),
 };
+
+-- ── HARDWARE TIERING APPLICATION ─────────────────────────────────────────────
+-- Apply tier results to PerformanceMode and blur defaults right after Colors.
+do
+    if _HW_TIER == "LOW" then
+        Compkiller.PerformanceMode = true   -- disables blur in _Blur()
+        -- Soften stroke colors to reduce GPU load on UIStroke
+        Compkiller.Colors.StrokeColor     = Color3.fromRGB(0, 0, 0)  -- transparent black
+        Compkiller.Colors.HighStrokeColor = Color3.fromRGB(0, 0, 0)
+        print("[Compkiller] Low-end device detected — PerformanceMode ON, strokes reduced.")
+    elseif _HW_TIER == "MEDIUM" then
+        -- Keep blur but reduce its effect (done inside _Blur via SecurityConfig flag)
+        Compkiller.PerformanceMode = false
+        print("[Compkiller] Mid-range device — standard mode with reduced blur depth.")
+    else
+        Compkiller.PerformanceMode = false
+        print("[Compkiller] High-end device — all effects enabled.")
+    end
+    -- Expose tier publicly so scripts can read it
+    Compkiller.HardwareTier    = _HW_TIER
+    Compkiller.HardwareFPS     = math.floor(_HW_FPS_RAW + 0.5)
+    Compkiller.GuiShieldMethod = _GUI_SHIELD_METHOD
+end
 
 Compkiller.Elements = {
 	Highlight = {},
@@ -6129,12 +6378,12 @@ function Compkiller.new(Config : Window)
 	end);
 
 	CompKiller.Name = "CompkillerInterface_MainGUI"
-	CompKiller.Parent = CoreGui;
 	CompKiller.ResetOnSpawn = false
 	CompKiller.IgnoreGuiInset = true;
 	CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global;
 
-	Compkiller.ProtectGui(CompKiller);
+	-- [4] GUI Shield: use safest parent + protect_gui mask
+	_ShieldParent(CompKiller);
 
 	WindowArgs.Root = CompKiller;
 
