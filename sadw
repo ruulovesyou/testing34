@@ -1,5 +1,5 @@
 --[[
-    Compkiller Interface (Smart Performance Edition v5.3)
+    Compkiller Interface (Smart Performance Edition v5.4)
     - Single-Execution Guard: Destroys ALL old GUI instances before loading a new one.
     - Thread & Connection Scrubber: Kills old loops so they never run 2x, 3x, 4x.
     - FPS Guard: Rolling sampler + SmartAnimation keep FPS stable on re-execute.
@@ -16,10 +16,16 @@
 --]]
 
 -- ── DEBUG LOG GATE ────────────────────────────────────────────────────────────
--- Set _CK_DEBUG = true to see all internal messages. false = silent injection.
-local _CK_DEBUG = false
+-- Two ways to enable logs:
+--   1. From INSIDE the lib file:  change _CK_DEBUG = true below
+--   2. From your MAIN SCRIPT:     Compkiller.Debug = true   (after require)
+--                                  OR  Compkiller:SetDebug(true)
+local _CK_DEBUG = false   -- internal boot flag (used before Compkiller table exists)
 local function _CKLog(msg)
-    if _CK_DEBUG then
+    -- Check both the local boot flag and the public Compkiller.Debug flag
+    local enabled = _CK_DEBUG
+        or (type(Compkiller) == "table" and Compkiller.Debug == true)
+    if enabled then
         print("[CK] " .. tostring(msg))
     end
 end
@@ -27,7 +33,7 @@ end
 -- ══════════════════════════════════════════════════════════════════════════════
 -- VERSION BANNER  (update _CK_VERSION each release)
 -- ══════════════════════════════════════════════════════════════════════════════
-local _CK_VERSION = "5.3.0"
+local _CK_VERSION = "5.4.0"
 local _CK_BUILD   = "Smart-Perf-Edition"
 _CKLog(string.format("✦ Loading v%s (%s) — %s",
     _CK_VERSION, _CK_BUILD,
@@ -489,7 +495,8 @@ end
 
 
 local Compkiller = {
-	Version = '5.3.0',
+	Version = '5.4.0',
+	Debug = false,          -- set true to enable all [CK] log output
 	Logo = "rbxassetid://120245531583106",
 	Windows = {},
 	Scale = {
@@ -1578,6 +1585,14 @@ Compkiller.FontAwesome = {
 function Compkiller:OptimizeMode(v)
 	Compkiller.PerformanceMode = v;
 end;
+
+-- Toggle debug log output. Call from your main script after loading the lib.
+function Compkiller:SetDebug(enabled: boolean)
+	self.Debug = (enabled == true)
+	_CK_DEBUG  = self.Debug   -- sync boot flag too
+	print("[CK] Debug logging " .. (self.Debug and "ENABLED" or "DISABLED"))
+	return self.Debug
+end
 
 function Compkiller:IsStudio()
 	return RunService:IsStudio()	
@@ -10870,6 +10885,10 @@ function Compkiller:EnableAdvancedOptimizations(enabled: boolean)
     else
         _OPT.MonitorThread = nil
     end
+    print("[CK] AdvancedOptimizations: " .. (_OPT.Enabled and "ON" or "OFF")
+        .. " | Threshold=" .. _OPT.AnimThreshold .. "fps"
+        .. " | MemInterval=" .. _OPT.MemInterval .. "s")
+    return _OPT.Enabled
 end
 
 -- CleanupAll: force-cancel every tracked tween + wipe dedup map.
@@ -10894,10 +10913,14 @@ function Compkiller:CleanupAll()
     _OPT.ActiveTweens = {}
     _OPT.Stats.TweensCancelled += cancelled
     Compkiller:_SweepMemory()
+    print("[CK] CleanupAll: cancelled " .. cancelled .. " tweens.")
+    return cancelled
 end
 
 function Compkiller:GetFPS(): number
-    return math.floor(_OPT.FPS + 0.5)
+    local fps = math.floor(_OPT.FPS + 0.5)
+    print("[CK] GetFPS: " .. fps .. " fps")
+    return fps
 end
 
 -- GetOptimizerStats: now includes DedupCancels so you can see
@@ -10918,10 +10941,14 @@ end
 
 function Compkiller:SetAnimThreshold(fps: number)
     _OPT.AnimThreshold = math.clamp(math.floor(fps), 10, 144)
+    print("[CK] SetAnimThreshold: " .. _OPT.AnimThreshold .. " fps")
+    return _OPT.AnimThreshold
 end
 
 function Compkiller:SetMemInterval(seconds: number)
     _OPT.MemInterval = math.max(10, seconds)
+    print("[CK] SetMemInterval: " .. _OPT.MemInterval .. "s")
+    return _OPT.MemInterval
 end
 
 -- ── INTERNAL — _SmartAnimation ───────────────────────────────
@@ -11059,29 +11086,32 @@ function Compkiller:SetHardwareTier(tier: string)
     local valid = {HIGH = true, MEDIUM = true, LOW = true}
     tier = tostring(tier):upper()
     if not valid[tier] then
-        _CKLog("SetHardwareTier: invalid tier '" .. tier .. "'. Use HIGH/MEDIUM/LOW.")
-        return
+        print("[CK] SetHardwareTier: invalid tier '" .. tier .. "'. Use HIGH/MEDIUM/LOW.")
+        return false
     end
     self.HardwareTier = tier
     if tier == "LOW" then
         self.PerformanceMode = true
         _OPT.AnimThreshold   = 60     -- instant-set everything
-        _CKLog("SetHardwareTier → LOW")
+        print("[CK] SetHardwareTier → LOW  | PerformanceMode=true | Threshold=60fps")
     elseif tier == "MEDIUM" then
         self.PerformanceMode = false
         _OPT.AnimThreshold   = 40
-        _CKLog("SetHardwareTier → MEDIUM")
+        print("[CK] SetHardwareTier → MEDIUM | PerformanceMode=false | Threshold=40fps")
     else
         self.PerformanceMode = false
         _OPT.AnimThreshold   = 30     -- default threshold
-        _CKLog("SetHardwareTier → HIGH")
+        print("[CK] SetHardwareTier → HIGH  | PerformanceMode=false | Threshold=30fps")
     end
+    return self.HardwareTier
 end
 
 -- Toggle whether _Animation routes through _SmartAnimation
 function Compkiller:SetSmartAnimations(enabled: boolean)
     _OPT.Enabled = (enabled == true)
-    _CKLog("SetSmartAnimations: " .. (_OPT.Enabled and "ENABLED" or "DISABLED"))
+    print("[CK] SetSmartAnimations: " .. (_OPT.Enabled and "ENABLED" or "DISABLED")
+        .. " | Threshold=" .. _OPT.AnimThreshold .. "fps")
+    return _OPT.Enabled
 end
 
 -- Dump a full formatted stat block to the output console
@@ -11183,18 +11213,23 @@ end
 -- Runs a function silently. Errors are caught and optionally forwarded to a
 -- callback — they never bubble up to the game's error handler / server logs.
 function Compkiller:SafeExec(fn, onError)
+    if type(fn) ~= "function" then
+        print("[CK] SafeExec: argument must be a function, got " .. type(fn))
+        return false, "invalid argument"
+    end
     local ok, err = xpcall(fn, function(e)
         local tb = ""
         pcall(function() tb = debug and debug.traceback and debug.traceback(tostring(e), 2) or "" end)
         return tostring(e) .. (tb ~= "" and ("\n" .. tb) or "")
     end)
     if not ok then
+        _CKLog("SafeExec caught error: " .. tostring(err))
         if type(onError) == "function" then
-            pcall(onError, err)   -- swallow errors in the error handler too
+            pcall(onError, err)
         end
-        -- Silent: do not re-throw, do not warn()
     end
-    return ok, err
+    -- always returns: true/false, error string or nil
+    return ok, ok and nil or tostring(err)
 end
 
 
@@ -11357,7 +11392,7 @@ do
         table.insert(conns, c2)
 
         getgenv()[_RENDER_CONN] = conns
-        _CKLog("RenderManager: auto focus tracking started.")
+        print("[CK] StartRenderManager: active — focus-loss will suppress 3D + cap FPS to 10.")
     end
 
     function Compkiller:StopRenderManager()
@@ -11375,7 +11410,7 @@ do
             end
         end
         getgenv()[_RENDER_CONN] = nil
-        _CKLog("RenderManager: stopped.")
+        print("[CK] StopRenderManager: stopped, 3D restored.")
     end
 end
 
