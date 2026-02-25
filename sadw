@@ -1,5 +1,5 @@
 --[[
-    Compkiller Interface (Smart Performance Edition v4)
+    Compkiller Interface (Smart Performance Edition v5)
     - Single-Execution Guard: Destroys ALL old GUI instances before loading a new one.
     - Thread & Connection Scrubber: Kills old loops so they never run 2x, 3x, 4x.
     - FPS Guard: Rolling sampler + SmartAnimation keep FPS stable on re-execute.
@@ -11,12 +11,14 @@
     [3] Hardware-Aware Graphics Tiering — FPS-sampled quality scaler at startup
     [4] Instance Protection / GUI Shield — safest-parent picker + parent spoofing
     [5] Startup Diagnostics — executor capability report before UI loads
+    [6] Extended Command API — GC, tier override, anim toggle, stat dump
+    [7] Advanced Background Functions — pos memory, sandbox, janitor, 3D cull, rate limiter, anomaly detector
 --]]
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- VERSION BANNER  (update _CK_VERSION each release)
 -- ══════════════════════════════════════════════════════════════════════════════
-local _CK_VERSION = "4.0.0"
+local _CK_VERSION = "5.0.0"
 local _CK_BUILD   = "Smart-Perf-Edition"
 print(string.format(
     "[Compkiller] ✦ Loading v%s (%s) — %s",
@@ -329,7 +331,7 @@ end
 
 
 local Compkiller = {
-	Version = '4.0.0',
+	Version = '5.0.0',
 	Logo = "rbxassetid://120245531583106",
 	Windows = {},
 	Scale = {
@@ -9918,6 +9920,7 @@ function Compkiller.new(Config : Window)
 		MovementFrame.ZIndex = 9
 
 		Compkiller:Drag(MovementFrame,MainFrame,0.1)
+		Compkiller:_ApplyPositionMemory(MainFrame, MovementFrame) -- [8b] Position Memory
 
 		SelectionFrame.Position = UDim2.new(1, 5, 0, 28)
 		SelectionFrame.Size = UDim2.new(0, 8, 0, 22)
@@ -10870,6 +10873,414 @@ do
         Pause         = function() end,
     }
     table.insert(_CK_CONNECTIONS, _dummyBE.Event:Connect(function() end))
+end
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════
+-- [6] EXTENDED COMMAND API — Optimization Controls
+--     Manual knobs exposed on the Compkiller object:
+--       :ForceGC()               — forces a full Lua garbage collection cycle
+--       :SetHardwareTier(tier)   — override auto-detected tier ("HIGH"/"MEDIUM"/"LOW")
+--       :SetSmartAnimations(bool)— toggle _SmartAnimation routing on/off at runtime
+--       :DumpStats()             — prints a full execution / optimizer stat block
+-- ════════════════════════════════════════════════════════════════════════════════════
+
+-- Force a full GC pass and report memory delta
+function Compkiller:ForceGC()
+    local before = gcinfo()
+    collectgarbage("collect")
+    local after  = gcinfo()
+    local freed  = math.max(0, before - after)
+    print(string.format("[CK:ForceGC] GC complete — freed ~%d KB (before=%d KB, after=%d KB)", freed, before, after))
+    return freed
+end
+
+-- Manually override the hardware tier at runtime
+function Compkiller:SetHardwareTier(tier: string)
+    local valid = {HIGH = true, MEDIUM = true, LOW = true}
+    tier = tostring(tier):upper()
+    if not valid[tier] then
+        warn("[CK:SetHardwareTier] Invalid tier '" .. tier .. "'. Use HIGH / MEDIUM / LOW.")
+        return
+    end
+    self.HardwareTier = tier
+    if tier == "LOW" then
+        self.PerformanceMode = true
+        _OPT.AnimThreshold   = 60     -- instant-set everything
+        print("[CK:SetHardwareTier] → LOW  (PerformanceMode ON, animations disabled)")
+    elseif tier == "MEDIUM" then
+        self.PerformanceMode = false
+        _OPT.AnimThreshold   = 40
+        print("[CK:SetHardwareTier] → MEDIUM (animations reduced)")
+    else
+        self.PerformanceMode = false
+        _OPT.AnimThreshold   = 30     -- default threshold
+        print("[CK:SetHardwareTier] → HIGH  (all effects enabled)")
+    end
+end
+
+-- Toggle whether _Animation routes through _SmartAnimation
+function Compkiller:SetSmartAnimations(enabled: boolean)
+    _OPT.Enabled = (enabled == true)
+    print(string.format("[CK:SetSmartAnimations] SmartAnimation %s", _OPT.Enabled and "ENABLED" or "DISABLED"))
+end
+
+-- Dump a full formatted stat block to the output console
+function Compkiller:DumpStats()
+    local stats = self:GetOptimizerStats()
+    local lines = {
+        "╔══════════════════════════════════════════",
+        "║  Compkiller v" .. self.Version .. " — Runtime Stats",
+        "╠══════════════════════════════════════════",
+        "║  Hardware Tier   : " .. tostring(self.HardwareTier or "N/A"),
+        "║  Hardware FPS    : " .. tostring(self.HardwareFPS  or "N/A"),
+        "║  GUI Shield      : " .. tostring(self.GuiShieldMethod or "N/A"),
+        "║  Performance Mode: " .. tostring(self.PerformanceMode),
+        "╠══════════════════════════════════════════",
+        "║  Live FPS        : " .. stats.FPS,
+        "║  Anim Threshold  : " .. stats.AnimThreshold .. " fps",
+        "║  Smart Anim ON   : " .. tostring(stats.Enabled),
+        "║  Active Tweens   : " .. stats.ActiveTweens,
+        "╠══════════════════════════════════════════",
+        "║  Tweens Cancelled: " .. stats.TweensCancelled,
+        "║  Instant Sets    : " .. stats.InstantSets,
+        "║  Dedup Cancels   : " .. stats.DedupCancels,
+        "║  Memory Sweeps   : " .. stats.MemorySweeps,
+        "║  Tracked Threads : " .. #_CK_THREADS,
+        "║  Tracked Conns   : " .. #_CK_CONNECTIONS,
+        "║  GC Memory (KB)  : " .. gcinfo(),
+        "╠══════════════════════════════════════════",
+        "║  Windows Open    : " .. #self.Windows,
+        "╚══════════════════════════════════════════",
+    }
+    for _, line in ipairs(lines) do print(line) end
+    return stats
+end
+
+
+-- ════════════════════════════════════════════════════════════════════════════════════
+-- [7/8] ADVANCED BACKGROUND FUNCTIONS
+-- ════════════════════════════════════════════════════════════════════════════════════
+
+-- ── [8a] SMART SINGLE-EXECUTION GUARD ────────────────────────────────────────────
+-- Upgrades the static SecureKill at the top with a runtime callable that also
+-- cancels all tracked background tasks, then rebuilds state fresh.
+-- Called automatically on re-inject (via getgenv()._CK_CLEANUP at top of script).
+function Compkiller:HardReset()
+    print("[CK:HardReset] Tearing down all active UI and background tasks...")
+    -- Kill known ScreenGuis
+    for _, name in ipairs({
+        "CompkillerInterface_MainGUI","Compkiller","RubicsX","RubicsX_Main","CompkillerUI"
+    }) do
+        pcall(function()
+            local g = game:GetService("CoreGui"):FindFirstChild(name)
+            if g then g:Destroy() end
+        end)
+        pcall(function()
+            local p = LocalPlayer:FindFirstChild("PlayerGui")
+            if p then
+                local g = p:FindFirstChild(name)
+                if g then g:Destroy() end
+            end
+        end)
+    end
+    -- Run full cleanup
+    pcall(getgenv()._CK_CLEANUP)
+    print("[CK:HardReset] Done. Re-inject to reload.")
+end
+
+
+-- ── [8b] WINDOW POSITION MEMORY ──────────────────────────────────────────────────
+-- Persists the last dragged position of the main window across re-injects
+-- by storing it in getgenv(). Hooks into the Drag function's InputEnded event.
+do
+    local _POS_KEY = "_CK_WIN_POS"
+
+    -- Read saved position (returns UDim2 or nil)
+    function Compkiller:LoadWindowPosition()
+        local raw = getgenv()[_POS_KEY]
+        if raw and type(raw) == "table" then
+            return UDim2.new(raw.xs, raw.xo, raw.ys, raw.yo)
+        end
+        return nil
+    end
+
+    -- Save a UDim2 position
+    function Compkiller:SaveWindowPosition(pos: UDim2)
+        if not pos then return end
+        getgenv()[_POS_KEY] = {
+            xs = pos.X.Scale,  xo = pos.X.Offset,
+            ys = pos.Y.Scale,  yo = pos.Y.Offset,
+        }
+    end
+
+    -- Hook: called by newWindow after Drag is set up on MainFrame
+    -- Restores saved pos and wires auto-save on drag-end
+    function Compkiller:_ApplyPositionMemory(MainFrame: Frame, MovementFrame: Frame)
+        -- Restore
+        local saved = self:LoadWindowPosition()
+        if saved then
+            MainFrame.Position = saved
+            print(string.format(
+                "[CK:PosMem] Restored window to (%.2f, %d, %.2f, %d)",
+                saved.X.Scale, saved.X.Offset, saved.Y.Scale, saved.Y.Offset
+            ))
+        end
+
+        -- Auto-save on every drag release
+        _TrackConn(UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+                self:SaveWindowPosition(MainFrame.Position)
+            end
+        end))
+    end
+end
+
+
+-- ── [8c] SAFE-EXECUTE SANDBOX ────────────────────────────────────────────────────
+-- Runs a function silently. Errors are caught and optionally forwarded to a
+-- callback — they never bubble up to the game's error handler / server logs.
+function Compkiller:SafeExec(fn, onError)
+    local ok, err = xpcall(fn, function(e)
+        return debug and debug.traceback and debug.traceback(e, 2) or tostring(e)
+    end)
+    if not ok then
+        if type(onError) == "function" then
+            pcall(onError, err)   -- swallow errors in the error handler too
+        end
+        -- Silent: do not re-throw, do not warn()
+    end
+    return ok, err
+end
+
+
+-- ── [8d] EVENT JANITOR ───────────────────────────────────────────────────────────
+-- Lightweight Janitor class. Create one per logical group of connections/instances.
+-- Call :Destroy() to bulk-clean everything registered in that group.
+do
+    local Janitor = {}
+    Janitor.__index = Janitor
+
+    function Janitor.new()
+        return setmetatable({ _items = {} }, Janitor)
+    end
+
+    -- Register a connection (anything with :Disconnect())
+    function Janitor:Add(connection)
+        table.insert(self._items, { type = "conn", ref = connection })
+        return connection
+    end
+
+    -- Register an Instance for :Destroy()
+    function Janitor:AddInstance(instance)
+        table.insert(self._items, { type = "inst", ref = instance })
+        return instance
+    end
+
+    -- Register an arbitrary cleanup function
+    function Janitor:AddFn(fn)
+        table.insert(self._items, { type = "fn", ref = fn })
+        return fn
+    end
+
+    -- Destroy everything registered
+    function Janitor:Destroy()
+        for _, item in ipairs(self._items) do
+            pcall(function()
+                if item.type == "conn" then
+                    item.ref:Disconnect()
+                elseif item.type == "inst" then
+                    item.ref:Destroy()
+                elseif item.type == "fn" then
+                    item.ref()
+                end
+            end)
+        end
+        self._items = {}
+    end
+
+    -- Expose factory on Compkiller
+    function Compkiller:NewJanitor()
+        return Janitor.new()
+    end
+end
+
+
+-- ── [8e] 3D RENDERING CULL ───────────────────────────────────────────────────────
+-- Suspends the Roblox 3D engine by collapsing the camera FOV and disabling
+-- scene rendering. Useful during auto-farm loops that don't need visuals.
+-- Call :RenderResume() to restore. Stores original values in getgenv() so
+-- re-inject does not permanently break the camera.
+do
+    local _CULL_KEY = "_CK_CULL_STATE"
+
+    function Compkiller:RenderCull()
+        if getgenv()[_CULL_KEY] then
+            print("[CK:RenderCull] Already culled — call :RenderResume() first.")
+            return
+        end
+        local cam = workspace.CurrentCamera
+        getgenv()[_CULL_KEY] = {
+            fov          = cam.FieldOfView,
+            ctype        = cam.CameraType,
+        }
+        pcall(function()
+            cam.CameraType    = Enum.CameraType.Scriptable
+            cam.FieldOfView   = 1          -- near-zero FOV = nothing rendered
+        end)
+        -- Freeze the render step so Roblox doesn't process 3D each frame
+        pcall(function()
+            if game:GetService("RunService"):IsClient() then
+                game:GetService("RunService"):Set3dRenderingEnabled(false)
+            end
+        end)
+        print("[CK:RenderCull] 3D rendering suspended.")
+    end
+
+    function Compkiller:RenderResume()
+        local state = getgenv()[_CULL_KEY]
+        if not state then
+            print("[CK:RenderResume] Nothing to resume.")
+            return
+        end
+        pcall(function()
+            local cam = workspace.CurrentCamera
+            cam.FieldOfView  = state.fov
+            cam.CameraType   = state.ctype
+        end)
+        pcall(function()
+            if game:GetService("RunService"):IsClient() then
+                game:GetService("RunService"):Set3dRenderingEnabled(true)
+            end
+        end)
+        getgenv()[_CULL_KEY] = nil
+        print("[CK:RenderResume] 3D rendering restored.")
+    end
+end
+
+
+-- ── [8f] REMOTEEVENT RATE LIMITER ────────────────────────────────────────────────
+-- Wraps RemoteEvent:FireServer() calls through a token-bucket queue.
+-- Prevents spam-kick by enforcing a minimum gap between server requests.
+-- Usage:
+--   local limiter = Compkiller:NewRateLimiter(0.25)  -- min 0.25s between fires
+--   limiter:Fire(remote, arg1, arg2)
+do
+    local RateLimiter = {}
+    RateLimiter.__index = RateLimiter
+
+    function RateLimiter.new(interval: number)
+        local self = setmetatable({
+            _interval = math.max(0.05, interval or 0.25),
+            _queue    = {},
+            _running  = false,
+        }, RateLimiter)
+        return self
+    end
+
+    function RateLimiter:Fire(remote, ...)
+        local args = {...}
+        table.insert(self._queue, { remote = remote, args = args })
+        if not self._running then
+            self._running = true
+            _ckSpawn(function()
+                while #self._queue > 0 do
+                    local item = table.remove(self._queue, 1)
+                    pcall(function()
+                        item.remote:FireServer(table.unpack(item.args))
+                    end)
+                    task.wait(self._interval)
+                end
+                self._running = false
+            end)
+        end
+    end
+
+    function RateLimiter:Flush()
+        self._queue = {}
+        print("[CK:RateLimiter] Queue flushed.")
+    end
+
+    function Compkiller:NewRateLimiter(interval: number)
+        return RateLimiter.new(interval)
+    end
+end
+
+
+-- ── [8g] ANOMALY DETECTOR ────────────────────────────────────────────────────────
+-- Monitors core Lua globals and Roblox service methods for tampering.
+-- If an anti-cheat hooks/replaces a standard function, this fires a warning.
+-- Call :StartAnomalyDetector() to begin monitoring, :StopAnomalyDetector() to stop.
+do
+    -- Baseline snapshots of function identities taken at first load
+    local _BASELINE = {
+        { label = "rawget",          ref = rawget },
+        { label = "rawset",          ref = rawset },
+        { label = "rawequal",        ref = rawequal },
+        { label = "tostring",        ref = tostring },
+        { label = "tonumber",        ref = tonumber },
+        { label = "pcall",           ref = pcall },
+        { label = "xpcall",          ref = xpcall },
+        { label = "type",            ref = type },
+        { label = "pairs",           ref = pairs },
+        { label = "ipairs",          ref = ipairs },
+        { label = "select",          ref = select },
+        { label = "unpack or table.unpack", ref = table.unpack or unpack },
+        { label = "math.floor",      ref = math.floor },
+        { label = "string.format",   ref = string.format },
+        { label = "table.insert",    ref = table.insert },
+        { label = "table.remove",    ref = table.remove },
+    }
+
+    local _DETECTOR_THREAD = nil
+
+    function Compkiller:StartAnomalyDetector(interval: number)
+        if _DETECTOR_THREAD then
+            print("[CK:Anomaly] Detector already running.")
+            return
+        end
+        interval = math.max(1, interval or 5)
+        print(string.format("[CK:Anomaly] Detector started — scanning every %ds.", interval))
+
+        _DETECTOR_THREAD = _ckSpawn(function()
+            while _DETECTOR_THREAD do
+                task.wait(interval)
+                local tampered = {}
+
+                -- Check global identity
+                if rawget(_G, "rawget")   ~= _BASELINE[1].ref  then table.insert(tampered, "rawget")   end
+                if rawget(_G, "rawset")   ~= _BASELINE[2].ref  then table.insert(tampered, "rawset")   end
+                if rawget(_G, "pcall")    ~= _BASELINE[6].ref  then table.insert(tampered, "pcall")    end
+                if rawget(_G, "xpcall")   ~= _BASELINE[7].ref  then table.insert(tampered, "xpcall")   end
+                if rawget(_G, "tostring") ~= _BASELINE[4].ref  then table.insert(tampered, "tostring") end
+                if rawget(_G, "type")     ~= _BASELINE[8].ref  then table.insert(tampered, "type")     end
+                if rawget(_G, "pairs")    ~= _BASELINE[9].ref  then table.insert(tampered, "pairs")    end
+                if rawget(_G, "ipairs")   ~= _BASELINE[10].ref then table.insert(tampered, "ipairs")   end
+
+                -- Check math/string/table
+                if math.floor     ~= _BASELINE[13].ref then table.insert(tampered, "math.floor")     end
+                if string.format  ~= _BASELINE[14].ref then table.insert(tampered, "string.format")  end
+                if table.insert   ~= _BASELINE[15].ref then table.insert(tampered, "table.insert")   end
+                if table.remove   ~= _BASELINE[16].ref then table.insert(tampered, "table.remove")   end
+
+                if #tampered > 0 then
+                    warn(string.format(
+                        "[CK:Anomaly] ⚠ TAMPERED FUNCTIONS DETECTED: %s",
+                        table.concat(tampered, ", ")
+                    ))
+                end
+            end
+        end)
+    end
+
+    function Compkiller:StopAnomalyDetector()
+        if _DETECTOR_THREAD then
+            pcall(task.cancel, _DETECTOR_THREAD)
+            _DETECTOR_THREAD = nil
+            print("[CK:Anomaly] Detector stopped.")
+        end
+    end
 end
 
 return Compkiller;
