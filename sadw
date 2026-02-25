@@ -113,66 +113,37 @@ local _CK_THREADS     = {}
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- [2] GHOST CONNECTION REAPER — Zero-Leak Edition
---     Overrides task.spawn / task.delay / task.defer so every spawned thread
---     is auto-registered. On re-execute, _CK_CLEANUP cancels them all.
+--     Wraps task.spawn / task.delay / task.defer with tracking versions stored
+--     as local helpers (_ckSpawn, _ckDelay, _ckDefer). The global `task` table
+--     is NEVER replaced — doing so breaks Roblox's internal scheduler.
+--     All library code below uses the _ck* wrappers instead of raw task calls.
+--     On re-execute, _CK_CLEANUP iterates _CK_THREADS and cancels every one.
 -- ══════════════════════════════════════════════════════════════════════════════
-do
-    -- Preserve originals so we can still call them internally
-    local _rawSpawn = task.spawn
-    local _rawDelay = task.delay
-    local _rawDefer = task.defer
-
-    -- Patched versions that auto-track into _CK_THREADS
-    local function _safeTrackThread(thread)
-        if type(thread) == "thread" then
-            table.insert(_CK_THREADS, thread)
-        end
-        return thread
+local function _ckTrackThread(thread)
+    if type(thread) == "thread" then
+        table.insert(_CK_THREADS, thread)
     end
-
-    -- We shadow task in the current execution scope only —
-    -- revert originals so internal Roblox engine calls aren't broken.
-    task = setmetatable({}, {
-        __index = function(_, k)
-            -- Fall through to original task for anything we don't override
-            return rawget(task, k) or (getrawmetatable and getrawmetatable(task) or {})[k]
-        end
-    })
-
-    -- Override spawn
-    function task.spawn(fn, ...)
-        local thread = _rawSpawn(fn, ...)
-        _safeTrackThread(thread)
-        return thread
-    end
-
-    -- Override delay
-    function task.delay(t, fn, ...)
-        local thread = _rawDelay(t, fn, ...)
-        _safeTrackThread(thread)
-        return thread
-    end
-
-    -- Override defer
-    function task.defer(fn, ...)
-        local thread = _rawDefer(fn, ...)
-        _safeTrackThread(thread)
-        return thread
-    end
-
-    -- Expose cancel passthrough
-    function task.cancel(thread)
-        return pcall(function()
-            coroutine.close(thread)
-        end)
-    end
-
-    -- wait / synchronize kept as-is
-    task.wait        = task.wait        or _rawDelay
-    task.synchronize = task.synchronize or function() end
-
-    print("[Compkiller] Ghost Connection Reaper active — task overrides installed.")
+    return thread
 end
+
+-- Safe tracked wrappers — use these everywhere inside the library
+local function _ckSpawn(fn, ...)
+    return _ckTrackThread(task.spawn(fn, ...))
+end
+
+local function _ckDelay(t, fn, ...)
+    return _ckTrackThread(task.delay(t, fn, ...))
+end
+
+local function _ckDefer(fn, ...)
+    return _ckTrackThread(task.defer(fn, ...))
+end
+
+local function _ckCancel(thread)
+    pcall(task.cancel, thread)
+end
+
+print("[Compkiller] Ghost Connection Reaper active — _ckSpawn/_ckDelay/_ckDefer wrappers ready.")
 
 -- ── SERVICE REFS (virtualized for executor compatibility) ─────────────────────
 local cloneref         = (cloneref or function(f) return f end)
