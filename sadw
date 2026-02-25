@@ -2,21 +2,37 @@
 if not game:IsLoaded() then game.Loaded:Wait() end
 
 -- ── Service bootstrap (single, cloneref-protected declarations) ──────────────
-local cloneref       = cloneref or function(f) return f end;
-local TweenService             = cloneref(game:GetService('TweenService'));
-local UserInputService     = cloneref(game:GetService('UserInputService'));
-local TextService               = cloneref(game:GetService('TextService'));
-local RunService                 = cloneref(game:GetService('RunService'));
-local Players                       = cloneref(game:GetService('Players'));
-local HttpService               = cloneref(game:GetService('HttpService'));
-local LocalPlayer                    = Players.LocalPlayer;
-local PlayerGui                              = LocalPlayer:FindFirstChild("PlayerGui");
-local CoreGui                     = (gethui and gethui())
-                                               or (get_hidden_gui and get_hidden_gui())
-                                               or cloneref(game:FindFirstChildOfClass('CoreGui'))
-                                               or cloneref(LocalPlayer.PlayerGui);
-local Mouse           = LocalPlayer:GetMouse();
-local CurrentCamera = cloneref(workspace.CurrentCamera);
+-- Nil-safe cloneref: if executor exposes it but passes nil, return nil gracefully
+local _rawCloneref = (typeof(cloneref) == "function") and cloneref or nil
+local cloneref = function(s)
+    if s == nil then return nil end
+    if _rawCloneref then
+        local ok, result = pcall(_rawCloneref, s)
+        return ok and result or s
+    end
+    return s
+end
+
+-- Safe GetService: never throws, returns nil on failure
+local function _GetService(name)
+    local ok, svc = pcall(function() return game:GetService(name) end)
+    return ok and svc or nil
+end
+
+local TweenService       = cloneref(_GetService('TweenService'));
+local UserInputService   = cloneref(_GetService('UserInputService'));
+local TextService        = cloneref(_GetService('TextService'));
+local RunService         = cloneref(_GetService('RunService'));
+local Players            = cloneref(_GetService('Players'));
+local HttpService        = cloneref(_GetService('HttpService'));
+local LocalPlayer        = Players and Players.LocalPlayer;
+local PlayerGui          = LocalPlayer and LocalPlayer:FindFirstChild("PlayerGui");
+local CoreGui            = (gethui and gethui())
+                           or (get_hidden_gui and get_hidden_gui())
+                           or cloneref(game:FindFirstChildOfClass('CoreGui'))
+                           or (LocalPlayer and cloneref(LocalPlayer.PlayerGui));
+local Mouse              = LocalPlayer and LocalPlayer:GetMouse();
+local CurrentCamera      = cloneref(workspace.CurrentCamera);
 
 
 -- ════════════════════════════════════════════════════════════════════════
@@ -11474,8 +11490,3 @@ else
 end
 
 return Compkiller
-
-
-
-
-
