@@ -1,5 +1,5 @@
 --[[
-    Compkiller Interface (Smart Performance Edition v5.1)
+    Compkiller Interface (Smart Performance Edition v5.2)
     - Single-Execution Guard: Destroys ALL old GUI instances before loading a new one.
     - Thread & Connection Scrubber: Kills old loops so they never run 2x, 3x, 4x.
     - FPS Guard: Rolling sampler + SmartAnimation keep FPS stable on re-execute.
@@ -18,7 +18,7 @@
 -- ══════════════════════════════════════════════════════════════════════════════
 -- VERSION BANNER  (update _CK_VERSION each release)
 -- ══════════════════════════════════════════════════════════════════════════════
-local _CK_VERSION = "5.1.0"
+local _CK_VERSION = "5.2.0"
 local _CK_BUILD   = "Smart-Perf-Edition"
 print(string.format(
     "[Compkiller] ✦ Loading v%s (%s) — %s",
@@ -78,10 +78,83 @@ local Players       = game:GetService("Players")
 local LocalPlayer   = Players.LocalPlayer
 local PlayerGui     = LocalPlayer:FindFirstChild("PlayerGui")
 
--- ── SINGLE-EXECUTION GUARD ────────────────────────────────────────────────────
--- Destroy every known GUI name this script can create.
--- IMPORTANT: "CompkillerInterface_MainGUI" is the actual ScreenGui name used
--- by Compkiller:newWindow(). All legacy names are kept for safety.
+-- ══════════════════════════════════════════════════════════════════════════════
+-- ADVANCED SMART SINGLE EXECUTION GUARD
+--   Step 1 — Kill every ScreenGui we own, identified by a stamped attribute
+--             OR by the legacy known-name list (backwards compatible).
+--   Step 2 — Cancel every background thread/connection from the old run via
+--             getgenv()._CK_CLEANUP (our unified cleanup registered at bottom).
+--   Step 3 — Kill any raw coroutines left in getgenv()._CK_COROUTINE_REGISTRY.
+--   Step 4 — Wipe the global coroutine registry so this new execution owns it.
+-- All steps are pcall-wrapped so a partial old state never crashes the new load.
+-- ══════════════════════════════════════════════════════════════════════════════
+local _CK_GUI_TAG    = "_CK_OWNED_GUI"   -- attribute stamped on every ScreenGui we create
+local _CK_LEGACY_NAMES = {               -- backwards-compat name kill list
+    "CompkillerInterface_MainGUI",
+    "Compkiller", "RubicsX", "RubicsX_Main", "CompkillerUI",
+}
+
+-- ── Step 1: Destroy all owned ScreenGuis across every possible parent ─────────
+local function _SmartKillGUIs()
+    local parents = {}
+    pcall(function() parents[#parents+1] = CoreGui end)
+    pcall(function() if PlayerGui then parents[#parents+1] = PlayerGui end end)
+    pcall(function()
+        local hg = get_hidden_gui and get_hidden_gui()
+        if hg then parents[#parents+1] = hg end
+    end)
+    pcall(function() parents[#parents+1] = workspace.CurrentCamera end)
+
+    for _, parent in ipairs(parents) do
+        pcall(function()
+            for _, child in ipairs(parent:GetChildren()) do
+                pcall(function()
+                    -- Kill by our ownership attribute tag
+                    if child:IsA("ScreenGui") and child:GetAttribute(_CK_GUI_TAG) then
+                        child:Destroy()
+                        return
+                    end
+                end)
+                -- Kill by legacy known names (old executions without the tag)
+                pcall(function()
+                    for _, name in ipairs(_CK_LEGACY_NAMES) do
+                        if child.Name == name then
+                            child:Destroy()
+                            break
+                        end
+                    end
+                end)
+            end
+        end)
+    end
+end
+
+-- ── Step 2: Run old unified cleanup (threads, connections, tweens) ────────────
+pcall(function()
+    if getgenv()._CK_CLEANUP then getgenv()._CK_CLEANUP() end
+end)
+
+-- ── Step 3: Kill raw coroutines from old execution's registry ────────────────
+pcall(function()
+    local reg = getgenv()._CK_COROUTINE_REGISTRY
+    if type(reg) == "table" then
+        for _, co in ipairs(reg) do
+            pcall(function()
+                if coroutine.status(co) ~= "dead" then
+                    coroutine.close(co)
+                end
+            end)
+        end
+    end
+end)
+
+-- ── Step 4: Install fresh coroutine registry for this execution ───────────────
+getgenv()._CK_COROUTINE_REGISTRY = {}
+
+-- Run the smart GUI killer now
+_SmartKillGUIs()
+
+-- ── Legacy SecureKill shim (kept so any code referencing it still works) ──────
 local function SecureKill(target)
     pcall(function()
         local c = CoreGui:FindFirstChild(target)
@@ -95,17 +168,7 @@ local function SecureKill(target)
     end)
 end
 
-SecureKill("CompkillerInterface_MainGUI")   -- actual main window name
-SecureKill("Compkiller")
-SecureKill("RubicsX")
-SecureKill("RubicsX_Main")
-SecureKill("CompkillerUI")
-
--- ── THREAD / CONNECTION SCRUBBER ─────────────────────────────────────────────
--- Run old cleanup BEFORE declaring new state so references are correct.
-pcall(function()
-    if getgenv()._CK_CLEANUP then getgenv()._CK_CLEANUP() end
-end)
+-- ── THREAD / CONNECTION SCRUBBER ──────────────────────────────────────────────
 
 local _CK_CONNECTIONS = {}
 local _CK_THREADS     = {}
@@ -256,8 +319,76 @@ do
     ))
 end
 
+-- ── GUI NAME ENCRYPTION ──────────────────────────────────────────────────────
+-- Generates an obfuscated ScreenGui name that blends into Roblox system names.
+-- Anti-cheats scanning for script/exploit keywords will find nothing suspicious.
+-- Format: mimics internal Roblox GUI service names (e.g. "RbxGui_[hex]_Svc")
+-- A different name is generated every inject; old name stored for smart kill.
+local _CK_ENCRYPTED_NAMES = {}   -- registry of all encrypted names this run
+
+local function _EncryptGuiName()
+    -- Prefix pool — indistinguishable from Roblox internal systems
+    local prefixes = {
+        "RbxGui", "CoreUISvc", "TopbarPlus", "RbxHud",
+        "SystemUI", "RenderSvc", "InputSvc", "GuiSvc",
+        "ScreenSvc", "UISvc",
+    }
+    local suffixes = {
+        "Handler", "Manager", "Controller", "Service",
+        "Module", "System", "Runtime", "Instance",
+    }
+
+    -- Seed with tick() + math.random for uniqueness per inject
+    local seed   = math.floor(tick() * 1000) % 0xFFFF
+    local hexPart = string.format("%04X", seed)
+    local rndSuffix = math.random(1, #suffixes)
+    local rndPrefix = math.random(1, #prefixes)
+
+    local name = prefixes[rndPrefix] .. "_" .. hexPart .. "_" .. suffixes[rndSuffix]
+
+    -- Register so smart kill can find it next inject
+    table.insert(_CK_ENCRYPTED_NAMES, name)
+    pcall(function()
+        local reg = getgenv()._CK_GUI_NAME_REGISTRY
+        if type(reg) ~= "table" then
+            getgenv()._CK_GUI_NAME_REGISTRY = {}
+        end
+        table.insert(getgenv()._CK_GUI_NAME_REGISTRY, name)
+    end)
+
+    return name
+end
+
+-- On every new execution, kill any GUIs from the old encrypted name registry
+pcall(function()
+    local reg = getgenv()._CK_GUI_NAME_REGISTRY
+    if type(reg) == "table" then
+        for _, oldName in ipairs(reg) do
+            pcall(function()
+                local g = CoreGui:FindFirstChild(oldName)
+                if g then g:Destroy() end
+            end)
+            pcall(function()
+                if PlayerGui then
+                    local g = PlayerGui:FindFirstChild(oldName)
+                    if g then g:Destroy() end
+                end
+            end)
+        end
+    end
+    getgenv()._CK_GUI_NAME_REGISTRY = {}   -- reset for this run
+end)
+
 -- Applies shield when parenting the ScreenGui
+-- Now also assigns an encrypted name before parenting
 local function _ShieldParent(screenGui)
+    -- Assign encrypted obfuscated name (replaces static "CompkillerInterface_MainGUI")
+    pcall(function()
+        local encName = _EncryptGuiName()
+        screenGui.Name = encName
+        print("[CK:GuiEncrypt] ScreenGui renamed → " .. encName)
+    end)
+    -- Apply executor protect_gui mask
     pcall(function()
         local _protectFn = protect_gui or protectgui or (syn and syn.protect_gui)
         if _protectFn then _protectFn(screenGui) end
@@ -338,11 +469,26 @@ getgenv()._CK_CLEANUP = function()
     _OPT.MonitorThread = nil
     _OPT.ActiveTweenMap = {}
     _OPT._DummyTween   = nil   -- rebuilt at bottom of next execution
+
+    -- 6. Kill raw coroutines in the registry and reset it
+    pcall(function()
+        local reg = getgenv()._CK_COROUTINE_REGISTRY
+        if type(reg) == "table" then
+            for _, co in ipairs(reg) do
+                pcall(function()
+                    if coroutine.status(co) ~= "dead" then
+                        coroutine.close(co)
+                    end
+                end)
+            end
+        end
+        getgenv()._CK_COROUTINE_REGISTRY = {}
+    end)
 end
 
 
 local Compkiller = {
-	Version = '5.1.0',
+	Version = '5.2.0',
 	Logo = "rbxassetid://120245531583106",
 	Windows = {},
 	Scale = {
@@ -6358,12 +6504,13 @@ function Compkiller.new(Config : Window)
 		TabButtonScrollingFrame.CanvasSize = UDim2.fromOffset(0,UIListLayout.AbsoluteContentSize.Y)
 	end);
 
-	CompKiller.Name = "CompkillerInterface_MainGUI"
 	CompKiller.ResetOnSpawn = false
 	CompKiller.IgnoreGuiInset = true;
 	CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global;
 
-	-- [4] GUI Shield: use safest parent + protect_gui mask
+	-- Smart Single-Exec: stamp ownership tag + apply encrypted name via GUI Shield
+	pcall(function() CompKiller:SetAttribute(_CK_GUI_TAG, true) end)
+	-- [4] GUI Shield: encrypted name + safest parent + protect_gui mask
 	_ShieldParent(CompKiller);
 
 	WindowArgs.Root = CompKiller;
