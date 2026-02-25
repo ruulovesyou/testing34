@@ -1,5 +1,5 @@
 --[[
-    Compkiller Interface (Smart Performance Edition v5)
+    Compkiller Interface (Smart Performance Edition v5.1)
     - Single-Execution Guard: Destroys ALL old GUI instances before loading a new one.
     - Thread & Connection Scrubber: Kills old loops so they never run 2x, 3x, 4x.
     - FPS Guard: Rolling sampler + SmartAnimation keep FPS stable on re-execute.
@@ -18,7 +18,7 @@
 -- ══════════════════════════════════════════════════════════════════════════════
 -- VERSION BANNER  (update _CK_VERSION each release)
 -- ══════════════════════════════════════════════════════════════════════════════
-local _CK_VERSION = "5.0.0"
+local _CK_VERSION = "5.1.0"
 local _CK_BUILD   = "Smart-Perf-Edition"
 print(string.format(
     "[Compkiller] ✦ Loading v%s (%s) — %s",
@@ -167,36 +167,47 @@ local _HW_TIER      = "HIGH"   -- default; overwritten after sample
 local _HW_FPS_RAW   = 60
 
 do
+    -- Non-blocking: collect samples in background, tier is applied once enough
+    -- data arrives. UI loads immediately with default HIGH tier meanwhile.
     local _hwSamples = {}
     local _hwConn
     _hwConn = RunService.Heartbeat:Connect(function(dt)
         table.insert(_hwSamples, 1 / math.max(dt, 0.001))
-        if #_hwSamples >= 30 then
-            _hwConn:Disconnect()
-        end
-    end)
+        if #_hwSamples < 60 then return end  -- wait for 60 frames (~1s)
+        _hwConn:Disconnect()
+        _hwConn = nil
 
-    local _t0 = tick()
-    repeat task.wait() until #_hwSamples >= 30 or (tick() - _t0) > 2
-
-    if #_hwSamples > 0 then
         local _sum = 0
         for _, v in ipairs(_hwSamples) do _sum = _sum + v end
         _HW_FPS_RAW = _sum / #_hwSamples
-    end
 
-    if _HW_FPS_RAW >= 55 then
-        _HW_TIER = "HIGH"
-    elseif _HW_FPS_RAW >= 35 then
-        _HW_TIER = "MEDIUM"
-    else
-        _HW_TIER = "LOW"
-    end
+        if _HW_FPS_RAW >= 55 then
+            _HW_TIER = "HIGH"
+        elseif _HW_FPS_RAW >= 35 then
+            _HW_TIER = "MEDIUM"
+        else
+            _HW_TIER = "LOW"
+        end
 
-    print(string.format(
-        "[Compkiller] Hardware Tier: %s (avg %.1f fps over %d samples)",
-        _HW_TIER, _HW_FPS_RAW, #_hwSamples
-    ))
+        -- Apply tier retroactively once measured
+        if Compkiller then
+            Compkiller.HardwareTier = _HW_TIER
+            Compkiller.HardwareFPS  = math.floor(_HW_FPS_RAW + 0.5)
+            if _HW_TIER == "LOW" then
+                Compkiller.PerformanceMode = true
+                _OPT.AnimThreshold = 60
+            elseif _HW_TIER == "MEDIUM" then
+                _OPT.AnimThreshold = 40
+            end
+        end
+
+        print(string.format(
+            "[Compkiller] Hardware Tier: %s (avg %.1f fps over %d frames)",
+            _HW_TIER, _HW_FPS_RAW, #_hwSamples
+        ))
+    end)
+    -- Track so cleanup can disconnect it
+    table.insert(_CK_CONNECTIONS, _hwConn)
 end
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -331,7 +342,7 @@ end
 
 
 local Compkiller = {
-	Version = '5.0.0',
+	Version = '5.1.0',
 	Logo = "rbxassetid://120245531583106",
 	Windows = {},
 	Scale = {
@@ -10887,9 +10898,9 @@ end
 
 -- Force a full GC pass and report memory delta
 function Compkiller:ForceGC()
-    local before = gcinfo()
+    local before = math.floor((collectgarbage("count") or 0) + 0.5)
     collectgarbage("collect")
-    local after  = gcinfo()
+    local after  = math.floor((collectgarbage("count") or 0) + 0.5)
     local freed  = math.max(0, before - after)
     print(string.format("[CK:ForceGC] GC complete — freed ~%d KB (before=%d KB, after=%d KB)", freed, before, after))
     return freed
@@ -10948,7 +10959,7 @@ function Compkiller:DumpStats()
         "║  Memory Sweeps   : " .. stats.MemorySweeps,
         "║  Tracked Threads : " .. #_CK_THREADS,
         "║  Tracked Conns   : " .. #_CK_CONNECTIONS,
-        "║  GC Memory (KB)  : " .. gcinfo(),
+        "║  GC Memory (KB)  : " .. tostring(math.floor((collectgarbage("count") or 0) + 0.5)),
         "╠══════════════════════════════════════════",
         "║  Windows Open    : " .. #self.Windows,
         "╚══════════════════════════════════════════",
@@ -11043,7 +11054,9 @@ end
 -- callback — they never bubble up to the game's error handler / server logs.
 function Compkiller:SafeExec(fn, onError)
     local ok, err = xpcall(fn, function(e)
-        return debug and debug.traceback and debug.traceback(e, 2) or tostring(e)
+        local tb = ""
+        pcall(function() tb = debug and debug.traceback and debug.traceback(tostring(e), 2) or "" end)
+        return tostring(e) .. (tb ~= "" and ("\n" .. tb) or "")
     end)
     if not ok then
         if type(onError) == "function" then
@@ -11121,21 +11134,26 @@ do
             return
         end
         local cam = workspace.CurrentCamera
+        -- Save originals safely
+        local origFOV, origType, origCFrame
+        pcall(function()
+            origFOV    = cam.FieldOfView
+            origType   = cam.CameraType
+            origCFrame = cam.CFrame
+        end)
         getgenv()[_CULL_KEY] = {
-            fov          = cam.FieldOfView,
-            ctype        = cam.CameraType,
+            fov    = origFOV   or 70,
+            ctype  = origType  or Enum.CameraType.Custom,
+            cf     = origCFrame,
         }
+        -- Move camera inside a wall so the 3D scene is fully occluded.
+        -- FOV=1 alone is not enough on all hardware; burying the CFrame is.
         pcall(function()
-            cam.CameraType    = Enum.CameraType.Scriptable
-            cam.FieldOfView   = 1          -- near-zero FOV = nothing rendered
+            cam.CameraType  = Enum.CameraType.Scriptable
+            cam.FieldOfView = 1
+            cam.CFrame      = CFrame.new(0, -1e6, 0)  -- far below the map
         end)
-        -- Freeze the render step so Roblox doesn't process 3D each frame
-        pcall(function()
-            if game:GetService("RunService"):IsClient() then
-                game:GetService("RunService"):Set3dRenderingEnabled(false)
-            end
-        end)
-        print("[CK:RenderCull] 3D rendering suspended.")
+        print("[CK:RenderCull] 3D rendering suppressed (camera relocated).")
     end
 
     function Compkiller:RenderResume()
@@ -11145,14 +11163,10 @@ do
             return
         end
         pcall(function()
-            local cam = workspace.CurrentCamera
-            cam.FieldOfView  = state.fov
-            cam.CameraType   = state.ctype
-        end)
-        pcall(function()
-            if game:GetService("RunService"):IsClient() then
-                game:GetService("RunService"):Set3dRenderingEnabled(true)
-            end
+            local cam       = workspace.CurrentCamera
+            cam.CameraType  = state.ctype
+            cam.FieldOfView = state.fov
+            if state.cf then cam.CFrame = state.cf end
         end)
         getgenv()[_CULL_KEY] = nil
         print("[CK:RenderResume] 3D rendering restored.")
@@ -11209,66 +11223,67 @@ end
 
 
 -- ── [8g] ANOMALY DETECTOR ────────────────────────────────────────────────────────
--- Monitors core Lua globals and Roblox service methods for tampering.
--- If an anti-cheat hooks/replaces a standard function, this fires a warning.
--- Call :StartAnomalyDetector() to begin monitoring, :StopAnomalyDetector() to stop.
+-- Monitors core Lua globals for tampering by comparing live values against a
+-- baseline captured at StartAnomalyDetector() time (lazy — not at load time,
+-- which avoids false positives from executor pre-hooks).
+-- Call :StartAnomalyDetector() to begin, :StopAnomalyDetector() to stop.
 do
-    -- Baseline snapshots of function identities taken at first load
-    local _BASELINE = {
-        { label = "rawget",          ref = rawget },
-        { label = "rawset",          ref = rawset },
-        { label = "rawequal",        ref = rawequal },
-        { label = "tostring",        ref = tostring },
-        { label = "tonumber",        ref = tonumber },
-        { label = "pcall",           ref = pcall },
-        { label = "xpcall",          ref = xpcall },
-        { label = "type",            ref = type },
-        { label = "pairs",           ref = pairs },
-        { label = "ipairs",          ref = ipairs },
-        { label = "select",          ref = select },
-        { label = "unpack or table.unpack", ref = table.unpack or unpack },
-        { label = "math.floor",      ref = math.floor },
-        { label = "string.format",   ref = string.format },
-        { label = "table.insert",    ref = table.insert },
-        { label = "table.remove",    ref = table.remove },
+    local _DETECTOR_THREAD = nil
+    local _BASELINE        = nil   -- populated lazily on first Start call
+
+    -- Keys to monitor: {global_table, key, friendly_label}
+    local _WATCH = {
+        { _G,      "rawget",        "rawget"        },
+        { _G,      "rawset",        "rawset"        },
+        { _G,      "pcall",         "pcall"         },
+        { _G,      "xpcall",        "xpcall"        },
+        { _G,      "tostring",      "tostring"      },
+        { _G,      "type",          "type"          },
+        { _G,      "pairs",         "pairs"         },
+        { _G,      "ipairs",        "ipairs"        },
+        { math,    "floor",         "math.floor"    },
+        { math,    "random",        "math.random"   },
+        { string,  "format",        "string.format" },
+        { string,  "find",          "string.find"   },
+        { table,   "insert",        "table.insert"  },
+        { table,   "remove",        "table.remove"  },
     }
 
-    local _DETECTOR_THREAD = nil
+    local function _captureBaseline()
+        local bl = {}
+        for _, w in ipairs(_WATCH) do
+            local ok, val = pcall(rawget, w[1], w[2])
+            bl[w[3]] = ok and val or nil
+        end
+        return bl
+    end
 
     function Compkiller:StartAnomalyDetector(interval: number)
         if _DETECTOR_THREAD then
             print("[CK:Anomaly] Detector already running.")
             return
         end
-        interval = math.max(1, interval or 5)
-        print(string.format("[CK:Anomaly] Detector started — scanning every %ds.", interval))
+        interval = math.max(2, interval or 5)
+
+        -- Capture baseline NOW (lazy), after executor has finished its own hooks
+        _BASELINE = _captureBaseline()
+        print(string.format("[CK:Anomaly] Baseline captured. Scanning every %ds.", interval))
 
         _DETECTOR_THREAD = _ckSpawn(function()
             while _DETECTOR_THREAD do
                 task.wait(interval)
+                if not _DETECTOR_THREAD then break end
+
                 local tampered = {}
-
-                -- Check global identity
-                if rawget(_G, "rawget")   ~= _BASELINE[1].ref  then table.insert(tampered, "rawget")   end
-                if rawget(_G, "rawset")   ~= _BASELINE[2].ref  then table.insert(tampered, "rawset")   end
-                if rawget(_G, "pcall")    ~= _BASELINE[6].ref  then table.insert(tampered, "pcall")    end
-                if rawget(_G, "xpcall")   ~= _BASELINE[7].ref  then table.insert(tampered, "xpcall")   end
-                if rawget(_G, "tostring") ~= _BASELINE[4].ref  then table.insert(tampered, "tostring") end
-                if rawget(_G, "type")     ~= _BASELINE[8].ref  then table.insert(tampered, "type")     end
-                if rawget(_G, "pairs")    ~= _BASELINE[9].ref  then table.insert(tampered, "pairs")    end
-                if rawget(_G, "ipairs")   ~= _BASELINE[10].ref then table.insert(tampered, "ipairs")   end
-
-                -- Check math/string/table
-                if math.floor     ~= _BASELINE[13].ref then table.insert(tampered, "math.floor")     end
-                if string.format  ~= _BASELINE[14].ref then table.insert(tampered, "string.format")  end
-                if table.insert   ~= _BASELINE[15].ref then table.insert(tampered, "table.insert")   end
-                if table.remove   ~= _BASELINE[16].ref then table.insert(tampered, "table.remove")   end
+                for _, w in ipairs(_WATCH) do
+                    local ok, cur = pcall(rawget, w[1], w[2])
+                    if ok and _BASELINE[w[3]] ~= nil and cur ~= _BASELINE[w[3]] then
+                        table.insert(tampered, w[3])
+                    end
+                end
 
                 if #tampered > 0 then
-                    warn(string.format(
-                        "[CK:Anomaly] ⚠ TAMPERED FUNCTIONS DETECTED: %s",
-                        table.concat(tampered, ", ")
-                    ))
+                    warn("[CK:Anomaly] ⚠ Tampered: " .. table.concat(tampered, ", "))
                 end
             end
         end)
@@ -11278,6 +11293,7 @@ do
         if _DETECTOR_THREAD then
             pcall(task.cancel, _DETECTOR_THREAD)
             _DETECTOR_THREAD = nil
+            _BASELINE        = nil
             print("[CK:Anomaly] Detector stopped.")
         end
     end
