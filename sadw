@@ -1,9 +1,12 @@
 
+
+print("run")
+wait(1)
 if not game:IsLoaded() then game.Loaded:Wait() end
 
 -- ── Service bootstrap (single, cloneref-protected declarations) ──────────────
 -- Nil-safe cloneref: if executor exposes it but passes nil, return nil gracefully
-local _rawCloneref = (typeof(cloneref) == "function") and cloneref or nil
+local _rawCloneref = (type(cloneref) == "function") and cloneref or nil
 local cloneref = function(s)
     if s == nil then return nil end
     if _rawCloneref then
@@ -10628,125 +10631,53 @@ local _DummyTween = {
     Pause = function() end,
 }
 
-task.spawn(function()
-    local _runSum = 0
-    local conn = _TrackConn(RunService.Heartbeat:Connect(function(dt)
-        local fps = 1 / math.max(dt, 0.001)
-        if #Compkiller._OPT.FpsSamples >= Compkiller._OPT.FpsSampleMax then
-            _runSum = _runSum - table.remove(Compkiller._OPT.FpsSamples, 1)
-        end
-        table.insert(Compkiller._OPT.FpsSamples, fps)
-        _runSum = _runSum + fps
-        Compkiller._OPT.FPS = _runSum / #Compkiller._OPT.FpsSamples
-    end))
-end)
+-- ════════════════════════════════════════════════════════════════════
+--  SMART SYSTEMS — Each is an individual opt-in method.
+--  Nothing runs automatically. Call each one you want:
+--
+--    Compkiller:EnableFPSMonitor()        -- tracks live FPS
+--    Compkiller:EnableGhostReaper()       -- patches task.spawn/delay for zero memory leaks
+--    Compkiller:EnableHWTiering()         -- auto-detects hardware tier and adjusts quality
+--    Compkiller:EnableGuiProtection()     -- hides GUIs from game anti-cheats
+--    Compkiller:RunDiagnostics()          -- checks for common misconfigs, prints report
+-- ════════════════════════════════════════════════════════════════════
 
-function Compkiller:_SmartAnimation(Self, Info, Property: {[any]: any})
-    local opt = Compkiller._OPT
-
-    if not opt.Enabled then
-        local tw = TweenService:Create(Self, Info, Property)
-        tw:Play()
-        return tw
+-- ── SMART SYSTEM 1 ▸ FPS MONITOR ──────────────────────────────────────────
+function Compkiller:EnableFPSMonitor()
+    if Compkiller._OPT._fpsMonitorActive then
+        print("[CK] FPS Monitor already active.")
+        return
     end
-
-    if opt.FPS < opt.AnimThreshold then
-        for prop, val in pairs(Property) do
-            pcall(function() Self[prop] = val end)
-        end
-        opt.Stats.InstantSets = opt.Stats.InstantSets + 1
-        return _DummyTween
-    end
-
-    local baseDuration = (Info and Info.Time) or 0.25
-    local fpsScale = math.clamp(opt.FPS / 60, 0.5, 1.0)
-    local newDuration = math.max(0.05, baseDuration * fpsScale)
-
-    local newInfo = TweenInfo.new(
-        newDuration,
-        Info.EasingStyle or Enum.EasingStyle.Quad,
-        Info.EasingDirection or Enum.EasingDirection.Out
-    )
-
-    local debugId = Self:GetDebugId()
-    for prop in pairs(Property) do
-        local key = debugId .. "|" .. prop
-        local existing = opt.ActiveTweenMap[key]
-        if existing and existing.PlaybackState == Enum.PlaybackState.Playing then
-            pcall(function() existing:Cancel() end)
-            opt.Stats.DedupCancels = opt.Stats.DedupCancels + 1
-        end
-    end
-
-    local tween = TweenService:Create(Self, newInfo, Property)
-    table.insert(opt.ActiveTweens, tween)
-
-    for prop in pairs(Property) do
-        opt.ActiveTweenMap[debugId .. "|" .. prop] = tween
-    end
-
-    tween.Completed:Connect(function()
-        local idx = table.find(opt.ActiveTweens, tween)
-        if idx then table.remove(opt.ActiveTweens, idx) end
-        for prop in pairs(Property) do
-            opt.ActiveTweenMap[debugId .. "|" .. prop] = nil
-        end
+    Compkiller._OPT._fpsMonitorActive = true
+    task.spawn(function()
+        local _runSum = 0
+        _TrackConn(RunService.Heartbeat:Connect(function(dt)
+            local fps = 1 / math.max(dt, 0.001)
+            if #Compkiller._OPT.FpsSamples >= Compkiller._OPT.FpsSampleMax then
+                _runSum = _runSum - table.remove(Compkiller._OPT.FpsSamples, 1)
+            end
+            table.insert(Compkiller._OPT.FpsSamples, fps)
+            _runSum = _runSum + fps
+            Compkiller._OPT.FPS = _runSum / #Compkiller._OPT.FpsSamples
+        end))
     end)
-
-    tween:Play()
-    return tween
+    print("[CK] FPS Monitor active.")
 end
 
-function Compkiller:GetFPS()
-    return math.floor(Compkiller._OPT.FPS + 0.5)
-end
-
-function Compkiller:GetOptimizerStats()
-    local opt = Compkiller._OPT
-    return {
-        FPS = self:GetFPS(),
-        ActiveTweens = #opt.ActiveTweens,
-        DedupCancels = opt.Stats.DedupCancels,
-        InstantSets = opt.Stats.InstantSets
-    }
-end
-
-function Compkiller:SetAnimThreshold(fps)
-    Compkiller._OPT.AnimThreshold = math.clamp(fps, 10, 144)
-end
-
-function Compkiller:CleanupAll()
-    local opt = Compkiller._OPT
-    for key, tw in pairs(opt.ActiveTweenMap) do
-        pcall(function() tw:Cancel() end)
+-- ── SMART SYSTEM 2 ▸ GHOST CONNECTION REAPER ──────────────────────────────
+function Compkiller:EnableGhostReaper()
+    if getgenv()._CK_GHOST_REAPER_ACTIVE then
+        print("[CK] Ghost Reaper already active.")
+        return
     end
-    table.clear(opt.ActiveTweens)
-    table.clear(opt.ActiveTweenMap)
-    opt.Stats.TweensCancelled = opt.Stats.TweensCancelled + 1
-end
-
--- ═══════════════════════════════════════════════════════════════════════════
---  NEW SMART SYSTEM 1 ▸ GHOST CONNECTION REAPER (Zero-Leak Edition)
---  Patches task.spawn/task.delay so every new thread is auto-registered
---  into _CK_THREADS and killed on re-execute via _CK_CLEANUP.
---  RunService connections spawned after this point are also auto-tracked.
---  Guard prevents double-patching on re-execute.
--- ═══════════════════════════════════════════════════════════════════════════
-do
-    -- Restore originals if a previous CK execution already patched them
     pcall(function()
         if getgenv()._CK_ORIG_SPAWN then task.spawn = getgenv()._CK_ORIG_SPAWN end
         if getgenv()._CK_ORIG_DELAY then task.delay = getgenv()._CK_ORIG_DELAY end
     end)
-
     local _orig_spawn = task.spawn
     local _orig_delay = task.delay
-
-    -- Persist originals so next re-execute can restore them
     pcall(function() getgenv()._CK_ORIG_SPAWN = _orig_spawn end)
     pcall(function() getgenv()._CK_ORIG_DELAY = _orig_delay end)
-
-    -- FIX #2: task.spawn/task.delay patching may fail on some executors — wrap in pcall
     pcall(function()
         task.spawn = function(fn, ...)
             local thread = _orig_spawn(fn, ...)
@@ -10754,7 +10685,6 @@ do
             return thread
         end
     end)
-
     pcall(function()
         task.delay = function(t, fn, ...)
             local thread = _orig_delay(t, fn, ...)
@@ -10762,11 +10692,6 @@ do
             return thread
         end
     end)
-
-    -- FIX #1 (CRITICAL)
-    -- Directly assigning to Heartbeat.Connect / RenderStepped.Connect / Stepped.Connect
-    -- causes a hard crash that prevents the entire library from loading.
-    -- Wrapped in pcall so it silently skips if the executor does not support signal hijacking.
     local function _autoTrackSignal(signal)
         local origConnect = signal.Connect
         return function(self, fn)
@@ -10775,23 +10700,20 @@ do
             return conn
         end
     end
-
-    pcall(function() RunService.Heartbeat.Connect    = _autoTrackSignal(RunService.Heartbeat) end)
+    pcall(function() RunService.Heartbeat.Connect     = _autoTrackSignal(RunService.Heartbeat) end)
     pcall(function() RunService.RenderStepped.Connect = _autoTrackSignal(RunService.RenderStepped) end)
-    pcall(function() RunService.Stepped.Connect      = _autoTrackSignal(RunService.Stepped) end)
-
+    pcall(function() RunService.Stepped.Connect       = _autoTrackSignal(RunService.Stepped) end)
     getgenv()._CK_GHOST_REAPER_ACTIVE = true
+    print("[CK] Ghost Connection Reaper active.")
 end
 
--- ═══════════════════════════════════════════════════════════════════════════
---  NEW SMART SYSTEM 2 ▸ HARDWARE-AWARE GRAPHICS TIERING
---  Samples 30 Heartbeat frames on load to calculate real average FPS.
---  TIER_HIGH  (60+ fps)  → full UIStrokes, Blur, normal AnimThreshold
---  TIER_MID   (30-59 fps)→ UIStrokes off, Blur on,  AnimThreshold 35
---  TIER_LOW   (<30 / mobile) → UIStrokes off, Blur off, AnimThreshold 45
---  Also exposes Compkiller:GetHardwareTier() and GetESPInterval().
--- ═══════════════════════════════════════════════════════════════════════════
-do
+-- ── SMART SYSTEM 3 ▸ HARDWARE-AWARE GRAPHICS TIERING ──────────────────────
+function Compkiller:EnableHWTiering()
+    if Compkiller.HW and Compkiller.HW._started then
+        print("[CK] HW Tiering already active.")
+        return
+    end
+
     Compkiller.HW = {
         Tier             = "HIGH",
         IsMobile         = UserInputService.TouchEnabled,
@@ -10862,47 +10784,40 @@ do
         end
     end))
 
-    function Compkiller:GetHardwareTier()
-        return Compkiller.HW.Tier
-    end
 
-    function Compkiller:GetESPInterval()
-        return Compkiller.HW.ESPInterval
-    end
-
-    function Compkiller:IsMobileTier()
-        return Compkiller.HW.IsMobile or Compkiller.HW.Tier == "LOW"
-    end
+    Compkiller.HW._started = true
+    print("[CK] HW Tiering active — sampling FPS...")
 end
 
--- ═══════════════════════════════════════════════════════════════════════════
---  NEW SMART SYSTEM 3 ▸ INSTANCE PROTECTION (Pseudo-Parent / GUI Shield)
---  Re-parents every ScreenGui to a memory location that game scripts
---  cannot scan with game:GetDescendants() or GetChildren().
---  Priority chain:
---    1. get_hidden_gui()   → executor hidden layer (strongest)
---    2. gethui()           → alternative (Fluxus / Oxygen executors)
---    3. CoreGui + protect_gui → standard protection
---    4. CurrentCamera      → obfuscation fallback
---  Compkiller.new() is wrapped to apply protection automatically on every
---  new window. Existing windows in Compkiller.Windows are also re-parented.
--- ═══════════════════════════════════════════════════════════════════════════
+function Compkiller:GetHardwareTier()
+    return Compkiller.HW and Compkiller.HW.Tier or "UNKNOWN"
+end
+
+function Compkiller:GetESPInterval()
+    return Compkiller.HW and Compkiller.HW.ESPInterval or 0
+end
+
+function Compkiller:IsMobileTier()
+    return Compkiller.HW and (Compkiller.HW.IsMobile or Compkiller.HW.Tier == "LOW") or false
+end
+
+-- ── SMART SYSTEM 4 ▸ GUI PROTECTION ───────────────────────────────────────
 do
     local function _getHiddenLayer()
         if type(get_hidden_gui) == "function" then
             local ok, hg = pcall(get_hidden_gui)
-            if ok and hg then return hg, "get_hidden_gui" end
+            if ok and hg then return hg end
         end
         if type(gethui) == "function" then
             local ok, hg = pcall(gethui)
-            if ok and hg then return hg, "gethui" end
+            if ok and hg then return hg end
         end
-        return nil, nil
+        return nil
     end
 
     function Compkiller:_SecureParentGUI(sg)
         if not sg or not sg.Parent then return end
-        local layer, method = _getHiddenLayer()
+        local layer = _getHiddenLayer()
         if layer then
             pcall(function() sg.Parent = layer end)
             return
@@ -10912,8 +10827,6 @@ do
             Compkiller.ProtectGui(sg)
         end)
         if not ok then
-            -- Item #11: Parent Spoofing — disguise as a default Roblox system element
-            -- so game scripts scanning PlayerGui children cannot identify it as an exploit GUI
             pcall(function()
                 sg.Name   = "RobloxNetworkScreen"
                 sg.Parent = PlayerGui or CurrentCamera
@@ -10928,30 +10841,35 @@ do
         return false
     end
 
-    local _orig_new = Compkiller.new
-    Compkiller.new = function(cfg)
-        local win = _orig_new(cfg)
-        if win and win.Root then
-            Compkiller:_SecureParentGUI(win.Root)
+    function Compkiller:EnableGuiProtection()
+        if Compkiller._guiProtectionActive then
+            print("[CK] GUI Protection already active.")
+            return
         end
-        return win
-    end
-
-    for _, existingWin in ipairs(Compkiller.Windows) do
-        pcall(function()
-            if existingWin and existingWin.Parent then
-                Compkiller:_SecureParentGUI(existingWin)
+        Compkiller._guiProtectionActive = true
+        -- Re-parent already open windows
+        for _, existingWin in ipairs(Compkiller.Windows) do
+            pcall(function()
+                if existingWin and existingWin.Parent then
+                    Compkiller:_SecureParentGUI(existingWin)
+                end
+            end)
+        end
+        -- Wrap Compkiller.new so all future windows are auto-protected
+        local _orig_new = Compkiller.new
+        Compkiller.new = function(cfg)
+            local win = _orig_new(cfg)
+            if win and win.Root then
+                Compkiller:_SecureParentGUI(win.Root)
             end
-        end)
+            return win
+        end
+        print("[CK] GUI Protection active.")
     end
 end
 
--- ============================================================================
---  NEW SMART SYSTEM 4 ▸ STARTUP DIAGNOSTICS
---  Runs on load. Checks for common misconfigs/errors.
---  Results in Compkiller.DiagnosticReport; printed to console immediately.
--- ============================================================================
-do
+-- ── SMART SYSTEM 5 ▸ DIAGNOSTICS ──────────────────────────────────────────
+function Compkiller:RunDiagnostics()
     local _DIAG = { Passed = {}, Errors = {}, Warns = {} }
     local function _chk(lbl, fn)
         local ok, err = pcall(fn)
@@ -11000,110 +10918,101 @@ do
     end
     for _,w in ipairs(_DIAG.Warns) do warn("  [HINT] "..w.label.." — "..w.msg) end
 
-    function Compkiller:GetDiagnostics() return Compkiller.DiagnosticReport end
-    function Compkiller:RunDiagnostics()
-        local r = Compkiller.DiagnosticReport
-        print(("[CK Diag] Errors:%d  Warns:%d  Passed:%d"):format(#r.Errors,#r.Warns,#r.Passed))
-        for _,e in ipairs(r.Errors) do warn("  [ERR] "..e.label.." — "..e.msg) end
-        for _,w in ipairs(r.Warns)  do warn("  [HINT] "..w.label.." — "..w.msg) end
-        return r
+    Compkiller.DiagnosticReport = _DIAG
+    local ec,wc,pc2 = #_DIAG.Errors, #_DIAG.Warns, #_DIAG.Passed
+    if ec > 0 then
+        warn(string.format("[CK v%s] DIAG: %d ERROR(S) | %d warn | %d passed", Compkiller.Version, ec, wc, pc2))
+        for _,e in ipairs(_DIAG.Errors) do warn("  [ERR] "..e.label.." — "..e.msg) end
+    else
+        print(string.format("[CK v%s] Diag OK — %d passed | %d hint(s)", Compkiller.Version, pc2, wc))
+    end
+    for _,w in ipairs(_DIAG.Warns) do warn("  [HINT] "..w.label.." — "..w.msg) end
+    return _DIAG
+end
+
+function Compkiller:GetDiagnostics()
+    return Compkiller.DiagnosticReport
+end
+
+-- ── EXTENDED COMMAND API ──────────────────────────────────────────────────
+function Compkiller:SetPerformanceProfile(profile)
+    local P = {
+        ULTRA={thr=15, strk=true,  blur=true,  esp=0    },
+        HIGH ={thr=25, strk=true,  blur=true,  esp=0    },
+        MID  ={thr=35, strk=false, blur=true,  esp=1/45 },
+        LOW  ={thr=50, strk=false, blur=false, esp=1/20 },
+    }
+    local p = P[string.upper(tostring(profile or ""))]
+    if not p then
+        warn("[CK] SetPerformanceProfile: unknown '"..tostring(profile).."' (LOW/MID/HIGH/ULTRA)")
+        return
+    end
+    Compkiller._OPT.AnimThreshold = p.thr
+    _OPT.AnimThreshold            = p.thr
+    if Compkiller.HW then
+        Compkiller.HW.Tier             = string.upper(profile)
+        Compkiller.HW.UIStrokesEnabled = p.strk
+        Compkiller.HW.BlurEnabled      = p.blur
+        Compkiller.HW.ESPInterval      = p.esp
+    end
+    print(("[CK] Profile -> %s | threshold=%d fps | strokes=%s | blur=%s")
+        :format(string.upper(profile), p.thr, tostring(p.strk), tostring(p.blur)))
+end
+
+function Compkiller:SetHighlightColor(color)
+    assert(type(color) == "userdata", "[CK] SetHighlightColor expects Color3")
+    Compkiller.Colors.Highlight = color
+    Compkiller.Colors.Toggle    = color
+    for _,entry in ipairs(Compkiller.Elements.Highlight or {}) do
+        pcall(function() entry.Element[entry.Property] = color end)
     end
 end
 
--- ============================================================================
---  NEW SMART SYSTEM 5 ▸ EXTENDED COMMAND API
--- ============================================================================
-do
-    -- Sync both _OPT tables when toggling optimizations
-    function Compkiller:EnableAdvancedOptimizations(enabled)
-        _OPT.Enabled             = enabled
-        Compkiller._OPT.Enabled  = enabled
-        print(("[CK] Advanced Optimizations -> %s")
-    end
-
-    -- Force a performance tier instead of relying on auto-detection
-    function Compkiller:SetPerformanceProfile(profile)
-        local P = {
-            ULTRA={thr=15, strk=true,  blur=true,  esp=0    },
-            HIGH ={thr=25, strk=true,  blur=true,  esp=0    },
-            MID  ={thr=35, strk=false, blur=true,  esp=1/45 },
-            LOW  ={thr=50, strk=false, blur=false, esp=1/20 },
-        }
-        local p = P[string.upper(tostring(profile or ""))]
-        if not p then
-            warn("[CK] SetPerformanceProfile: unknown '"..tostring(profile).."' (LOW/MID/HIGH/ULTRA)")
-            return
-        end
-        Compkiller._OPT.AnimThreshold = p.thr
-        _OPT.AnimThreshold            = p.thr
-        if Compkiller.HW then
-            Compkiller.HW.Tier             = string.upper(profile)
-            Compkiller.HW.UIStrokesEnabled = p.strk
-            Compkiller.HW.BlurEnabled      = p.blur
-            Compkiller.HW.ESPInterval      = p.esp
-        end
-        print(("[CK] Profile -> %s | threshold=%d fps | strokes=%s | blur=%s")
-            :format(string.upper(profile), p.thr, tostring(p.strk), tostring(p.blur)))
-    end
-
-    -- Hot-swap accent/highlight color on all registered elements
-    function Compkiller:SetHighlightColor(color)
-        assert(typeof(color)=="Color3","[CK] SetHighlightColor expects Color3, got "..typeof(color))
-        Compkiller.Colors.Highlight = color
-        Compkiller.Colors.Toggle    = color
-        for _,entry in ipairs(Compkiller.Elements.Highlight or {}) do
-            pcall(function() entry.Element[entry.Property] = color end)
+function Compkiller:SetThemeColors(colors)
+    for key,color in pairs(colors) do
+        if Compkiller.Colors[key] ~= nil then
+            Compkiller.Colors[key] = color
+            for _,entry in ipairs(Compkiller.Elements[key] or {}) do
+                pcall(function() entry.Element[entry.Property] = color end)
+            end
+        else
+            warn("[CK] SetThemeColors: unknown slot '"..tostring(key).."'")
         end
     end
+end
 
-    -- Batch-update colour slots and live-update all tracked elements
-    -- Batch-update individual colour slots and live-update all tracked elements
-    function Compkiller:SetThemeColors(colors)
-        for key,color in pairs(colors) do
-            if Compkiller.Colors[key]~=nil then
-                Compkiller.Colors[key]=color
-                for _,entry in ipairs(Compkiller.Elements[key] or {}) do
-                    pcall(function() entry.Element[entry.Property]=color end)
-                end
-            else warn("[CK] SetThemeColors: unknown slot '"..tostring(key).."'") end
-        end
-    end
+function Compkiller:PauseAllAnimations()
+    for _,tw in ipairs(Compkiller._OPT.ActiveTweens) do pcall(function() tw:Pause() end) end
+end
 
-    -- Pause / resume all active tweens (e.g. when overlay menus open)
-    function Compkiller:PauseAllAnimations()
-        for _,tw in ipairs(Compkiller._OPT.ActiveTweens) do pcall(function() tw:Pause() end) end
-    end
-    function Compkiller:ResumeAllAnimations()
-        for _,tw in ipairs(Compkiller._OPT.ActiveTweens) do pcall(function() tw:Play()  end) end
-    end
+function Compkiller:ResumeAllAnimations()
+    for _,tw in ipairs(Compkiller._OPT.ActiveTweens) do pcall(function() tw:Play() end) end
+end
 
-    -- One-shot info dump
-    function Compkiller:GetVersionInfo()
-        return {
-            Version      = Compkiller.Version,
-            FPS          = Compkiller:GetFPS(),
-            HardwareTier = Compkiller.HW and Compkiller.HW.Tier or "UNKNOWN",
-            IsMobile     = Compkiller.HW and Compkiller.HW.IsMobile or false,
-            OptimizerOn  = Compkiller._OPT.Enabled,
-            Stats        = Compkiller:GetOptimizerStats(),
-        }
-    end
+function Compkiller:GetVersionInfo()
+    return {
+        Version      = Compkiller.Version,
+        FPS          = Compkiller:GetFPS(),
+        HardwareTier = Compkiller.HW and Compkiller.HW.Tier or "UNKNOWN",
+        IsMobile     = Compkiller.HW and Compkiller.HW.IsMobile or false,
+        OptimizerOn  = Compkiller._OPT.Enabled,
+        Stats        = Compkiller:GetOptimizerStats(),
+    }
+end
 
-    -- Safe nil-guarded Destroy
-    function Compkiller:SafeDestroy(inst)
-        if inst then pcall(function() inst:Destroy() end) end
-    end
+function Compkiller:SafeDestroy(inst)
+    if inst then pcall(function() inst:Destroy() end) end
+end
 
-    -- Hint Lua GC after closing heavy windows
-    function Compkiller:ForceGC()
-        collectgarbage("collect")
-        print("[CK] GC pass triggered.")
-    end
+function Compkiller:ForceGC()
+    collectgarbage("collect")
+    print("[CK] GC pass triggered.")
+end
 
-    -- Quick open-state query
-    function Compkiller:IsWindowOpen(win)
-        return win and win.IsOpen == true
-    end
+function Compkiller:IsWindowOpen(win)
+    return win and win.IsOpen == true
+end
+
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
