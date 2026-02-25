@@ -11,10 +11,7 @@ local Players: Players                       = cloneref(game:GetService('Players
 local HttpService: HttpService               = cloneref(game:GetService('HttpService'));
 local LocalPlayer: Player                    = Players.LocalPlayer;
 local PlayerGui                              = LocalPlayer:FindFirstChild("PlayerGui");
-local CoreGui: PlayerGui                     = (gethui and gethui())
-                                               or (get_hidden_gui and get_hidden_gui())
-                                               or cloneref(game:FindFirstChildOfClass('CoreGui'))
-                                               or cloneref(LocalPlayer.PlayerGui);
+local CoreGui: PlayerGui                     = (gethui and gethui()) or (get_hidden_gui and get_hidden_gui()) or cloneref(game:FindFirstChildOfClass('CoreGui')) or cloneref(LocalPlayer.PlayerGui);
 local Mouse: Mouse           = LocalPlayer:GetMouse();
 local CurrentCamera: Camera? = cloneref(workspace.CurrentCamera);
 
@@ -61,7 +58,7 @@ local _CK_THREADS     = {}
 local function _CK_RandomScreenName()
     local c = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
     local r = {}
-    for i = 1, 20 do r[i] = c:sub(math.random(1,#c), math.random(1,#c)) end
+    for i = 1, 20 do local idx = math.random(1,#c); r[i] = c:sub(idx, idx) end
     return table.concat(r)
 end
 
@@ -1298,7 +1295,7 @@ function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
 	return math.floor(num * mult + 0.5) / mult;
 end;
 
-function Compkiller:_Animation(Self: Instance , Info: TweenInfo , Property :{[K] : V})
+function Compkiller:_Animation(Self: Instance , Info: TweenInfo , Property :{[string]: any})
 	local opt = Compkiller._OPT
 	if opt and opt.Enabled then
 		return self:_SmartAnimation(Self, Info, Property)
@@ -1349,7 +1346,7 @@ function Compkiller:_Input(Frame : Frame , Callback : () -> ()) : TextButton
 	return Button;
 end;
 
-function Compkiller:GetCalculatePosition(planePos: number, planeNormal: number, rayOrigin: number, rayDirection: number) : number
+function Compkiller:GetCalculatePosition(planePos: Vector3, planeNormal: Vector3, rayOrigin: Vector3, rayDirection: Vector3) : Vector3
 	local n = planeNormal;
 	local d = rayDirection;
 	local v = rayOrigin - planePos;
@@ -3033,7 +3030,7 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 			Args.IsHold = true;
 
-			while (UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or Args.IsHold) do task.wait()
+			while (UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)) do task.wait()
 				local ColorY = ColorRedGreenBlue.AbsolutePosition.Y
 				local ColorYM = ColorY + ColorRedGreenBlue.AbsoluteSize.Y;
 				local Value = math.clamp(Mouse.Y, ColorY, ColorYM)
@@ -3050,7 +3047,7 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 			Args.IsHold = true;
 
-			while (UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or Args.IsHold) do task.wait()
+			while (UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)) do task.wait()
 				local transparency = math.clamp((((Mouse.X) - ColorOpc.AbsolutePosition.X) / ColorOpc.AbsoluteSize.X), 0, 1);
 				local RealColor = Color3.fromHSV(H , S , V);
 
@@ -3067,7 +3064,7 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 			Args.IsHold = true;
 
-			while (UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or Args.IsHold) do task.wait();
+			while (UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)) do task.wait();
 				local PosX = ColorPickBox.AbsolutePosition.X
 				local ScaleX = PosX + ColorPickBox.AbsoluteSize.X
 				local Value, PosY = math.clamp(Mouse.X, PosX, ScaleX), ColorPickBox.AbsolutePosition.Y
@@ -10509,7 +10506,7 @@ local _DummyTween = {
     Completed = _dummyBE.Event,
     PlaybackState = Enum.PlaybackState.Completed,
     Cancel = function() end,
-    Play = function() end,
+    Play = function() task.defer(function() _dummyBE:Fire() end) end,
     Pause = function() end,
 }
 
