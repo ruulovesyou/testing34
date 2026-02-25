@@ -1,4 +1,4 @@
-local _CK_DEBUG = true   -- internal boot flag (used before Compkiller table exists)
+local _CK_DEBUG = false   -- internal boot flag (used before Compkiller table exists)
 local function _CKLog(msg)
     local enabled = _CK_DEBUG
         or (type(Compkiller) == "table" and Compkiller.Debug == true)
@@ -1506,6 +1506,12 @@ function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
 end;
 
 function Compkiller:_Animation(Self: Instance , Info: TweenInfo , Property :{[K] : V})
+	if _OPT and _OPT._AnimPaused then
+		for prop, val in pairs(Property) do
+			pcall(function() Self[prop] = val end)
+		end
+		return _OPT._DummyTween
+	end
 	if _OPT and _OPT.Enabled then
 		return self:_SmartAnimation(Self, Info, Property)
 	end
@@ -11468,5 +11474,132 @@ do
 		end
 	end
 end
+
+
+Compkiller.MasterControl = {
+
+	-- ── IDENTITY & DEBUG ───────────────────────────────────────────────────────
+	Debug = {
+		enable  = function() Compkiller:SetDebug(true)  end,
+		disable = function() Compkiller:SetDebug(false) end,
+		dump    = function() _CKLog("dump")              end,
+		version = function() return Compkiller:GetVersionInfo() end,
+	},
+
+	-- ── PERFORMANCE PROFILE ────────────────────────────────────────────────────
+	Performance = {
+		high   = function() Compkiller:SetPerformanceProfile("HIGH")   end,
+		medium = function() Compkiller:SetPerformanceProfile("MEDIUM") end,
+		low    = function() Compkiller:SetPerformanceProfile("LOW")    end,
+		setTier      = function(t)  Compkiller:SetHardwareTier(t)       end,
+		setThreshold = function(n)  Compkiller:SetAnimThreshold(n)      end,
+		setMemInterval = function(s) Compkiller:SetMemInterval(s)       end,
+		isMobile     = function()   return Compkiller:IsMobileTier()    end,
+		getFPS       = function()   return Compkiller:GetFPS()          end,
+		getStats     = function()   return Compkiller:GetOptimizerStats() end,
+	},
+
+	-- ── ANIMATIONS ─────────────────────────────────────────────────────────────
+	Animations = {
+		enable  = function() Compkiller:SetSmartAnimations(true)  end,
+		disable = function() Compkiller:SetSmartAnimations(false) end,
+		pause   = function() Compkiller:PauseAllAnimations()      end,
+		resume  = function() Compkiller:ResumeAllAnimations()     end,
+		cleanup = function() Compkiller:CleanupAll()              end,
+		optimize = function(v) Compkiller:EnableAdvancedOptimizations(v ~= false) end,
+		gc      = function() return Compkiller:ForceGC()          end,
+	},
+
+	-- ── RENDER MANAGER ─────────────────────────────────────────────────────────
+	Render = {
+		start  = function() Compkiller:StartRenderManager() end,
+		stop   = function() Compkiller:StopRenderManager()  end,
+		cull   = function() Compkiller:RenderCull()         end,
+		resume = function() Compkiller:RenderResume()       end,
+		sleep  = function(v) Compkiller:SetSleepMode(v ~= false) end,
+		wake   = function() Compkiller:SetSleepMode(false)  end,
+	},
+
+	-- ── GUI SHIELD / OBFUSCATION ───────────────────────────────────────────────
+	Shield = {
+		obfuscate = function(v) Compkiller:EnableNameObfuscation(v ~= false) end,
+		reset     = function() Compkiller:HardReset()           end,
+		isOpen    = function(w) return Compkiller:IsWindowOpen(w) end,
+	},
+
+	-- ── SANDBOX & SAFE EXECUTION ───────────────────────────────────────────────
+	Sandbox = {
+		setSafeCall  = function(v) Compkiller:SetSafeCall(v ~= false) end,
+		exec         = function(fn, onErr) return Compkiller:SafeExec(fn, onErr) end,
+		getErrors    = function() return Compkiller:GetSandboxErrors() end,
+		newJanitor   = function() return Compkiller:NewJanitor()       end,
+		newRateLimiter = function(i) return Compkiller:NewRateLimiter(i) end,
+	},
+
+	-- ── DIAGNOSTICS & ANOMALY ──────────────────────────────────────────────────
+	Diagnostics = {
+		run          = function() return Compkiller:RunDiagnostics()       end,
+		get          = function() return Compkiller:GetDiagnostics()       end,
+		anomalyRun   = function() return Compkiller:RunAnomalyCheck()      end,
+		anomalyGet   = function() return Compkiller:GetAnomalyReport()     end,
+		watchStart   = function(i) Compkiller:StartAnomalyDetector(i)     end,
+		watchStop    = function() Compkiller:StopAnomalyDetector()         end,
+	},
+
+	-- ── QUICK PRESET BUNDLES ───────────────────────────────────────────────────
+	Preset = {
+		-- Minimal footprint: everything off, low perf, sleep on
+		stealth = function()
+			Compkiller:SetPerformanceProfile("LOW")
+			Compkiller:SetSmartAnimations(false)
+			Compkiller:EnableAdvancedOptimizations(false)
+			Compkiller:SetSleepMode(true)
+			Compkiller:EnableNameObfuscation(true)
+			_CKLog("MasterControl.Preset.stealth: active")
+		end,
+		-- Full power: everything on, high perf
+		performance = function()
+			Compkiller:SetPerformanceProfile("HIGH")
+			Compkiller:SetSmartAnimations(true)
+			Compkiller:EnableAdvancedOptimizations(true)
+			Compkiller:SetSleepMode(false)
+			Compkiller:StartRenderManager()
+			_CKLog("MasterControl.Preset.performance: active")
+		end,
+		-- Balanced: medium tier, smart anim, no sleep
+		balanced = function()
+			Compkiller:SetPerformanceProfile("MEDIUM")
+			Compkiller:SetSmartAnimations(true)
+			Compkiller:EnableAdvancedOptimizations(true)
+			Compkiller:SetSleepMode(false)
+			_CKLog("MasterControl.Preset.balanced: active")
+		end,
+	},
+
+	-- ── APPLY ALL FROM CONFIG TABLE ────────────────────────────────────────────
+	Apply = function(self, cfg)
+		if type(cfg) ~= "table" then return end
+
+		if cfg.debug          ~= nil then Compkiller:SetDebug(cfg.debug)                               end
+		if cfg.profile                    then Compkiller:SetPerformanceProfile(cfg.profile)            end
+		if cfg.tier                       then Compkiller:SetHardwareTier(cfg.tier)                     end
+		if cfg.animThreshold  ~= nil then Compkiller:SetAnimThreshold(cfg.animThreshold)               end
+		if cfg.memInterval    ~= nil then Compkiller:SetMemInterval(cfg.memInterval)                   end
+		if cfg.smartAnimations~= nil then Compkiller:SetSmartAnimations(cfg.smartAnimations)           end
+		if cfg.advancedOpt    ~= nil then Compkiller:EnableAdvancedOptimizations(cfg.advancedOpt)      end
+		if cfg.sleepMode      ~= nil then Compkiller:SetSleepMode(cfg.sleepMode)                       end
+		if cfg.safeCall       ~= nil then Compkiller:SetSafeCall(cfg.safeCall)                         end
+		if cfg.obfuscate      ~= nil then Compkiller:EnableNameObfuscation(cfg.obfuscate)              end
+		if cfg.renderManager  == true then Compkiller:StartRenderManager()
+		elseif cfg.renderManager == false then Compkiller:StopRenderManager()                          end
+		if cfg.anomalyWatch   == true then Compkiller:StartAnomalyDetector(cfg.anomalyInterval or 5)
+		elseif cfg.anomalyWatch == false then Compkiller:StopAnomalyDetector()                         end
+		if cfg.preset and Compkiller.MasterControl.Preset[cfg.preset] then
+			Compkiller.MasterControl.Preset[cfg.preset]()
+		end
+
+		_CKLog("MasterControl.Apply: config applied")
+	end,
+}
 
 return Compkiller;
