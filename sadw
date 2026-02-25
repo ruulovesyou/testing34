@@ -1,85 +1,22 @@
 
--- Ensure game is loaded before proceeding
-if not game:IsLoaded() then 
-    local success, err = pcall(function()
-        game.Loaded:Wait()
-    end)
-    if not success then
-        warn("[Compkiller] Failed to wait for game load:", err)
-    end
-end
-
--- Global error handler
-local INIT_ERRORS = {}
-local function safeInit(name, func)
-    local success, result = pcall(func)
-    if not success then
-        table.insert(INIT_ERRORS, {name = name, error = result})
-        warn(string.format("[Compkiller Init Error] %s: %s", name, tostring(result)))
-        return nil
-    end
-    return result
-end
+if not game:IsLoaded() then game.Loaded:Wait() end
 
 -- ── Service bootstrap (single, cloneref-protected declarations) ──────────────
-local cloneref = cloneref or function(f) return f end;
-
--- Safely get services with fallbacks
-local function safeGetService(name)
-    local success, result = pcall(function()
-        return cloneref(game:GetService(name))
-    end)
-    if not success then
-        success, result = pcall(function()
-            return game:GetService(name)
-        end)
-    end
-    return success and result or nil
-end
-
-local TweenService = safeGetService('TweenService') or game:GetService('TweenService');
-local UserInputService = safeGetService('UserInputService') or game:GetService('UserInputService');
-local TextService = safeGetService('TextService') or game:GetService('TextService');
-local RunService = safeGetService('RunService') or game:GetService('RunService');
-local Players = safeGetService('Players') or game:GetService('Players');
-local HttpService = safeGetService('HttpService') or game:GetService('HttpService');
-
-assert(TweenService, "Failed to get TweenService")
-assert(UserInputService, "Failed to get UserInputService")
-assert(Players, "Failed to get Players")
-
-local LocalPlayer = Players.LocalPlayer;
-assert(LocalPlayer, "LocalPlayer is nil - game may not be fully loaded")
-local PlayerGui = (function()
-    local success, result = pcall(function() return LocalPlayer:FindFirstChild("PlayerGui") end)
-    return success and result or nil
-end)();
-
-local CoreGui = (function()
-    -- Try gethui
-    if gethui then
-        local success, result = pcall(gethui)
-        if success and result then return result end
-    end
-    
-    -- Try get_hidden_gui
-    if get_hidden_gui then
-        local success, result = pcall(get_hidden_gui)
-        if success and result then return result end
-    end
-    
-    -- Try CoreGui with cloneref
-    local success, result = pcall(function() 
-        return cloneref(game:FindFirstChildOfClass('CoreGui')) 
-    end)
-    if success and result then return result end
-    
-    -- Fallback to PlayerGui
-    return LocalPlayer.PlayerGui
-end)();
-
-local Mouse = LocalPlayer:GetMouse();
-local CurrentCamera = workspace.CurrentCamera or workspace:WaitForChild("Camera", 5) or workspace.Camera;
+local cloneref: cloneref       = cloneref or function(f) return f end;
+local TweenService: TweenService             = cloneref(game:GetService('TweenService'));
+local UserInputService: UserInputService     = cloneref(game:GetService('UserInputService'));
+local TextService: TextService               = cloneref(game:GetService('TextService'));
+local RunService: RunService                 = cloneref(game:GetService('RunService'));
+local Players: Players                       = cloneref(game:GetService('Players'));
+local HttpService: HttpService               = cloneref(game:GetService('HttpService'));
+local LocalPlayer: Player                    = Players.LocalPlayer;
+local PlayerGui                              = LocalPlayer:FindFirstChild("PlayerGui");
+local CoreGui: PlayerGui                     = (gethui and gethui())
+                                               or (get_hidden_gui and get_hidden_gui())
+                                               or cloneref(game:FindFirstChildOfClass('CoreGui'))
+                                               or cloneref(LocalPlayer.PlayerGui);
+local Mouse: Mouse           = LocalPlayer:GetMouse();
+local CurrentCamera: Camera? = cloneref(workspace.CurrentCamera);
 
 
 local function SecureKill(target)
@@ -157,14 +94,18 @@ end
 
 getgenv()._CK_CLEANUP = function()
     -- Restore global task functions patched by Ghost Connection Reaper
-    if getgenv()._CK_ORIG_SPAWN then
-        task.spawn = getgenv()._CK_ORIG_SPAWN
-        getgenv()._CK_ORIG_SPAWN = nil
-    end
-    if getgenv()._CK_ORIG_DELAY then
-        task.delay = getgenv()._CK_ORIG_DELAY
-        getgenv()._CK_ORIG_DELAY = nil
-    end
+    pcall(function()
+        if getgenv()._CK_ORIG_SPAWN then
+            task.spawn = getgenv()._CK_ORIG_SPAWN
+            getgenv()._CK_ORIG_SPAWN = nil
+        end
+    end)
+    pcall(function()
+        if getgenv()._CK_ORIG_DELAY then
+            task.delay = getgenv()._CK_ORIG_DELAY
+            getgenv()._CK_ORIG_DELAY = nil
+        end
+    end)
 
     for _, t in ipairs(_CK_THREADS) do
         pcall(task.cancel, t)
@@ -231,11 +172,8 @@ local Compkiller = {
 	},
 	PerformanceMode = false,
 	WindowsNil = {},
-	NilFolder = (function()
-		local success, folder = pcall(function() return Instance.new('Folder') end)
-		return success and folder or nil
-	end)(),
-	ArcylicParent = CurrentCamera or workspace.CurrentCamera,
+	NilFolder = Instance.new('Folder'),
+	ArcylicParent = CurrentCamera,
 	ProtectGui = protect_gui or protectgui or (syn and syn.protect_gui) or function(s) return s; end,
 	-- Item #9: Anti-F9 Log — toggle via Compkiller:SetSafeCall(true/false)
 	SafeCallEnabled = _CK_SafeCallEnabled,
@@ -1313,7 +1251,8 @@ function Compkiller:_SetNilP(Ins: Instance , Parent: Instance)
 	Ins.Parent = Parent or Compkiller.NilFolder;
 end;
 
-function Compkiller:_GetIcon(name : string , font_aws).SecureMode then
+function Compkiller:_GetIcon(name : string , font_aws) : string
+	if Compkiller.SecureMode then
 		local AssetId;
 
 		if font_aws then
@@ -1338,20 +1277,24 @@ function Compkiller:_GetIcon(name : string , font_aws).SecureMode then
 	return Compkiller.Lucide['lucide-'..tostring(name)] or Compkiller.Lucide[name] or Compkiller.Lucide[tostring(name)] or Compkiller.FontAwesome[name] or name;
 end;
 
-function Compkiller:_RandomString()"CK="..string.char(math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102));
+function Compkiller:_RandomString() : string
+	return "CK="..string.char(math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102));
 end;
 
-function Compkiller:_IsMouseOverFrame(Frame : Frame);
+function Compkiller:_IsMouseOverFrame(Frame : Frame) : boolean
+	if not Frame then
+		return;
 	end;
 
-	local AbsPos, AbsSize = Frame.AbsolutePosition, Frame.AbsoluteSize;
+	local AbsPos: Vector2, AbsSize: Vector2 = Frame.AbsolutePosition, Frame.AbsoluteSize;
 
 	if Mouse.X >= AbsPos.X and Mouse.X <= AbsPos.X + AbsSize.X and Mouse.Y >= AbsPos.Y and Mouse.Y <= AbsPos.Y + AbsSize.Y then
 		return true;
 	end;
 end;
 
-function Compkiller:_Rounding(num: number, numDecimalPlaces: number)= 10 ^ (numDecimalPlaces or 0);
+function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
+	local mult: number = 10 ^ (numDecimalPlaces or 0);
 	return math.floor(num * mult + 0.5) / mult;
 end;
 
@@ -1406,7 +1349,8 @@ function Compkiller:_Input(Frame : Frame , Callback : () -> ()) : TextButton
 	return Button;
 end;
 
-function Compkiller:GetCalculatePosition(planePos: number, planeNormal: number, rayOrigin: number, rayDirection: number)= planeNormal;
+function Compkiller:GetCalculatePosition(planePos: number, planeNormal: number, rayOrigin: number, rayDirection: number) : number
+	local n = planeNormal;
 	local d = rayDirection;
 	local v = rayOrigin - planePos;
 
@@ -1417,7 +1361,8 @@ function Compkiller:GetCalculatePosition(planePos: number, planeNormal: number, 
 	return rayOrigin + (a * rayDirection);
 end;
 
-function Compkiller:_Blur(element : Frame , WindowRemote).SecureMode and not Compkiller.SecurityConfig.BlurEnabled then
+function Compkiller:_Blur(element : Frame , WindowRemote) : RBXScriptSignal
+	if Compkiller.SecureMode and not Compkiller.SecurityConfig.BlurEnabled then
 		return game.Changed:Connect(function() end);
 	end;
 
@@ -1662,9 +1607,9 @@ function Compkiller.__CONFIG(config , default)
 end;
 
 function Compkiller:Drag(InputFrame: Frame, MoveFrame: Frame, Speed : number)
-	local dragToggle = false;
-	local dragStart = nil;
-	local startPos = nil;
+	local dragToggle: boolean = false;
+	local dragStart: Vector3 = nil;
+	local startPos: UDim2 = nil;
 	local Tween = TweenInfo.new(Speed);
 
 	local updateInput = function(input)
@@ -2223,7 +2168,8 @@ do
     Compkiller.NameObfuscation = false
     Compkiller._EncNameStore   = {}  -- [TextLabel instance] = encryptedBytes
 
-    function Compkiller:Encrypt(str: string)= {}
+    function Compkiller:Encrypt(str: string): string
+        local out = {}
         for i = 1, #str do
             local k = _XOR_KEY[((i - 1) % #_XOR_KEY) + 1]
             out[i]  = string.char(bit32.bxor(string.byte(str, i), k))
@@ -2231,7 +2177,8 @@ do
         return table.concat(out)
     end
 
-    function Compkiller:Decrypt(str: string):Encrypt(str)
+    function Compkiller:Decrypt(str: string): string
+        return Compkiller:Encrypt(str)
     end
 
     function Compkiller:EnableNameObfuscation(enabled: boolean)
@@ -2248,7 +2195,8 @@ do
         end
     end
 
-    function Compkiller:GetRealName(inst: TextLabel)= Compkiller._EncNameStore[inst]
+    function Compkiller:GetRealName(inst: TextLabel): string
+        local enc = Compkiller._EncNameStore[inst]
         if enc then return Compkiller:Decrypt(enc) end
         return inst.Text
     end
@@ -2426,7 +2374,8 @@ Compkiller.Hash = function(str: string)
 	return "ck-"..tostring(math.round(hex + 15))..tostring(dh);
 end;
 
-function Compkiller:CacheImage(id: string).SecureMode or not id or not id:byte() then
+function Compkiller:CacheImage(id: string) : string
+	if not Compkiller.SecureMode or not id or not id:byte() then
 		return id or "";
 	end;
 
@@ -2503,7 +2452,7 @@ function Compkiller:PreloadIcons()
 			end);
 		end;
 	else
-		local ContentProvider = cloneref(game:GetService('ContentProvider'));
+		local ContentProvider: ContentProvider = cloneref(game:GetService('ContentProvider'));
 
 		for i,v in next , RequiredAssets do
 			ContentProvider:Preload(v);
@@ -3898,7 +3847,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		});
 
 		local Helper = Value:AddLink("Helper" , Config.Default);
-		local Button = Helper.InfoButton;
+		local Button: ImageButton = Helper.InfoButton;
 
 		Helper.Text.Parent = Window;
 
@@ -3989,7 +3938,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			Callback = function() end
 		});
 
-		local ColorPicker, ColorFrame = Value:AddLink('ColorPicker' , Config.Default);
+		local ColorPicker:Frame , ColorFrame: Frame = Value:AddLink('ColorPicker' , Config.Default);
 
 		local Button = Compkiller:_Input(ColorPicker);
 
@@ -4078,7 +4027,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 	end;
 
 	function Args:AddOption()
-		local Element = Value:AddLink("Option");
+		local Element: ImageButton = Value:AddLink("Option");
 		local BaseZ_Index = math.random(1,15) * 100;
 
 		local Signal = Compkiller.__SIGNAL(false);
@@ -4771,7 +4720,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		Block:SetVisible(Signal:GetValue());
 
-		local ColorPicker, ColorFrame = Block:AddLink('ColorPicker' , Config.Default);
+		local ColorPicker:Frame , ColorFrame: Frame = Block:AddLink('ColorPicker' , Config.Default);
 
 		local Button = Compkiller:_Input(ColorPicker);
 
@@ -7395,7 +7344,7 @@ function Compkiller.new(Config : Window)
 			end;
 		end))
 
-		local Parent = UilistLayout.Parent;
+		local Parent: ScrollingFrame = UilistLayout.Parent;
 
 		Parent = Parent or Scrolling;
 
@@ -9982,7 +9931,8 @@ function Compkiller:_Path(...)
 	return table.concat(args, "/");
 end;
 
-function Compkiller:ConfigManager(ConfigManager: ConfigManager)= Compkiller.__CONFIG(ConfigManager , {
+function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunctions
+	ConfigManager = Compkiller.__CONFIG(ConfigManager , {
 		Directory = "Compkiller",
 		Config = "Software"
 	});
@@ -10669,30 +10619,39 @@ end
 -- ═══════════════════════════════════════════════════════════════════════════
 do
     -- Restore originals if a previous CK execution already patched them
-    if getgenv()._CK_ORIG_SPAWN then task.spawn = getgenv()._CK_ORIG_SPAWN end
-    if getgenv()._CK_ORIG_DELAY then task.delay = getgenv()._CK_ORIG_DELAY end
+    pcall(function()
+        if getgenv()._CK_ORIG_SPAWN then task.spawn = getgenv()._CK_ORIG_SPAWN end
+        if getgenv()._CK_ORIG_DELAY then task.delay = getgenv()._CK_ORIG_DELAY end
+    end)
 
     local _orig_spawn = task.spawn
     local _orig_delay = task.delay
 
     -- Persist originals so next re-execute can restore them
-    getgenv()._CK_ORIG_SPAWN = _orig_spawn
-    getgenv()._CK_ORIG_DELAY = _orig_delay
+    pcall(function() getgenv()._CK_ORIG_SPAWN = _orig_spawn end)
+    pcall(function() getgenv()._CK_ORIG_DELAY = _orig_delay end)
 
-    task.spawn = function(fn, ...)
-        local thread = _orig_spawn(fn, ...)
-        if thread then _TrackThread(thread) end
-        return thread
-    end
+    -- FIX #2: task.spawn/task.delay patching may fail on some executors — wrap in pcall
+    pcall(function()
+        task.spawn = function(fn, ...)
+            local thread = _orig_spawn(fn, ...)
+            if thread then _TrackThread(thread) end
+            return thread
+        end
+    end)
 
-    task.delay = function(t, fn, ...)
-        local thread = _orig_delay(t, fn, ...)
-        if thread then _TrackThread(thread) end
-        return thread
-    end
+    pcall(function()
+        task.delay = function(t, fn, ...)
+            local thread = _orig_delay(t, fn, ...)
+            if thread then _TrackThread(thread) end
+            return thread
+        end
+    end)
 
-    local _runservice_connect_orig = RunService.Heartbeat.Connect
-
+    -- FIX #1 (CRITICAL): RBXScriptSignal.Connect is READ-ONLY in Roblox.
+    -- Directly assigning to Heartbeat.Connect / RenderStepped.Connect / Stepped.Connect
+    -- causes a hard crash that prevents the entire library from loading.
+    -- Wrapped in pcall so it silently skips if the executor does not support signal hijacking.
     local function _autoTrackSignal(signal)
         local origConnect = signal.Connect
         return function(self, fn)
@@ -10702,9 +10661,9 @@ do
         end
     end
 
-    RunService.Heartbeat.Connect   = _autoTrackSignal(RunService.Heartbeat)
-    RunService.RenderStepped.Connect = _autoTrackSignal(RunService.RenderStepped)
-    RunService.Stepped.Connect     = _autoTrackSignal(RunService.Stepped)
+    pcall(function() RunService.Heartbeat.Connect    = _autoTrackSignal(RunService.Heartbeat) end)
+    pcall(function() RunService.RenderStepped.Connect = _autoTrackSignal(RunService.RenderStepped) end)
+    pcall(function() RunService.Stepped.Connect      = _autoTrackSignal(RunService.Stepped) end)
 
     getgenv()._CK_GHOST_REAPER_ACTIVE = true
 end
@@ -11367,22 +11326,5 @@ do
         return Compkiller._Anomaly.LastReport
     end
 end
-
--- Report any initialization errors
-if #INIT_ERRORS > 0 then
-    warn("[Compkiller] " .. #INIT_ERRORS .. " initialization errors occurred:")
-    for i, err in ipairs(INIT_ERRORS) do
-        warn(string.format("  [%d] %s: %s", i, err.name, err.error))
-    end
-end
-
--- Final validation before return
-assert(type(Compkiller) == "table", "Compkiller failed to initialize as table")
-assert(type(Compkiller.newNotify) == "function", "Compkiller.newNotify not found")
-assert(type(Compkiller.new) == "function", "Compkiller.new not found")
-
-print(string.format("[Compkiller] v%s initialized successfully (FPS Optimizer: %s)", 
-    Compkiller.Version or "2.6", 
-    tostring(Compkiller._OPT and Compkiller._OPT.Enabled or false)))
 
 return Compkiller
