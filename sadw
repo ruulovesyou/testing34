@@ -1,5 +1,25 @@
 
-if not game:IsLoaded() then game.Loaded:Wait() end
+-- Ensure game is loaded before proceeding
+if not game:IsLoaded() then 
+    local success, err = pcall(function()
+        game.Loaded:Wait()
+    end)
+    if not success then
+        warn("[Compkiller] Failed to wait for game load:", err)
+    end
+end
+
+-- Global error handler
+local INIT_ERRORS = {}
+local function safeInit(name, func)
+    local success, result = pcall(func)
+    if not success then
+        table.insert(INIT_ERRORS, {name = name, error = result})
+        warn(string.format("[Compkiller Init Error] %s: %s", name, tostring(result)))
+        return nil
+    end
+    return result
+end
 
 -- ── Service bootstrap (single, cloneref-protected declarations) ──────────────
 local cloneref: cloneref = cloneref or function(f) return f end;
@@ -9,26 +29,57 @@ local function safeGetService(name)
     local success, result = pcall(function()
         return cloneref(game:GetService(name))
     end)
-    return success and result or game:GetService(name)
+    if not success then
+        success, result = pcall(function()
+            return game:GetService(name)
+        end)
+    end
+    return success and result or nil
 end
 
-local TweenService: TweenService = safeGetService('TweenService');
-local UserInputService: UserInputService = safeGetService('UserInputService');
-local TextService: TextService = safeGetService('TextService');
-local RunService: RunService = safeGetService('RunService');
-local Players: Players = safeGetService('Players');
-local HttpService: HttpService = safeGetService('HttpService');
+local TweenService: TweenService = safeGetService('TweenService') or game:GetService('TweenService');
+local UserInputService: UserInputService = safeGetService('UserInputService') or game:GetService('UserInputService');
+local TextService: TextService = safeGetService('TextService') or game:GetService('TextService');
+local RunService: RunService = safeGetService('RunService') or game:GetService('RunService');
+local Players: Players = safeGetService('Players') or game:GetService('Players');
+local HttpService: HttpService = safeGetService('HttpService') or game:GetService('HttpService');
+
+assert(TweenService, "Failed to get TweenService")
+assert(UserInputService, "Failed to get UserInputService")
+assert(Players, "Failed to get Players")
 
 local LocalPlayer: Player = Players.LocalPlayer;
-local PlayerGui = pcall(function() return LocalPlayer:FindFirstChild("PlayerGui") end) and LocalPlayer:FindFirstChild("PlayerGui") or nil;
+assert(LocalPlayer, "LocalPlayer is nil - game may not be fully loaded")
+local PlayerGui = (function()
+    local success, result = pcall(function() return LocalPlayer:FindFirstChild("PlayerGui") end)
+    return success and result or nil
+end)();
 
-local CoreGui: PlayerGui = (gethui and pcall(gethui) and gethui())
-                           or (get_hidden_gui and pcall(get_hidden_gui) and get_hidden_gui())
-                           or (pcall(function() return cloneref(game:FindFirstChildOfClass('CoreGui')) end) and cloneref(game:FindFirstChildOfClass('CoreGui')))
-                           or LocalPlayer.PlayerGui;
+local CoreGui: PlayerGui = (function()
+    -- Try gethui
+    if gethui then
+        local success, result = pcall(gethui)
+        if success and result then return result end
+    end
+    
+    -- Try get_hidden_gui
+    if get_hidden_gui then
+        local success, result = pcall(get_hidden_gui)
+        if success and result then return result end
+    end
+    
+    -- Try CoreGui with cloneref
+    local success, result = pcall(function() 
+        return cloneref(game:FindFirstChildOfClass('CoreGui')) 
+    end)
+    if success and result then return result end
+    
+    -- Fallback to PlayerGui
+    return LocalPlayer.PlayerGui
+end)();
 
 local Mouse: Mouse = LocalPlayer:GetMouse();
-local CurrentCamera: Camera? = workspace.CurrentCamera;
+local CurrentCamera: Camera? = workspace.CurrentCamera or workspace:WaitForChild("Camera", 5) or workspace.Camera;
 
 
 local function SecureKill(target)
@@ -11329,9 +11380,21 @@ do
     end
 end
 
+-- Report any initialization errors
+if #INIT_ERRORS > 0 then
+    warn("[Compkiller] " .. #INIT_ERRORS .. " initialization errors occurred:")
+    for i, err in ipairs(INIT_ERRORS) do
+        warn(string.format("  [%d] %s: %s", i, err.name, err.error))
+    end
+end
+
 -- Final validation before return
 assert(type(Compkiller) == "table", "Compkiller failed to initialize as table")
 assert(type(Compkiller.newNotify) == "function", "Compkiller.newNotify not found")
 assert(type(Compkiller.new) == "function", "Compkiller.new not found")
+
+print(string.format("[Compkiller] v%s initialized successfully (FPS Optimizer: %s)", 
+    Compkiller.Version or "2.6", 
+    tostring(Compkiller._OPT and Compkiller._OPT.Enabled or false)))
 
 return Compkiller
