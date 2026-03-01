@@ -11580,20 +11580,62 @@ Compkiller.MasterControl = {
 	Apply = function(self, cfg)
 		if type(cfg) ~= "table" then return end
 
+		-- ── DEBUG ─────────────────────────────────────────────────────────────
 		if cfg.debug          ~= nil then Compkiller:SetDebug(cfg.debug)                               end
+		if cfg.dumpStats      == true then Compkiller:DumpStats()                                      end
+
+		-- ── PERFORMANCE ───────────────────────────────────────────────────────
 		if cfg.profile                    then Compkiller:SetPerformanceProfile(cfg.profile)            end
 		if cfg.tier                       then Compkiller:SetHardwareTier(cfg.tier)                     end
 		if cfg.animThreshold  ~= nil then Compkiller:SetAnimThreshold(cfg.animThreshold)               end
 		if cfg.memInterval    ~= nil then Compkiller:SetMemInterval(cfg.memInterval)                   end
 		if cfg.smartAnimations~= nil then Compkiller:SetSmartAnimations(cfg.smartAnimations)           end
 		if cfg.advancedOpt    ~= nil then Compkiller:EnableAdvancedOptimizations(cfg.advancedOpt)      end
+		if cfg.optimizeMode   ~= nil then Compkiller:OptimizeMode(cfg.optimizeMode)                    end
 		if cfg.sleepMode      ~= nil then Compkiller:SetSleepMode(cfg.sleepMode)                       end
-		if cfg.safeCall       ~= nil then Compkiller:SetSafeCall(cfg.safeCall)                         end
-		if cfg.obfuscate      ~= nil then Compkiller:EnableNameObfuscation(cfg.obfuscate)              end
+		if cfg.fpsCap         ~= nil then pcall(function() setfpscap(cfg.fpsCap) end)                  end
+
+		-- ── ANIMATIONS ────────────────────────────────────────────────────────
+		if cfg.pauseAnimations  == true  then Compkiller:PauseAllAnimations()                          end
+		if cfg.resumeAnimations == true  then Compkiller:ResumeAllAnimations()                         end
+		if cfg.cleanupAll       == true  then Compkiller:CleanupAll()                                  end
+		if cfg.forceGC          == true  then Compkiller:ForceGC()                                     end
+
+		-- ── RENDER MANAGER ────────────────────────────────────────────────────
 		if cfg.renderManager  == true then Compkiller:StartRenderManager()
 		elseif cfg.renderManager == false then Compkiller:StopRenderManager()                          end
+		if cfg.renderCull     == true  then Compkiller:RenderCull()                                    end
+		if cfg.renderResume   == true  then Compkiller:RenderResume()                                  end
+
+		-- ── SAFE EXECUTION ────────────────────────────────────────────────────
+		if cfg.safeCall       ~= nil then Compkiller:SetSafeCall(cfg.safeCall)                         end
+
+		-- ── GUI SHIELD ────────────────────────────────────────────────────────
+		if cfg.obfuscate      ~= nil then Compkiller:EnableNameObfuscation(cfg.obfuscate)              end
+		if cfg.hardReset      == true  then Compkiller:HardReset()                                     end
+		if cfg.security       ~= nil then
+			local sec = cfg.security
+			Compkiller:Security(sec.folder or "Security", sec.config or {})
+		end
+
+		-- ── WINDOW POSITION ───────────────────────────────────────────────────
+		if cfg.savePosition   ~= nil then Compkiller:SaveWindowPosition(cfg.savePosition)              end
+		if cfg.loadPosition   == true  then Compkiller:LoadWindowPosition()                            end
+
+		-- ── ANOMALY DETECTION ─────────────────────────────────────────────────
 		if cfg.anomalyWatch   == true then Compkiller:StartAnomalyDetector(cfg.anomalyInterval or 5)
 		elseif cfg.anomalyWatch == false then Compkiller:StopAnomalyDetector()                         end
+
+		-- ── DIAGNOSTICS (delayed — waits for HW tier sample) ──────────────────
+		if cfg.runDiagnostics == true or cfg.runAnomalyCheck == true then
+			task.spawn(function()
+				task.wait(cfg.diagnosticsDelay or 3)
+				if cfg.runDiagnostics  == true then Compkiller:RunDiagnostics()  end
+				if cfg.runAnomalyCheck == true then Compkiller:RunAnomalyCheck() end
+			end)
+		end
+
+		-- ── PRESET ────────────────────────────────────────────────────────────
 		if cfg.preset and Compkiller.MasterControl.Preset[cfg.preset] then
 			Compkiller.MasterControl.Preset[cfg.preset]()
 		end
