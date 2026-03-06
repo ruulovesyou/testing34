@@ -1,3 +1,140 @@
+-- ════════════════════════════════════════════════════════════════════════════
+--  EXECUTOR COMPATIBILITY SHIM  —  normalises environment BEFORE anything runs
+--  Supports: Synapse X, Synapse V3, KRNL, Fluxus, Delta, Solara, Electron,
+--            Celery, Nihon, Comet, Velocity, Hydrogen, Arceus X, and others.
+-- ════════════════════════════════════════════════════════════════════════════
+do
+    -- ── task library ─────────────────────────────────────────────────────────
+    -- Older executors expose spawn/delay/wait at global scope, not task.*
+    if type(task) ~= "table" then
+        task = {}
+    end
+    if type(task.spawn) ~= "function" then
+        task.spawn = function(fn, ...)
+            local args = {...}
+            local co = coroutine.wrap(function() fn(table.unpack(args)) end)
+            local ok, err = pcall(co)
+            if not ok then warn("[CK:task.spawn] " .. tostring(err)) end
+        end
+    end
+    if type(task.wait) ~= "function" then
+        task.wait = (type(wait) == "function" and wait)
+            or function(n) local t = tick(); repeat until tick() - t >= (n or 0) end
+    end
+    if type(task.delay) ~= "function" then
+        task.delay = function(t, fn, ...)
+            local args = {...}
+            task.spawn(function() task.wait(t) fn(table.unpack(args)) end)
+        end
+    end
+    if type(task.defer) ~= "function" then
+        task.defer = task.spawn
+    end
+    if type(task.cancel) ~= "function" then
+        task.cancel = function(co)
+            pcall(function()
+                if type(co) == "thread" and coroutine.status(co) ~= "dead" then
+                    coroutine.resume(co)
+                end
+            end)
+        end
+    end
+
+    -- ── getgenv / getrenv ─────────────────────────────────────────────────────
+    -- Hydrogen, Arceus X, Velocity and others don't always expose these
+    if type(getgenv) ~= "function" then
+        local _genv = {}
+        getgenv = function() return _genv end
+    end
+    if type(getrenv) ~= "function" then
+        getrenv = function() return {} end
+    end
+
+    -- ── coroutine.close ───────────────────────────────────────────────────────
+    -- Not available in Lua 5.1 environments used by some executors
+    if type(coroutine.close) ~= "function" then
+        coroutine.close = function(co)
+            pcall(function()
+                if coroutine.status(co) == "suspended" then
+                    coroutine.resume(co)
+                end
+            end)
+        end
+    end
+
+    -- ── typeof ────────────────────────────────────────────────────────────────
+    if type(typeof) ~= "function" then
+        typeof = type
+    end
+
+    -- ── warn ──────────────────────────────────────────────────────────────────
+    if type(warn) ~= "function" then
+        warn = print
+    end
+
+    -- ── cloneref ─────────────────────────────────────────────────────────────
+    if type(cloneref) ~= "function" then
+        cloneref = function(obj) return obj end
+    end
+
+    -- ── gethui / protect_gui ──────────────────────────────────────────────────
+    if type(gethui) ~= "function" then
+        gethui = get_hidden_ui or get_hidden_gui or hiddenUI
+            or function() return game:GetService("CoreGui") end
+    end
+    if type(protect_gui) ~= "function" then
+        protect_gui = (type(syn) == "table" and syn.protect_gui) or function() end
+    end
+
+    -- ── hook functions — nil is safer than a stub so CK type() checks work ──
+    if type(hookfunction)    ~= "function" then hookfunction    = nil end
+    if type(hookmetamethod)  ~= "function" then hookmetamethod  = nil end
+
+    -- ── newcclosure ───────────────────────────────────────────────────────────
+    if type(newcclosure) ~= "function" then
+        newcclosure = function(f) return f end
+    end
+
+    -- ── metamethod/env helpers ────────────────────────────────────────────────
+    if type(setreadonly) ~= "function" then
+        setreadonly = function() end
+    end
+    if type(getrawmetatable) ~= "function" then
+        getrawmetatable = function(t)
+            return debug and type(debug.getmetatable) == "function"
+                and debug.getmetatable(t) or nil
+        end
+    end
+    if type(checkcaller) ~= "function" then
+        checkcaller = function() return true end  -- assume executor = safe caller
+    end
+    if type(getnamecallmethod) ~= "function" then
+        getnamecallmethod = function() return "" end
+    end
+    if type(identifyexecutor) ~= "function" then
+        identifyexecutor = what_is_my_executor or function() return "unknown", "0" end
+    end
+    if type(islclosure) ~= "function" then
+        islclosure = is_l_closure or function() return false end
+    end
+    if type(isourclosure) ~= "function" then
+        isourclosure = is_our_closure or function() return false end
+    end
+    if type(getconnections) ~= "function" then
+        getconnections = function() return {} end
+    end
+    if type(setfpscap) ~= "function" then
+        setfpscap = function() end
+    end
+    if type(ficloseupvalue) ~= "function" then
+        ficloseupvalue = function() end
+    end
+    if type(getupvalues) ~= "function" then
+        getupvalues = function() return {} end
+    end
+end
+-- ════════════════════════════════════════════════════════════════════════════
+
 local _CK_DEBUG = false   -- internal boot flag (used before Compkiller table exists)
 local function _CKLog(msg)
     local enabled = _CK_DEBUG
@@ -247,7 +384,7 @@ pcall(function()
     end
 end)
 
-getgenv().__rbxCoReg = {}
+pcall(function() getgenv().__rbxCoReg = {} end)
 
 _SmartKillGUIs()
 
@@ -301,7 +438,7 @@ local RunService       = cloneref(game:GetService("RunService"))
 local TextService      = cloneref(game:GetService("TextService"))
 
 local CurrentCamera = workspace.CurrentCamera
-local Mouse         = LocalPlayer:GetMouse()
+local Mouse         = (function() local ok, m = pcall(function() return LocalPlayer:GetMouse() end); return ok and m or nil end)()
 
 local _HW_TIER      = "MEDIUM"   -- [PATCH #10] default lowered from HIGH — reduces activity fingerprint on AC idle-detection; nuke preset still overrides to HIGH explicitly
 local _HW_FPS_RAW   = 60
@@ -548,47 +685,6 @@ local function _GetPoolName()
     return _TURBO_NAME_POOL[_mrandom(1, #_TURBO_NAME_POOL)]
 end
 
-function Compkiller:EnableTurboScramble(screenGui, enabled)
-    if enabled == false then
-        if _TURBO_CONN then
-            _pcall(function() _TURBO_CONN:Disconnect() end)
-            _TURBO_CONN   = nil
-            _TURBO_ACTIVE = false
-            _CKLog("TurboScramble: disabled.")
-        end
-        return
-    end
-
-    if _TURBO_ACTIVE then
-        _CKLog("TurboScramble: already active.")
-        return
-    end
-
-    if not screenGui then
-        _CKLog("TurboScramble: no ScreenGui provided.")
-        return
-    end
-
-    _BuildNamePool(screenGui)
-    _TURBO_ACTIVE = true
-
-    -- RenderStepped — rename GUI + ALL descendants every frame
-    _TURBO_CONN = _TrackConn(RunService.RenderStepped:Connect(function()
-        _pcall(function()
-            -- Rename root ScreenGui
-            local newName = _GetPoolName()
-            screenGui.Name = newName
-            _tinsert(_CK_HIDDEN_GUI_NAMES, newName)
-
-            -- Rename ALL descendants (TurboNameSpam equivalent)
-            for _, v in _ipairs(screenGui:GetDescendants()) do
-                _pcall(function() v.Name = _GetPoolName() end)
-            end
-        end)
-    end))
-
-    _CKLog("TurboScramble: active — renaming GUI + all descendants every frame.")
-end
 
 local _CK_ENCRYPTED_NAMES = {}   -- registry of all encrypted names this run
 
@@ -752,6 +848,7 @@ local function _TrackThread(thread)
     return thread
 end
 
+pcall(function()
 getgenv().__rbxClnSvc = function()
     for _, t in ipairs(_CK_THREADS) do
         pcall(task.cancel, t)
@@ -804,6 +901,7 @@ getgenv().__rbxClnSvc = function()
         getgenv().__rbxCoReg = {}
     end)
 end
+end) -- pcall wrapper for getgenv().__rbxClnSvc assignment
 
 
 local Compkiller = {
@@ -867,6 +965,49 @@ _ckSpawn(function()
         Compkiller.Debug = false
     end
 end)
+
+
+function Compkiller:EnableTurboScramble(screenGui, enabled)
+    if enabled == false then
+        if _TURBO_CONN then
+            _pcall(function() _TURBO_CONN:Disconnect() end)
+            _TURBO_CONN   = nil
+            _TURBO_ACTIVE = false
+            _CKLog("TurboScramble: disabled.")
+        end
+        return
+    end
+
+    if _TURBO_ACTIVE then
+        _CKLog("TurboScramble: already active.")
+        return
+    end
+
+    if not screenGui then
+        _CKLog("TurboScramble: no ScreenGui provided.")
+        return
+    end
+
+    _BuildNamePool(screenGui)
+    _TURBO_ACTIVE = true
+
+    -- RenderStepped — rename GUI + ALL descendants every frame
+    _TURBO_CONN = _TrackConn(RunService.RenderStepped:Connect(function()
+        _pcall(function()
+            -- Rename root ScreenGui
+            local newName = _GetPoolName()
+            screenGui.Name = newName
+            _tinsert(_CK_HIDDEN_GUI_NAMES, newName)
+
+            -- Rename ALL descendants (TurboNameSpam equivalent)
+            for _, v in _ipairs(screenGui:GetDescendants()) do
+                _pcall(function() v.Name = _GetPoolName() end)
+            end
+        end)
+    end))
+
+    _CKLog("TurboScramble: active — renaming GUI + all descendants every frame.")
+end
 
 Compkiller.Elements = {
 	Highlight = {},
@@ -1963,9 +2104,8 @@ function Compkiller:_RandomString() : string
 end;
 
 function Compkiller:_IsMouseOverFrame(Frame : Frame) : boolean
-	if not Frame then
-		return;
-	end;
+	if not Frame then return end
+	if not Mouse then return false end
 
 	local AbsPos: Vector2, AbsSize: Vector2 = Frame.AbsolutePosition, Frame.AbsoluteSize;
 
@@ -13614,276 +13754,2381 @@ function Compkiller:ArmAntiDetection(cfg)
 end
 
 
-Compkiller.MasterControl = {
 
- -- IDENTITY & DEBUG
-	Debug = {
-		enable  = function() Compkiller:SetDebug(true)  end,
-		disable = function() Compkiller:SetDebug(false) end,
-		dump    = function() _CKLog("dump")              end,
-		version = function() return Compkiller:GetVersionInfo() end,
-	},
+-- ══════════════════════════════════════════════════════════════════════════════
 
- -- PERFORMANCE PROFILE
-	Performance = {
-		high   = function() Compkiller:SetPerformanceProfile("HIGH")   end,
-		medium = function() Compkiller:SetPerformanceProfile("MEDIUM") end,
-		low    = function() Compkiller:SetPerformanceProfile("LOW")    end,
-		setTier        = function(t)  Compkiller:SetHardwareTier(t)       end,
-		setThreshold   = function(n)  Compkiller:SetAnimThreshold(n)      end,
-		setMemInterval = function(s)  Compkiller:SetMemInterval(s)        end,
-		isMobile       = function()   return Compkiller:IsMobileTier()    end,
-		getFPS         = function()   return Compkiller:GetFPS()          end,
-		getStats       = function()   return Compkiller:GetOptimizerStats() end,
-	},
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 🎮  MASTERCONTROL  v5.5.2  — Compkiller
+-- Single callable function. Call it once to get the controller, then use it.
+--
+--   local MC = Compkiller.MasterControl()
+--   MC.antiKick(true)
+--   MC.performance("HIGH")
+--   MC.allBypasses(true)
+--   MC.preset("nuke")
+--
+-- Or fire everything in one shot via apply():
+--   local MC = Compkiller.MasterControl()
+--   MC.apply({
+--     antiKick             = true,
+--     antiAfk              = true,
+--     performance          = "HIGH",
+--     obfuscate            = true,
+--     turboScramble        = true,
+--     turboScrambleGui     = Window.Root,
+--     allBypasses          = true,
+--     integrityTest        = true,
+--     preset               = "secure",
+--     -- also available in apply():
+--     debug                = false,
+--     dumpStats            = false,
+--     tier                 = "HIGH",
+--     animThreshold        = 30,
+--     memInterval          = 5,
+--     fpsCap               = 60,
+--     smartAnimations      = true,
+--     advancedOpt          = true,
+--     sleepMode            = false,
+--     optimizeMode         = false,
+--     pauseAnimations      = false,
+--     forceGC              = false,
+--     cleanupAll           = false,
+--     renderManager        = true,
+--     renderCull           = false,
+--     safeCall             = true,
+--     hardReset            = false,
+--     indexHook            = true,
+--     savePosition         = false,
+--     loadPosition         = false,
+--     anomalyWatch         = true,
+--     anomalyInterval      = 5,
+--     anomalyCallback      = nil,
+--     gcBypass             = true,
+--     memBypass            = true,
+--     contentBypass        = true,
+--     honeyPotBypass       = true,
+--     globalScanBypass     = true,
+--     metaGuard            = true,
+--     renvBypass           = true,
+--     textBoxBypass        = true,
+--     memorySpoof          = true,
+--     contentProviderBypass= true,
+--     honeypotBypass       = true,
+--     scanGuard            = true,
+--     scanGuardGui         = Window.Root,
+--     namecallGuard        = true,
+--     executorCloaker      = true,
+--     armAntiDetection     = true,
+--     runDiagnostics       = false,
+--     anomalyCheck         = false,
+--     diagnosticsDelay     = 8,
+--     presetOverrides      = {},
+--   })
+-- ══════════════════════════════════════════════════════════════════════════════
 
- -- ANIMATIONS
-	Animations = {
-		enable   = function()    Compkiller:SetSmartAnimations(true)              end,
-		disable  = function()    Compkiller:SetSmartAnimations(false)             end,
-		pause    = function()    Compkiller:PauseAllAnimations()                  end,
-		resume   = function()    Compkiller:ResumeAllAnimations()                 end,
-		cleanup  = function()    Compkiller:CleanupAll()                          end,
-		optimize = function(v)   Compkiller:EnableAdvancedOptimizations(v ~= false) end,
-		gc       = function()    return Compkiller:ForceGC()                      end,
-	},
+-- ════════════════════════════════════════════════════════════════════════════
+--  MASTERCONTROL  v5.5.2  —  Compkiller
+--  Single function. Every CK capability lives inside.
+--
+--  local MC = Compkiller.MasterControl()
+--  MC.antiKick(true)
+--  MC.performance("HIGH")
+--  MC.allBypasses(true)
+--  MC.preset("nuke")
+--  MC.apply({ antiKick=true, performance="HIGH", allBypasses=true })
+-- ════════════════════════════════════════════════════════════════════════════
+Compkiller.MasterControl = function()
 
- -- RENDER MANAGER
-	Render = {
-		start  = function()  Compkiller:StartRenderManager()          end,
-		stop   = function()  Compkiller:StopRenderManager()           end,
-		cull   = function()  Compkiller:RenderCull()                  end,
-		resume = function()  Compkiller:RenderResume()                end,
-		sleep  = function(v) Compkiller:SetSleepMode(v ~= false)      end,
-		wake   = function()  Compkiller:SetSleepMode(false)           end,
-	},
+	-- value coercion helpers
+	local function _bv(v, d) if v == nil then return d ~= false end return v ~= false and v ~= "false" end
+	local function _sv(v, d) return type(v) == "string" and v or (d or "") end
+	local function _nv(v, d) return type(v) == "number" and v or (d or 0) end
 
- -- GUI SHIELD / OBFUSCATION
-	Shield = {
-		obfuscate     = function(v)     Compkiller:EnableNameObfuscation(v ~= false)          end,
-		turboScramble = function(sg, v) Compkiller:EnableTurboScramble(sg, v ~= false)        end,
-		reset         = function()      Compkiller:HardReset()                                end,
-		isOpen        = function(w)     return Compkiller:IsWindowOpen(w)                     end,
-		indexHook     = function()      _InstallIndexHook()                                   end,
-	},
+	-- fpsCap (executor native, not a Compkiller method)
+	local function fpsCap(v)
+		_pcall(function() setfpscap(_nv(v, 60)) end)
+	end
 
- -- SANDBOX & SAFE EXECUTION
-	Sandbox = {
-		setSafeCall    = function(v)        Compkiller:SetSafeCall(v ~= false)        end,
-		exec           = function(fn, onErr) return Compkiller:SafeExec(fn, onErr)    end,
-		wrap           = function(fn, onErr) return Compkiller:Wrap(fn, onErr)        end,
-		getErrors      = function()          return Compkiller:GetSandboxErrors()     end,
-		newJanitor     = function()          return Compkiller:NewJanitor()           end,
-		newRateLimiter = function(i)         return Compkiller:NewRateLimiter(i)      end,
-		newSandbox     = function(cfg)       return Compkiller:NewSandbox(cfg)        end,
-	},
+	-- indexHook (uses local _InstallIndexHook)
+	local function indexHook()
+		_InstallIndexHook()
+	end
 
- -- DIAGNOSTICS & ANOMALY
-	Diagnostics = {
-		run              = function()    return Compkiller:RunDiagnostics()              end,
-		get              = function()    return Compkiller:GetDiagnostics()              end,
-		anomalyRun       = function()    return Compkiller:RunAnomalyCheck()             end,
-		anomalyGet       = function()    return Compkiller:GetAnomalyReport()            end,
-		watchStart       = function(i)   Compkiller:StartAnomalyDetector(i)             end,
-		watchStop        = function()    Compkiller:StopAnomalyDetector()               end,
-		setCallback      = function(fn)  Compkiller:SetAnomalyCallback(fn)              end,
-		integrityTest    = function()    return Compkiller:RunExecutorIntegrityTest()    end,
-		integrityGet     = function()    return Compkiller:GetIntegrityReport()          end,
-		executorProfile  = function()    return Compkiller:GetExecutorProfile()          end,
-		missingEnv       = function()    return Compkiller:GetMissingEnv()              end,
-	},
 
- -- SECURITY
-	Security = {
-		antiAfk          = function(v)  Compkiller:EnableAntiAFK(v ~= false)         end,
-		antiKick         = function(v)  Compkiller:EnableAntiKick(v ~= false)         end,
-	},
+	-- ════════════════════════════════════════════════════════════════════════
+	-- DEBUG
+	-- ════════════════════════════════════════════════════════════════════════
+	local function setDebug(enabled: boolean)
+		Compkiller.Debug = (enabled == true)
+		_CK_DEBUG  = Compkiller.Debug   -- sync boot flag too
+		_CKLog("Debug logging " .. (Compkiller.Debug and "ENABLED" or "DISABLED"))
+		return Compkiller.Debug
+	end
 
- -- ANTI-DETECTION BYPASSES
-	AntiDetection = {
-		memorySpoof      = function(v)    Compkiller:EnableMemorySpoof(v ~= false)              end,
-		contentBypass    = function(v)    Compkiller:EnableContentProviderBypass(v ~= false)    end,
-		honeypotBypass   = function(v)    Compkiller:EnableHoneypotBypass(v ~= false)           end,
-		scanGuard        = function(sg,v) Compkiller:EnableScanGuard(sg, v ~= false)            end,
-		namecallGuard    = function(v)    Compkiller:EnableNamecallGuard(v ~= false)            end,
-		executorCloaker  = function(v)    Compkiller:EnableExecutorCloaker(v ~= false)          end,
-		armAll           = function(cfg)  Compkiller:ArmAntiDetection(cfg)                      end,
-	},
+	local function dumpStats()
+		local stats = getOptimizerStats()
+		local lines = {
+			"╔══════════════════════════════════════════",
+			"║  Compkiller v" .. Compkiller.Version .. " — Runtime Stats",
+			"╠══════════════════════════════════════════",
+			"║  Hardware Tier   : " .. tostring(Compkiller.HardwareTier or "N/A"),
+			"║  Hardware FPS    : " .. tostring(Compkiller.HardwareFPS  or "N/A"),
+			"║  GUI Shield      : " .. tostring(Compkiller.GuiShieldMethod or "N/A"),
+			"║  Performance Mode: " .. tostring(Compkiller.PerformanceMode),
+			"╠══════════════════════════════════════════",
+			"║  Live FPS        : " .. stats.FPS,
+			"║  Anim Threshold  : " .. stats.AnimThreshold .. " fps",
+			"║  Smart Anim ON   : " .. tostring(stats.Enabled),
+			"║  Active Tweens   : " .. stats.ActiveTweens,
+			"╠══════════════════════════════════════════",
+			"║  Tweens Cancelled: " .. stats.TweensCancelled,
+			"║  Instant Sets    : " .. stats.InstantSets,
+			"║  Dedup Cancels   : " .. stats.DedupCancels,
+			"║  Memory Sweeps   : " .. stats.MemorySweeps,
+			"║  Tracked Threads : " .. #_CK_THREADS,
+			"║  Tracked Conns   : " .. #_CK_CONNECTIONS,
+			"║  GC Memory (KB)  : " .. tostring(math.floor((collectgarbage("count") or 0) + 0.5)),
+			"╠══════════════════════════════════════════",
+			"║  Windows Open    : " .. #Compkiller.Windows,
+			"╚══════════════════════════════════════════",
+		}
+		_CKLog("dump")
+		return stats
+	end
 
- -- QUICK PRESET BUNDLES
-	Preset = {
-		-- Minimal footprint: everything off, low perf, sleep on
-		stealth = function()
-			Compkiller:SetPerformanceProfile("LOW")
-			Compkiller:SetSmartAnimations(false)
-			Compkiller:EnableAdvancedOptimizations(false)
-			Compkiller:SetSleepMode(true)
-			Compkiller:EnableNameObfuscation(true)
-			_CKLog("MasterControl.Preset.stealth: active")
-		end,
-		-- Full power: everything on, high perf
-		performance = function()
-			Compkiller:SetPerformanceProfile("HIGH")
-			Compkiller:SetSmartAnimations(true)
-			Compkiller:EnableAdvancedOptimizations(true)
-			Compkiller:SetSleepMode(false)
-			Compkiller:StartRenderManager()
-			_CKLog("MasterControl.Preset.performance: active")
-		end,
-		-- Balanced: medium tier, smart anim, no sleep
-		balanced = function()
-			Compkiller:SetPerformanceProfile("MEDIUM")
-			Compkiller:SetSmartAnimations(true)
-			Compkiller:EnableAdvancedOptimizations(true)
-			Compkiller:SetSleepMode(false)
-			_CKLog("MasterControl.Preset.balanced: active")
-		end,
-		-- Full war mode: every bypass + all protections
-		-- [PATCH #17] Accepts optional override table so explicit false flags
-		-- are NOT silently re-enabled by EnableAllBypasses()
-		nuke = function(overrides)
-			Compkiller:SetPerformanceProfile("HIGH")
-			Compkiller:SetSmartAnimations(true)
-			Compkiller:EnableAdvancedOptimizations(true)
-			Compkiller:EnableNameObfuscation(true)
-			Compkiller:StartAnomalyDetector(5)
-			Compkiller:EnableAntiAFK(true)
-			Compkiller:EnableAntiKick(true)
-			Compkiller:SetSafeCall(true)
-			Compkiller:EnableAllBypasses()
-			-- Re-apply any false overrides the caller explicitly set
-			if type(overrides) == "table" then
-				task.defer(function()
-					local _bypassMap = {
-						gcBypass         = function(v) Compkiller:EnableGCBypass(v)          end,
-						memBypass        = function(v) Compkiller:EnableMemoryBypass(v)       end,
-						contentBypass    = function(v) Compkiller:EnableContentBypass(v)      end,
-						honeyPotBypass   = function(v) Compkiller:EnableHoneyPotBypass(v)     end,
-						globalScanBypass = function(v) Compkiller:EnableGlobalScanBypass(v)   end,
-						metaGuard        = function(v) Compkiller:EnableMetaGuard(v)          end,
-						renvBypass       = function(v) Compkiller:EnableRenvBypass(v)         end,
-						textBoxBypass    = function(v) Compkiller:EnableTextBoxBypass(v)      end,
-					}
-					for k, fn in pairs(_bypassMap) do
-						if overrides[k] == false then
-							_pcall(fn, false)
+	local function getVersionInfo()
+		return {
+			Version      = Compkiller.Version,
+			HardwareTier = Compkiller.HardwareTier,
+			HardwareFPS  = Compkiller.HardwareFPS,
+			GuiShield    = Compkiller.GuiShieldMethod,
+			PerfMode     = Compkiller.PerformanceMode,
+			SmartAnim    = _OPT.Enabled,
+			AnimThreshold= _OPT.AnimThreshold,
+			Executor     = _CK_EXECUTOR,
+			ExecVersion  = _CK_EXEC_VERSION,
+			Elevated     = _CK_ELEVATED,
+			MissingEnv   = _CK_MISSING_ENV,
+		}
+	end
+
+	local function getExecutorProfile()
+		return {
+			executor   = _CK_EXECUTOR,
+			version    = _CK_EXEC_VERSION,
+			elevated   = _CK_ELEVATED,
+			missingEnv = _CK_MISSING_ENV,
+			guiShield  = _GUI_SHIELD_METHOD,
+		}
+	end
+
+	local function getMissingEnv()
+		return _CK_MISSING_ENV
+	end
+
+	local function isStudio()
+		return RunService:IsStudio()	
+	end;
+
+
+	-- ════════════════════════════════════════════════════════════════════════
+	-- PERFORMANCE
+	-- ════════════════════════════════════════════════════════════════════════
+	local function setPerformanceProfile(profile)
+		local p = tostring(profile):upper()
+		if p == "LOW" then
+			Compkiller.PerformanceMode = true
+			_OPT.AnimThreshold   = 60
+			Compkiller.HardwareTier    = "LOW"
+		elseif p == "MEDIUM" then
+			Compkiller.PerformanceMode = false
+			_OPT.AnimThreshold   = 40
+			Compkiller.HardwareTier    = "MEDIUM"
+		else
+			Compkiller.PerformanceMode = false
+			_OPT.AnimThreshold   = 30
+			Compkiller.HardwareTier    = "HIGH"
+		end
+		_CKLog("SetPerformanceProfile: " .. p)
+		return Compkiller.HardwareTier
+	end
+
+	local function setHardwareTier(tier: string)
+		local valid = {HIGH = true, MEDIUM = true, LOW = true}
+		tier = tostring(tier):upper()
+		if not valid[tier] then
+			_CKLog("SetHardwareTier: invalid tier '" .. tier .. "'. Use HIGH/MEDIUM/LOW.")
+			return false
+		end
+		Compkiller.HardwareTier = tier
+		if tier == "LOW" then
+			Compkiller.PerformanceMode = true
+			_OPT.AnimThreshold   = 60     -- instant-set everything
+			_CKLog("SetHardwareTier: LOW | PerformanceMode=true | Threshold=60fps")
+		elseif tier == "MEDIUM" then
+			Compkiller.PerformanceMode = false
+			_OPT.AnimThreshold   = 40
+			_CKLog("SetHardwareTier: MEDIUM | PerformanceMode=false | Threshold=40fps")
+		else
+			Compkiller.PerformanceMode = false
+			_OPT.AnimThreshold   = 30     -- default threshold
+			_CKLog("SetHardwareTier: HIGH | PerformanceMode=false | Threshold=30fps")
+		end
+		return Compkiller.HardwareTier
+	end
+
+	local function setAnimThreshold(fps: number)
+		_OPT.AnimThreshold = math.clamp(math.floor(fps), 10, 144)
+		_CKLog("SetAnimThreshold: " .. _OPT.AnimThreshold .. " fps")
+		return _OPT.AnimThreshold
+	end
+
+	local function setMemInterval(seconds: number)
+		_OPT.MemInterval = math.max(10, seconds)
+		_CKLog("SetMemInterval: " .. _OPT.MemInterval .. "s")
+		return _OPT.MemInterval
+	end
+
+	local function setSleepMode(enabled)
+		if enabled and not _SLEEP_ACTIVE then
+			_SLEEP_ACTIVE           = true
+			_SLEEP_PREV_THRESHOLD   = _OPT.AnimThreshold
+			_OPT.AnimThreshold      = 999
+			_OPT.Enabled            = false
+			pcall(function() setfpscap(10) end)
+			_CKLog("SetSleepMode: ON — animations paused, FPS capped to 10.")
+		elseif not enabled and _SLEEP_ACTIVE then
+			_SLEEP_ACTIVE      = false
+			_OPT.AnimThreshold = _SLEEP_PREV_THRESHOLD or 30
+			_OPT.Enabled       = true
+			pcall(function() setfpscap(360) end)
+			_CKLog("SetSleepMode: OFF — restored.")
+		end
+	end
+
+	local function optimizeMode(v)
+		Compkiller.PerformanceMode = v;
+	end;
+
+	local function getFPS(): number
+		local fps = math.floor(_OPT.FPS + 0.5)
+		_CKLog("GetFPS: " .. fps .. " fps")
+		return fps
+	end
+
+	local function getOptimizerStats()
+		return {
+			FPS             = getFPS(),
+			Enabled         = _OPT.Enabled,
+			AnimThreshold   = _OPT.AnimThreshold,
+			ActiveTweens    = #_OPT.ActiveTweens,
+			TweensCancelled = _OPT.Stats.TweensCancelled,
+			InstantSets     = _OPT.Stats.InstantSets,
+			DedupCancels    = _OPT.Stats.DedupCancels,
+			MemorySweeps    = _OPT.Stats.MemorySweeps,
+			LastSweepAt     = _OPT.Stats.LastSweepAt,
+		}
+	end
+
+	local function isMobileTier()
+		local isMobile = (Compkiller.HardwareTier == "LOW")
+			or (UserInputService and UserInputService.TouchEnabled and not UserInputService.MouseEnabled)
+		return isMobile
+	end
+
+
+	-- ════════════════════════════════════════════════════════════════════════
+	-- ANIMATIONS
+	-- ════════════════════════════════════════════════════════════════════════
+	local function setSmartAnimations(enabled: boolean)
+		_OPT.Enabled = (enabled == true)
+		_CKLog("SetSmartAnimations: " .. (_OPT.Enabled and "ENABLED" or "DISABLED") .. " | Threshold=" .. _OPT.AnimThreshold .. "fps")
+		return _OPT.Enabled
+	end
+
+	local function enableAdvancedOptimizations(enabled: boolean)
+		_OPT.Enabled = (enabled == true)
+		if _OPT.Enabled then
+			if not _OPT.MonitorThread then
+				local thread
+				thread = task.spawn(function()
+					while _OPT.Enabled and _OPT.MonitorThread == thread do
+						task.wait(_OPT.MemInterval)
+						if _OPT.Enabled and _OPT.MonitorThread == thread then
+							Compkiller:_SweepMemory()
 						end
 					end
+					if _OPT.MonitorThread == thread then
+						_OPT.MonitorThread = nil
+					end
 				end)
+				_OPT.MonitorThread = thread
+				_TrackThread(thread)
 			end
-			_CKLog("MasterControl.Preset.nuke: ALL systems active.")
-		end,
-			Compkiller:EnableNameObfuscation(true)
-			Compkiller:StartAnomalyDetector(5)
-			Compkiller:EnableAntiAFK(true)
-			Compkiller:SetSafeCall(true)
-			_CKLog("MasterControl.Preset.secure: active")
-		end,
-	},
+		else
+			_OPT.MonitorThread = nil
+		end
+		_CKLog("AdvancedOptimizations: " .. (_OPT.Enabled and "ON" or "OFF") .. " | Threshold=" .. _OPT.AnimThreshold .. "fps" .. " | MemInterval=" .. _OPT.MemInterval .. "s")
+		return _OPT.Enabled
+	end
 
- -- APPLY ALL FROM CONFIG TABLE
-	Apply = function(self, cfg)
-		if _type(cfg) ~= "table" then return end
+	local function pauseAllAnimations()
+		_OPT._AnimPaused = true
+		_OPT.Enabled     = false
+		_CKLog("PauseAllAnimations: animations paused.")
+	end
 
-  -- DEBUG
-		if cfg.debug          ~= nil then Compkiller:SetDebug(cfg.debug)                               end
-		if cfg.dumpStats      == true then Compkiller:DumpStats()                                      end
+	local function resumeAllAnimations()
+		_OPT._AnimPaused = false
+		_OPT.Enabled     = true
+		_CKLog("ResumeAllAnimations: animations resumed.")
+	end
 
-  -- PERFORMANCE
-		if cfg.profile                    then Compkiller:SetPerformanceProfile(cfg.profile)            end
-		if cfg.tier                       then Compkiller:SetHardwareTier(cfg.tier)                     end
-		if cfg.animThreshold  ~= nil then Compkiller:SetAnimThreshold(cfg.animThreshold)               end
-		if cfg.memInterval    ~= nil then Compkiller:SetMemInterval(cfg.memInterval)                   end
-		if cfg.smartAnimations~= nil then Compkiller:SetSmartAnimations(cfg.smartAnimations)           end
-		if cfg.advancedOpt    ~= nil then Compkiller:EnableAdvancedOptimizations(cfg.advancedOpt)      end
-		if cfg.optimizeMode   ~= nil then Compkiller:OptimizeMode(cfg.optimizeMode)                    end
-		if cfg.sleepMode      ~= nil then Compkiller:SetSleepMode(cfg.sleepMode)                       end
-		if cfg.fpsCap         ~= nil then _pcall(function() setfpscap(cfg.fpsCap) end)                 end
+	local function forceGC()
+		local before = math.floor((collectgarbage("count") or 0) + 0.5)
+		collectgarbage("collect")
+		local after  = math.floor((collectgarbage("count") or 0) + 0.5)
+		local freed  = math.max(0, before - after)
+		_CKLog(string.format("ForceGC: freed ~%d KB (before=%d, after=%d)", freed, before, after))
+		return freed
+	end
 
-  -- ANIMATIONS
-		if cfg.pauseAnimations  == true  then Compkiller:PauseAllAnimations()                          end
-		if cfg.resumeAnimations == true  then Compkiller:ResumeAllAnimations()                         end
-		if cfg.cleanupAll       == true  then Compkiller:CleanupAll()                                  end
-		if cfg.forceGC          == true  then Compkiller:ForceGC()                                     end
+	local function cleanupAll()
+		local cancelled = 0
+		for key, tw in pairs(_OPT.ActiveTweenMap) do
+			local ok, playing = pcall(function() return tw.PlaybackState end)
+			if ok and playing == Enum.PlaybackState.Playing then
+				pcall(function() tw:Cancel() end)
+				cancelled += 1
+			end
+			_OPT.ActiveTweenMap[key] = nil
+		end
+		for _, tw in ipairs(_OPT.ActiveTweens) do
+			local ok, playing = pcall(function() return tw.PlaybackState end)
+			if ok and playing == Enum.PlaybackState.Playing then
+				pcall(function() tw:Cancel() end)
+				cancelled += 1
+			end
+		end
+		_OPT.ActiveTweens = {}
+		_OPT.Stats.TweensCancelled += cancelled
+		Compkiller:_SweepMemory()
+		_CKLog("CleanupAll: cancelled " .. cancelled .. " tweens.")
+		return cancelled
+	end
 
-  -- RENDER MANAGER
-		if cfg.renderManager  == true  then Compkiller:StartRenderManager()
-		elseif cfg.renderManager == false then Compkiller:StopRenderManager()                          end
-		if cfg.renderCull     == true  then Compkiller:RenderCull()                                    end
-		if cfg.renderResume   == true  then Compkiller:RenderResume()                                  end
 
-  -- SAFE EXECUTION
-		if cfg.safeCall       ~= nil then Compkiller:SetSafeCall(cfg.safeCall)                         end
+	-- ════════════════════════════════════════════════════════════════════════
+	-- RENDER MANAGER
+	-- ════════════════════════════════════════════════════════════════════════
+	local function startRenderManager()
+		stopRenderManager()
 
-  -- GUI SHIELD
-		if cfg.obfuscate      ~= nil then Compkiller:EnableNameObfuscation(cfg.obfuscate)              end
-		if cfg.hardReset      == true  then Compkiller:HardReset()                                     end
-		if cfg.turboScramble  ~= nil and cfg.turboScrambleGui then
-			Compkiller:EnableTurboScramble(cfg.turboScrambleGui, cfg.turboScramble)                    end
-		if cfg.security       ~= nil then
-			local sec = cfg.security
-			Compkiller:Security(sec.folder or "Security", sec.config or {})
+		local conns = {}
+
+		local c1 = _TrackConn(UserInputService.WindowFocusReleased:Connect(function()
+			if not getgenv()[_CULL_KEY] then
+				getgenv()[_CULL_KEY] = _SaveCameraState()
+			end
+			_SuppressRender()
+			_CKLog("RenderManager: focus lost — 3D suppressed, FPS capped.")
+		end))
+		table.insert(conns, c1)
+
+		local c2 = _TrackConn(UserInputService.WindowFocused:Connect(function()
+			local state = getgenv()[_CULL_KEY]
+			if state then
+				_RestoreRender(state)
+				getgenv()[_CULL_KEY] = nil
+			end
+			_CKLog("RenderManager: focus gained — 3D restored.")
+		end))
+		table.insert(conns, c2)
+
+		getgenv()[_RENDER_CONN] = conns
+		_CKLog("StartRenderManager: active.")
+	end
+
+	local function stopRenderManager()
+		local state = getgenv()[_CULL_KEY]
+		if state then
+			_RestoreRender(state)
+			getgenv()[_CULL_KEY] = nil
+		end
+		local conns = getgenv()[_RENDER_CONN]
+		if type(conns) == "table" then
+			for _, c in ipairs(conns) do
+				pcall(function() c:Disconnect() end)
+			end
+		end
+		getgenv()[_RENDER_CONN] = nil
+		_CKLog("StopRenderManager: stopped, 3D restored.")
+	end
+
+	local function renderCull()
+		if getgenv()[_CULL_KEY] then
+			_CKLog("RenderCull: already active.")
+			return
+		end
+		getgenv()[_CULL_KEY] = _SaveCameraState()
+		_SuppressRender()
+		_CKLog("RenderCull: 3D suppressed.")
+	end
+
+	local function renderResume()
+		local state = getgenv()[_CULL_KEY]
+		if not state then
+			_CKLog("RenderResume: nothing to resume.")
+			return
+		end
+		_RestoreRender(state)
+		getgenv()[_CULL_KEY] = nil
+		_CKLog("RenderResume: 3D restored.")
+	end
+
+
+	-- ════════════════════════════════════════════════════════════════════════
+	-- GUI SHIELD
+	-- ════════════════════════════════════════════════════════════════════════
+	local function enableNameObfuscation(enabled)
+		if enabled == false then
+			_CKLog("EnableNameObfuscation: OFF (static name retained).")
+			return
+		end
+		pcall(function()
+			for _, win in ipairs(Compkiller.Windows) do
+				local sg = win and win._ScreenGui
+				if sg and sg.Parent then
+					local newName = _EncryptGuiName and _EncryptGuiName() or sg.Name
+					sg.Name = newName
+					_CKLog("EnableNameObfuscation: renamed → " .. newName)
+				end
+			end
+		end)
+	end
+
+	local function enableTurboScramble(screenGui, enabled)
+		if enabled == false then
+			if _TURBO_CONN then
+				_pcall(function() _TURBO_CONN:Disconnect() end)
+				_TURBO_CONN   = nil
+				_TURBO_ACTIVE = false
+				_CKLog("TurboScramble: disabled.")
+			end
+			return
 		end
 
-  -- WINDOW POSITION
-		if cfg.savePosition   ~= nil then Compkiller:SaveWindowPosition(cfg.savePosition)              end
-		if cfg.loadPosition   == true  then Compkiller:LoadWindowPosition()                            end
-
-  -- ANOMALY DETECTION
-		if cfg.anomalyWatch   == true  then Compkiller:StartAnomalyDetector(cfg.anomalyInterval or 5)
-		elseif cfg.anomalyWatch == false then Compkiller:StopAnomalyDetector()                         end
-		if cfg.anomalyCallback ~= nil  then Compkiller:SetAnomalyCallback(cfg.anomalyCallback)        end
-
-  -- SECURITY
-		if cfg.antiAfk          ~= nil then Compkiller:EnableAntiAFK(cfg.antiAfk)                        end
-		if cfg.antiKick         ~= nil then Compkiller:EnableAntiKick(cfg.antiKick)                      end
-
-  -- ANTI-DETECTION BYPASSES
-		if cfg.memorySpoof      ~= nil then Compkiller:EnableMemorySpoof(cfg.memorySpoof)                end
-		if cfg.contentBypass    ~= nil then Compkiller:EnableContentProviderBypass(cfg.contentBypass)    end
-		if cfg.honeypotBypass   ~= nil then Compkiller:EnableHoneypotBypass(cfg.honeypotBypass)          end
-		if cfg.executorCloaker  ~= nil then Compkiller:EnableExecutorCloaker(cfg.executorCloaker)        end
-		if cfg.namecallGuard    ~= nil then Compkiller:EnableNamecallGuard(cfg.namecallGuard)            end
-		if cfg.scanGuard        ~= nil then Compkiller:EnableScanGuard(cfg.scanGuardGui, cfg.scanGuard)  end
-		if cfg.armAntiDetection == true then
-			Compkiller:ArmAntiDetection({
-				screenGui      = cfg.turboScrambleGui,
-				memorySpoof    = cfg.memorySpoof    ~= false,
-				contentBypass  = cfg.contentBypass  ~= false,
-				honeypotBypass = cfg.honeypotBypass ~= false,
-				scanGuard      = cfg.scanGuard      ~= false,
-				namecallGuard  = cfg.namecallGuard  ~= false,
-				executorCloaker= cfg.executorCloaker~= false,
-			})
+		if _TURBO_ACTIVE then
+			_CKLog("TurboScramble: already active.")
+			return
 		end
-		if cfg.allBypasses      == true  then Compkiller:EnableAllBypasses()                              end
-		if cfg.allBypasses      == false then Compkiller:DisableAllBypasses()                             end
-		if cfg.gcBypass         ~= nil then Compkiller:EnableGCBypass(cfg.gcBypass)                      end
-		if cfg.memBypass        ~= nil then Compkiller:EnableMemoryBypass(cfg.memBypass)                 end
-		if cfg.contentBypass    ~= nil then Compkiller:EnableContentBypass(cfg.contentBypass)            end
-		if cfg.honeyPotBypass   ~= nil then Compkiller:EnableHoneyPotBypass(cfg.honeyPotBypass)         end
-		if cfg.globalScanBypass ~= nil then Compkiller:EnableGlobalScanBypass(cfg.globalScanBypass)     end
-		if cfg.metaGuard        ~= nil then Compkiller:EnableMetaGuard(cfg.metaGuard)                    end
-		if cfg.renvBypass       ~= nil then Compkiller:EnableRenvBypass(cfg.renvBypass)                  end
-		if cfg.textBoxBypass    ~= nil then Compkiller:EnableTextBoxBypass(cfg.textBoxBypass)            end
 
-  -- DIAGNOSTICS (delayed — waits for HW tier sample)
-		if cfg.runDiagnostics == true or cfg.runAnomalyCheck == true or cfg.integrityTest == true then
-			_ckSpawn(function()
-				task.wait(cfg.diagnosticsDelay or 8)  -- [PATCH #18] raised from 3s: HW sample needs more time
-				if cfg.runDiagnostics  == true then Compkiller:RunDiagnostics()          end
-				if cfg.runAnomalyCheck == true then Compkiller:RunAnomalyCheck()         end
-				if cfg.integrityTest   == true then Compkiller:RunExecutorIntegrityTest() end
+		if not screenGui then
+			_CKLog("TurboScramble: no ScreenGui provided.")
+			return
+		end
+
+		_BuildNamePool(screenGui)
+		_TURBO_ACTIVE = true
+
+		-- RenderStepped — rename GUI + ALL descendants every frame
+		_TURBO_CONN = _TrackConn(RunService.RenderStepped:Connect(function()
+			_pcall(function()
+				-- Rename root ScreenGui
+				local newName = _GetPoolName()
+				screenGui.Name = newName
+				_tinsert(_CK_HIDDEN_GUI_NAMES, newName)
+
+				-- Rename ALL descendants (TurboNameSpam equivalent)
+				for _, v in _ipairs(screenGui:GetDescendants()) do
+					_pcall(function() v.Name = _GetPoolName() end)
+				end
+			end)
+		end))
+
+		_CKLog("TurboScramble: active — renaming GUI + all descendants every frame.")
+	end
+
+	local function hardReset()
+		_CKLog("HardReset: tearing down...")
+		_SmartKillGUIs()
+		pcall(getgenv().__rbxClnSvc)
+		_CKLog("HardReset: done.")
+	end
+
+	local function isWindowOpen(win)
+		if not win then return false end
+		for _, w in ipairs(Compkiller.Windows) do
+			if w == win then return true end
+		end
+		return false
+	end
+
+
+	-- ════════════════════════════════════════════════════════════════════════
+	-- SANDBOX & SAFE EXECUTION
+	-- ════════════════════════════════════════════════════════════════════════
+	local function setSafeCall(enabled)
+		_SAFE_CALL_ENABLED = (enabled == true)
+		_CKLog("SetSafeCall: " .. (_SAFE_CALL_ENABLED and "ON" or "OFF"))
+	end
+
+	local function safeExec(fn, onError)
+		if _type(fn) ~= "function" then
+			_CKLog("SafeExec: argument must be a function, got " .. _type(fn))
+			return false, "invalid argument"
+		end
+		local ok, err = _xpcall(fn, function(e)
+			local tb = ""
+			_pcall(function() tb = debug and debug.traceback and debug.traceback(_tostring(e), 2) or "" end)
+			return _tostring(e) .. (tb ~= "" and ("\n" .. tb) or "")
+		end)
+		if not ok then
+			_CKLog("SafeExec caught error: " .. _tostring(err))
+			if _type(onError) == "function" then
+				_pcall(onError, err)
+			end
+		end
+		return ok, ok and nil or _tostring(err)
+	end
+
+	local function safeCall(fn, ...)
+		if not _SAFE_CALL_ENABLED then
+			return fn(...)
+		end
+		local args = {...}
+		local ok, result = pcall(function() return fn(table.unpack(args)) end)
+		if not ok then
+			table.insert(_SANDBOX_ERRORS, { time = tick(), err = tostring(result) })
+			_CKLog("SafeCall caught: " .. tostring(result))
+		end
+		return ok, result
+	end
+
+	local function wrap(fn, onError)
+		if _type(fn) ~= "function" then return fn end
+		return _newcclosure(function(...)
+			return safeExec(function() return fn(...) end, onError)
+		end)
+	end
+
+	local function newSandbox(cfg)
+		cfg = cfg or {}
+		local _MAX_ERRORS  = cfg.maxErrors or 10
+		local _errorCount  = 0
+		local _disabled    = false
+		local _errorLog    = {}
+
+		local sandbox = {}
+
+		function sandbox:Run(fn, ...)
+			if _disabled then
+				_CKLog("Sandbox: disabled after too many errors.")
+				return false, "sandbox disabled"
+			end
+			if _type(fn) ~= "function" then return false, "not a function" end
+			local args = {...}
+			local ok, err = _xpcall(function() return fn(_unpack(args)) end, function(e)
+				return _tostring(e)
+			end)
+			if not ok then
+				_errorCount += 1
+				_tinsert(_errorLog, { time = _tick(), err = err })
+				_CKLog(_sfmt("Sandbox: error #%d — %s", _errorCount, err))
+				if _errorCount >= _MAX_ERRORS then
+					_disabled = true
+					warn("[CK:Sandbox] Too many errors — sandbox disabled.")
+				end
+			end
+			return ok, ok and nil or err
+		end
+
+		function sandbox:GetErrors()  return _errorLog  end
+		function sandbox:GetCount()   return _errorCount end
+		function sandbox:IsDisabled() return _disabled   end
+		function sandbox:Reset()
+			_errorCount = 0
+			_disabled   = false
+			_errorLog   = {}
+			_CKLog("Sandbox: reset.")
+		end
+
+		return sandbox
+	end
+
+	local function newJanitor()
+		return Janitor.new()
+	end
+
+	local function newRateLimiter(interval: number)
+		return RateLimiter.new(interval)
+	end
+
+	local function getSandboxErrors()
+		return _SANDBOX_ERRORS
+	end
+
+
+	-- ════════════════════════════════════════════════════════════════════════
+	-- WINDOW POSITION
+	-- ════════════════════════════════════════════════════════════════════════
+	local function saveWindowPosition(pos: UDim2)
+		if not pos then return end
+		getgenv()[_POS_KEY] = {
+			xs = pos.X.Scale,  xo = pos.X.Offset,
+			ys = pos.Y.Scale,  yo = pos.Y.Offset,
+		}
+	end
+
+	local function loadWindowPosition()
+		local raw = getgenv()[_POS_KEY]
+		if raw and type(raw) == "table" then
+			return UDim2.new(raw.xs, raw.xo, raw.ys, raw.yo)
+		end
+		return nil
+	end
+
+
+	-- ════════════════════════════════════════════════════════════════════════
+	-- CONFIG / THEME / ASSETS
+	-- ════════════════════════════════════════════════════════════════════════
+	local function getConfig(Type: string)
+		local ConfigFlags = {};
+
+		for i,v in next , Compkiller.Flags do
+			local Value = v:GetValue();
+			local Suf = {};
+
+			if typeof(Value) == "table" and Value.ColorPicker and typeof(Value.ColorPicker) == 'table' then
+				Suf.Color3 = {
+					R = Value.ColorPicker.Color.R,
+					G = Value.ColorPicker.Color.G,
+					B = Value.ColorPicker.Color.B
+				};
+
+				Suf.Transparency = Value.ColorPicker.Transparency;
+
+				Suf.Type = "ColorPicker";
+			else
+				Suf.Value = Value;
+				Suf.Type = "NormalElement";
+			end;
+
+			if Type == "KV" then
+				ConfigFlags[v.Flag] = {
+					Flag = v.Flag,
+					Value = Suf,
+					Functions = v,
+					AutoKeybind = (v.AutoKeybind and v.AutoKeybind:GetSettings());
+				}
+			elseif Type == "MK" then
+				ConfigFlags[v.Flag] = {
+					Flag = v.Flag,
+					Value = Suf,
+					AutoKeybind = (v.AutoKeybind and v.AutoKeybind:GetSettings());
+				}
+			else
+				table.insert(ConfigFlags , {
+					Flag = v.Flag,
+					Value = Suf,
+					AutoKeybind = (v.AutoKeybind and v.AutoKeybind:GetSettings());
+				})
+			end;
+		end;
+
+		return ConfigFlags;
+	end;
+
+	local function getTheme()
+		return Compkiller.Colors;
+	end;
+
+	local function setTheme(name)
+		if name == "Dark Green" then
+			Compkiller.Colors = {
+				["BGDBColor"] = Color3.new(0.0429964, 0.110345, 0.0727226),
+				["BlockBackground"] = Color3.new(0.159287, 0.234483, 0.201811),
+				["BlockColor"] = Color3.new(0, 0.137931, 0.0951249),
+				["DropColor"] = Color3.new(0, 0.227586, 0.100452),
+				["Highlight"] = Color3.new(0.0666667, 0.992157, 0.628343),
+				["LineColor"] = Color3.new(0.263258, 0.372414, 0.329504),
+				["MouseEnter"] = Color3.new(0, 0.841379, 0.51063),
+				["Risky"] = Color3.new(1, 0.398296, 0.152941),
+				["StrokeColor"] = Color3.new(0.132342, 0.241379, 0.198517),
+				["SwitchColor"] = Color3.new(0.927586, 1, 0.980523),
+				["Toggle"] = Color3.new(0, 0.613793, 0.220119),
+				HighStrokeColor = Color3.new(0, 0.241379, 0.186445),
+			};
+		elseif name == "Default" then
+			Compkiller.Colors = {
+				Highlight = Color3.fromRGB(17, 238, 253),
+				Toggle = Color3.fromRGB(14, 203, 213),
+				Risky = Color3.fromRGB(251, 255, 39),
+				BGDBColor = Color3.fromRGB(22, 24, 29),
+				BlockColor = Color3.fromRGB(28, 29, 34),
+				StrokeColor = Color3.fromRGB(37, 38, 43),
+				SwitchColor = Color3.fromRGB(255, 255, 255),
+				DropColor = Color3.fromRGB(33, 35, 39),
+				MouseEnter = Color3.fromRGB(55, 58, 65),
+				BlockBackground = Color3.fromRGB(39, 40, 47),
+				LineColor = Color3.fromRGB(65, 65, 65),
+				HighStrokeColor = Color3.fromRGB(55, 56, 63),
+			};
+		elseif name == "Dark Blue" then
+			Compkiller.Colors = {
+				["BGDBColor"] = Color3.new(0.0393817, 0.0754204, 0.165517),
+				["BlockBackground"] = Color3.new(0, 0.0618311, 0.172414),
+				["BlockColor"] = Color3.new(0, 0.0172414, 0.103448),
+				["DropColor"] = Color3.new(0, 0.0965518, 0.289655),
+				["HighStrokeColor"] = Color3.new(0, 0.132604, 0.234483),
+				["Highlight"] = Color3.new(0.0666667, 0.781528, 0.992157),
+				["LineColor"] = Color3.new(0, 0.110345, 0.275862),
+				["MouseEnter"] = Color3.new(0, 0.606896, 1),
+				["Risky"] = Color3.new(0.0310345, 0.819572, 1),
+				["StrokeColor"] = Color3.new(0, 0.119857, 0.248276),
+				["SwitchColor"] = Color3.new(1, 1, 1),
+				["Toggle"] = Color3.new(0.054902, 0.463935, 0.835294)
+			}
+		elseif name == "Purple Rose" then
+			Compkiller.Colors = {
+				["BGDBColor"] = Color3.new(0.0459068, 0.030321, 0.117241),
+				["BlockBackground"] = Color3.new(0.156272, 0.119596, 0.324138),
+				["BlockColor"] = Color3.new(0.0948428, 0.0576457, 0.165517),
+				["DropColor"] = Color3.new(0.131034, 0, 0.0813317),
+				["HighStrokeColor"] = Color3.new(0.136259, 0.101237, 0.296552),
+				["Highlight"] = Color3.new(0.992157, 0.0666667, 0.33474),
+				["LineColor"] = Color3.new(0.20872, 0.137408, 0.372414),
+				["MouseEnter"] = Color3.new(0.365517, 0, 0.120999),
+				["Risky"] = Color3.new(1, 0.6086, 0.152941),
+				["StrokeColor"] = Color3.new(0.148499, 0.137836, 0.248276),
+				["SwitchColor"] = Color3.new(1, 1, 1),
+				["Toggle"] = Color3.new(0.835294, 0.054902, 0.248654)
+			}
+		elseif name == "Skeet" then		
+			Compkiller.Colors = {
+				["BGDBColor"] = Color3.new(0.114578, 0.125191, 0.151724),
+				["BlockBackground"] = Color3.new(0.128181, 0.131124, 0.151724),
+				["BlockColor"] = Color3.new(0.0732699, 0.0760008, 0.0896552),
+				["DropColor"] = Color3.new(0.0809037, 0.0861197, 0.0965517),
+				["HighStrokeColor"] = Color3.new(0.119382, 0.1217, 0.137931),
+				["Highlight"] = Color3.new(0, 0.634483, 0.0700119),
+				["LineColor"] = Color3.new(0.151724, 0.151724, 0.151724),
+				["MouseEnter"] = Color3.new(0.134007, 0.141391, 0.158621),
+				["Risky"] = Color3.new(0.984314, 1, 0.152941),
+				["StrokeColor"] = Color3.new(0.0769798, 0.0790924, 0.0896552),
+				["SwitchColor"] = Color3.new(1, 1, 1),
+				["Toggle"] = Color3.new(0, 0.324138, 0.10283)
+			}
+		end;
+
+		refreshCurrentColor()
+	end;
+
+	local function refreshCurrentColor()
+		for i,v in next , Compkiller.Elements.Highlight do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.Highlight;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements do
+			if v.Element and v.Property and v.Element:GetAttribute('Enabled') then
+				v.Element[v.Property] = Compkiller.Colors.Highlight;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.Risky do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.Risky;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.BlockColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.BlockColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.BGDBColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.BGDBColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.StrokeColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.StrokeColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.SwitchColor do
+			if v.Element and v.Property and v.Element[v.Property] ~= Compkiller.Colors.MouseEnter then
+				v.Element[v.Property] = Compkiller.Colors.SwitchColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.BlockBackground do
+			if v.Element and v.Property and v.Element[v.Property] then
+				v.Element[v.Property] = Compkiller.Colors.BlockBackground;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.DropColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.DropColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.LineColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.LineColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.HighStrokeColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.HighStrokeColor;
+			end;
+		end;
+	end;
+
+	local function changeHighlightColor(NewColor: Color3)
+		local H,S,V = NewColor:ToHSV();
+
+		Compkiller.Colors.Highlight = NewColor;
+		Compkiller.Colors.Toggle = Color3.fromHSV(H,S,V - 0.2);
+
+		for i,v in next , Compkiller.Elements.Highlight do
+			if v.Element and v.Property then
+				v.Element[v.Property] = NewColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements do
+			if v.Element and v.Property and v.Element:GetAttribute('Enabled') then
+				v.Element[v.Property] = NewColor;
+			end;
+		end;
+	end;
+
+	local function loader(IconId,Duration)
+		local CompKiller = Instance.new("ScreenGui")
+
+		CompKiller.Name = Compkiller:_RandomString()
+		CompKiller.Parent = CoreGui
+		CompKiller.Enabled = true
+		CompKiller.ResetOnSpawn = false
+		CompKiller.IgnoreGuiInset = true
+		CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global
+
+		local Loader = Instance.new("Frame")
+		local Icon = Instance.new("ImageLabel")
+		local Vignette = Instance.new("ImageLabel")
+
+		Loader.Name = Compkiller:_RandomString()
+		Loader.Parent = CompKiller
+		Loader.AnchorPoint = Vector2.new(0.5, 0.5)
+		Loader.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+		Loader.BackgroundTransparency = 1
+		Loader.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		Loader.BorderSizePixel = 0
+		Loader.Position = UDim2.new(0.5, 0, 0.5, 0)
+		Loader.Size = UDim2.new(1, 0, 1, 0)
+
+		Icon.Name = Compkiller:_RandomString()
+		Icon.Parent = Loader
+		Icon.AnchorPoint = Vector2.new(0.5, 0.5)
+		Icon.BackgroundTransparency = 1.000
+		Icon.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		Icon.BorderSizePixel = 0
+		Icon.Position = UDim2.new(0.5, 0, 0.5, 0)
+		Icon.Size = UDim2.new(0, 750, 0, 750)
+		Icon.ZIndex = 100
+		Icon.Image = IconId or Compkiller.Logo;
+		Icon.ImageTransparency = 1
+
+		Vignette.Name = Compkiller:_RandomString()
+		Vignette.Parent = Loader
+		Vignette.BackgroundTransparency = 1.000
+		Vignette.BorderColor3 = Color3.fromRGB(27, 42, 53)
+		Vignette.BorderSizePixel = 0
+		Vignette.Size = UDim2.new(1, 0, 1, 0)
+		Vignette.Image = cacheImage("rbxassetid://18720640102")
+		Vignette.ImageColor3 = Compkiller.Colors.Highlight
+		Vignette.ImageTransparency = 1
+		Vignette.AnchorPoint = Vector2.new(0.5,0.5)
+		Vignette.Position = UDim2.fromScale(0.5,0.5)
+
+		Compkiller:_Animation(Loader,TweenInfo.new(0.55,Enum.EasingStyle.Quint),{
+			BackgroundTransparency = 0.5
+		});
+
+		local Event = Instance.new('BindableEvent');
+
+		task.delay(0.5,function()
+			Compkiller:_Animation(Icon,TweenInfo.new(0.75,Enum.EasingStyle.Quint),{
+				ImageTransparency = 0.01,
+				Size = UDim2.new(0, 200, 0, 200)
+			});
+
+			task.delay(0.25,function()
+				Compkiller:_Animation(Vignette,TweenInfo.new(5),{
+					ImageTransparency = 0.2
+				});
+
+				task.wait(Duration or 4.5)
+
+				Compkiller:_Animation(Vignette,TweenInfo.new(3,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
+					Size = UDim2.new(2, 0, 2, 0)
+				});
+
+				Compkiller:_Animation(Icon,TweenInfo.new(0.75,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
+					ImageTransparency = 1,
+				});
+
+				Compkiller:_Animation(Loader,TweenInfo.new(1.5,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
+					BackgroundTransparency = 1
+				});
+
+				task.delay(0.1,function()
+					Compkiller:_Animation(Vignette,TweenInfo.new(1,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
+						ImageTransparency = 1
+					});
+
+					task.wait(0.2)
+
+					task.delay(3,function()
+						CompKiller:Destroy();
+					end)
+				end)
+
+				task.delay(0.6,function()
+					Event:Fire();
+				end)
+			end)
+		end);
+
+		return {
+			yield = function()
+				return Event.Event:Wait();
+			end	
+		};
+	end;
+
+	local function preloadIcons()
+		local RequiredAssets = {
+			"http://www.roblox.com/asset/?id=112554223509763",
+			"rbxassetid://4805639000",
+			"rbxassetid://6198493000",
+			"rbxassetid://10709790948",
+			"rbxassetid://18518299306",
+			"rbxassetid://10747362393",
+			"rbxassetid://18720640102",
+			"rbxassetid://10723344270",
+			"rbxassetid://109535175596957",
+			"rbxassetid://10747384394",
+			"rbxassetid://10734941499",
+			Compkiller.Logo,
+		};
+
+		if Compkiller.SecureMode then
+			for i,v in next , RequiredAssets do task.wait()
+				pcall(function()
+					cacheImage(v);
+				end);
+			end;
+		else
+			local ContentProvider: ContentProvider = cloneref(game:GetService('ContentProvider'));
+
+			for i,v in next , RequiredAssets do
+				ContentProvider:Preload(v);
+			end;
+		end;
+	end;
+
+	local function cacheImage(id: string) : string
+		if not Compkiller.SecureMode or not id or not id:byte() then
+			return id or "";
+		end;
+
+		assert(Compkiller.SecureMode , "please use security(< string >) before cache image")
+		assert(Compkiller.CacheDirectory , "please use security(< string >) before cache image")
+
+		local ids = string.match(id , "%d+");
+
+		if ids == nil then
+			return id;
+		end;
+
+		local Hash = Compkiller.Hash(id);
+
+		local cache_path = string.format("%s/cache-%s.png" ,Compkiller.CacheDirectory , Hash);
+
+		if isfile(cache_path) then
+			return (getcustomasset or getsynasset or function() return ''; end)(cache_path);
+		end;
+
+		local imgSize = Compkiller.SecurityConfig.ImageScale;
+
+		local imagesize = (imgSize and string.format("%sx%s", tostring(math.round(imgSize)), tostring(math.round(imgSize)))) or "150x150"
+
+		if imagesize == nil then
+			return ''
+		end;
+
+		local endpoint = string.format(
+			"https://thumbnails.roblox.com/v1/assets?assetIds=%s&size=%s&format=Png&isCircular=false",
+			ids,
+			imagesize
+		);
+
+		local json = game:HttpGet(endpoint);
+
+		local JSON_Decode = select(2, pcall(function()
+			return HttpService:JSONDecode(json);
+		end));
+
+		if typeof(JSON_Decode) == "table" and JSON_Decode and JSON_Decode.data and JSON_Decode.data[1] and JSON_Decode.data[1].imageUrl and JSON_Decode.data[1].state == "Completed" then task.wait()
+			local en = JSON_Decode.data[1].imageUrl;
+
+			writefile(cache_path , game:HttpGet(en));
+
+			task.wait();
+
+			return (getcustomasset or getsynasset or function() return ''; end)(cache_path);
+		end;
+
+		return "";
+	end;
+
+	local function getDate(Time)
+		Time = Time or tick();
+
+		local val = os.date('*t',Time);
+
+		return string.format("%s/%s/%s",val.day,val.month,val.year);
+	end;
+
+	local function getTimeNow(Time)
+		Time = Time or tick();
+
+		local val = os.date('*t',Time);
+
+		return string.format("%s:%s:%s",val.hour,val.min,val.sec);
+	end;
+
+	local function security(directory: string,Config: SecurityConfig) -- Security Mode
+		directory = directory or "Compkiller-Cache";
+
+		if not isfolder(directory) then
+			makefolder(directory);
+		end;
+
+		Compkiller.SecureMode = true;
+
+		Compkiller.SecurityConfig = Config or {};
+
+		Compkiller.CacheDirectory = directory;
+	end;
+
+	local function configManager(ConfigManager: ConfigManager) : ConfigFunctions
+		ConfigManager = Compkiller.__CONFIG(ConfigManager , {
+			Directory = "Compkiller",
+			Config = "Software"
+		});
+
+		if not isfolder(ConfigManager.Directory) then
+			makefolder(ConfigManager.Directory);
+		end;
+
+		if not isfolder(Compkiller:_Path(ConfigManager.Directory , ConfigManager.Config)) then
+			makefolder(Compkiller:_Path(ConfigManager.Directory , ConfigManager.Config));
+		end;
+
+		local Args = {
+			Directory = Compkiller:_Path(ConfigManager.Directory , ConfigManager.Config);
+			EnableNotify = false,
+		};
+
+		local notify = Compkiller.newNotify();
+
+		function Args:WriteConfig(Config: WriteConfig)
+			Config = Compkiller.__CONFIG(Config , {
+				Name = Compkiller:_RandomString(),
+				Author = LocalPlayer.Name,
+			});
+
+			local Flags = getConfig("MK");
+
+			Flags["__INFORMATION"] = {
+				Type = "Information",
+				Author = Config.Author,
+				Name = Config.Name,
+				CreatedDate = getDate()
+			};
+
+			if Args.EnableNotify then
+				notify.new({
+					Title = "Configs",
+					Icon = Compkiller:_GetIcon('settings'),
+					Content = "Create config \""..Config.Name.."\""
+				})
+			end
+
+			writefile(Compkiller:_Path(Args.Directory , Config.Name) , HttpService:JSONEncode(Flags));
+		end;
+
+		function Args:LoadConfigFromString(str: string)
+			local decoded = HttpService:JSONDecode(str);
+
+			local Flags = getConfig("KV");
+
+			for i,v in next , decoded do
+				if v and v.Flag then
+
+					local Value = Flags[v.Flag];
+
+					if Value then
+
+						if v.Value.Type == "NormalElement" then
+							Value.Functions:SetValue(v.Value.Value);
+
+						elseif v.Value.Type == "ColorPicker" then
+
+							local Color = Color3.new(v.Value.Color3.R,v.Value.Color3.G,v.Value.Color3.B);
+
+							local Transparency = v.Value.Transparency;
+
+							Value.Functions:SetValue(Color , Transparency);
+						end;
+					end;
+				end
+			end;
+		end;
+
+		function Args:GetCurrentConfig()
+			return getConfig("MK")
+		end;
+
+		function Args:ReadInfo(ConfigName: string)
+			local _path = Compkiller:_Path(Args.Directory , ConfigName);
+
+			if isfile(_path) then
+				local info = readfile(_path);
+
+				local decoded = HttpService:JSONDecode(info);
+
+				return decoded.__INFORMATION;
+			end;
+
+			return false;
+		end;
+
+		function Args:GetConfigs()
+			local names = {};
+
+			for i,v in next , listfiles(Args.Directory) do
+				local Name = string.sub(v , #Args.Directory + 2);
+
+				table.insert(names , Name);
+			end;
+
+			return names;
+		end;
+
+		function Args:GetFullConfigs()
+			local names = {};
+
+			for i,v in next , listfiles(Args.Directory) do
+				local Name = string.sub(v , #Args.Directory + 2);
+				local Info = Args:ReadInfo(Name);
+
+				table.insert(names , {
+					Name = Name,
+					Info = Info,
+				});
+			end;
+
+			return names;
+		end;
+
+		function Args:DeleteConfig(ConfigName)
+			local _path = Compkiller:_Path(Args.Directory,ConfigName);
+
+			if Args.EnableNotify then
+				notify.new({
+					Title = "Configs",
+					Icon = Compkiller:_GetIcon('settings'),
+					Content = "Delete config \""..ConfigName.."\""
+				})
+			end
+
+			if isfile(_path) then
+				delfile(_path);
+			end;
+		end;
+
+		function Args:GetConfigCount()
+			return #listfiles(Args.Directory);
+		end;
+
+		function Args:LoadConfig(ConfigName: string)
+			local _path = Compkiller:_Path(Args.Directory,ConfigName);
+
+			if isfile(_path) then
+				local info = readfile(_path);
+
+				local decoded = HttpService:JSONDecode(info);
+
+				local Flags = getConfig("KV");
+
+				if Args.EnableNotify then
+					notify.new({
+						Title = "Configs",
+						Icon = Compkiller:_GetIcon('settings'),
+						Content = "Load config \""..ConfigName.."\""
+					})
+				end
+
+				for i,v in next , decoded do
+					if v and v.Flag then
+
+						local Value = Flags[v.Flag];
+
+						if Value then
+
+							if v.Value.Type == "NormalElement" then
+								Value.Functions:SetValue(v.Value.Value);
+
+							elseif v.Value.Type == "ColorPicker" then
+
+								local Color = Color3.new(v.Value.Color3.R,v.Value.Color3.G,v.Value.Color3.B);
+
+								local Transparency = v.Value.Transparency;
+
+								Value.Functions:SetValue(Color , Transparency);
+							end;
+
+							if Value.Functions.AutoKeybind then
+								if v.AutoKeybind then
+									Value.Functions.AutoKeybind:LoadSettings(v.AutoKeybind)
+								end;
+							end;
+						end;
+					end
+				end;
+			end;
+		end;
+
+		return Args;
+	end;
+
+
+	-- ════════════════════════════════════════════════════════════════════════
+	-- DIAGNOSTICS & ANOMALY
+	-- ════════════════════════════════════════════════════════════════════════
+	local function runDiagnostics()
+		local results = {}
+		local passed, failed = 0, 0
+		for _, check in ipairs(_DIAG_CHECKS) do
+			local ok, err = pcall(check[2])
+			results[check[1]] = { pass = ok, err = ok and nil or tostring(err) }
+			if ok then passed += 1 else failed += 1 end
+		end
+		results._passed = passed
+		results._failed = failed
+		_DIAG_CACHE = results
+		_CKLog(string.format("RunDiagnostics: %d passed, %d failed.", passed, failed))
+		return results
+	end
+
+	local function getDiagnostics()
+		if not _DIAG_CACHE then
+			return runDiagnostics()
+		end
+		return _DIAG_CACHE
+	end
+
+	local function startAnomalyDetector(interval: number)
+		if _DETECTOR_THREAD then
+			_CKLog("Anomaly: detector already running.")
+			return
+		end
+		interval = _mmax(2, interval or 5)
+		_BASELINE = _captureBaseline()
+		_CKLog(_sfmt("Anomaly: baseline captured (%d targets), scanning every %ds.",
+			#_WATCH, interval))
+
+		_DETECTOR_THREAD = _ckSpawn(function()
+			while _DETECTOR_THREAD do
+				task.wait(interval)
+				if not _DETECTOR_THREAD then break end
+
+				local tampered = {}
+				for _, w in _ipairs(_WATCH) do
+					local ok, cur = _pcall(_rawget, w[1], w[2])
+					if ok and _BASELINE[w[3]] ~= nil and cur ~= _BASELINE[w[3]] then
+						_tinsert(tampered, w[3])
+					end
+				end
+
+				-- Hook detection pass
+				local hooked = _detectHooks()
+				for _, h in _ipairs(hooked) do
+					_tinsert(tampered, h)
+				end
+
+				if #tampered > 0 then
+					warn("[CK:Anomaly] ⚠ Tampered/Hooked: " .. table.concat(tampered, ", "))
+					if _type(_TAMPER_CALLBACK) == "function" then
+						_pcall(_TAMPER_CALLBACK, tampered)
+					end
+				else
+					_CKLog("Anomaly: scan clean.")
+				end
+			end
+		end)
+	end
+
+	local function stopAnomalyDetector()
+		if _DETECTOR_THREAD then
+			_pcall(task.cancel, _DETECTOR_THREAD)
+			_DETECTOR_THREAD = nil
+			_BASELINE        = nil
+			_CKLog("Anomaly: detector stopped.")
+		end
+	end
+
+	local function setAnomalyCallback(fn)
+		-- [PATCH #7] Wrap callback in pcall so a crash cannot kill the detector loop
+		if _type(fn) == "function" then
+			_TAMPER_CALLBACK = function(...)
+				local ok, err = _pcall(fn, ...)
+				if not ok then
+					_CKLog("Anomaly: callback error (loop preserved): " .. _tostring(err))
+				end
+			end
+		else
+			_TAMPER_CALLBACK = nil
+		end
+		_CKLog("Anomaly: callback " .. (_TAMPER_CALLBACK and "set (sandboxed)." or "cleared."))
+	end
+
+	local function runAnomalyCheck()
+		local tampered = {}
+		local clean    = {}
+		for _, w in _ipairs(_ANOMALY_WATCH) do
+			local ok, cur = _pcall(_rawget, w[1], w[2])
+			if ok and _BASE_SNAP[w[3]] ~= nil and cur ~= _BASE_SNAP[w[3]] then
+				_tinsert(tampered, w[3])
+			else
+				_tinsert(clean, w[3])
+			end
+		end
+		-- Hook presence check
+		if _type(hookfunction)   == "function" then _tinsert(tampered, "hookfunction_present")   end
+		if _type(hookmetamethod) == "function" then _tinsert(tampered, "hookmetamethod_present") end
+		_ANOMALY_REPORT = {
+			tampered  = tampered,
+			clean     = clean,
+			checkedAt = _tick(),
+			safe      = (#tampered == 0),
+		}
+		_CKLog(_sfmt("RunAnomalyCheck: %d tampered, %d clean.", #tampered, #clean))
+		return _ANOMALY_REPORT
+	end
+
+	local function getAnomalyReport()
+		if not _ANOMALY_REPORT then
+			return runAnomalyCheck()
+		end
+		return _ANOMALY_REPORT
+	end
+
+	local function runExecutorIntegrityTest()
+		local results = {}
+		local passed  = 0
+		local failed  = 0
+
+		for _, probe in _ipairs(_PROBES) do
+			local ok, err = _pcall(probe.fn)
+			results[probe.name] = {
+				pass  = ok,
+				desc  = probe.desc,
+				err   = ok and nil or _tostring(err),
+			}
+			if ok then
+				passed = passed + 1
+				_CKLog(_sfmt("IntegrityProbe [✓] %s", probe.name))
+			else
+				failed = failed + 1
+				warn(_sfmt("[CK:Integrity] ✗ %s — %s", probe.name, _tostring(err)))
+			end
+		end
+
+		_INTEGRITY_REPORT = {
+			passed    = passed,
+			failed    = failed,
+			total     = passed + failed,
+			safe      = (failed == 0),
+			results   = results,
+			testedAt  = _tick(),
+		}
+
+		_CKLog(_sfmt("IntegrityTest: %d/%d passed — executor %s.",
+			passed, passed + failed,
+			failed == 0 and "appears CLEAN" or "has SUSPICIOUS traits"))
+
+		return _INTEGRITY_REPORT
+	end
+
+	local function getIntegrityReport()
+		if not _INTEGRITY_REPORT then
+			return runExecutorIntegrityTest()
+		end
+		return _INTEGRITY_REPORT
+	end
+
+
+	-- ════════════════════════════════════════════════════════════════════════
+	-- SECURITY
+	-- ════════════════════════════════════════════════════════════════════════
+	local function enableAntiKick(enabled)
+
+		-- DISABLE
+		if enabled == false then
+			if not _ANTIKICK_ACTIVE then return end
+
+			if _ANTIKICK_ORIG_KICK and _type(hookfunction) == "function" then
+				_pcall(function() hookfunction(LocalPlayer.Kick, _ANTIKICK_ORIG_KICK) end)
+			end
+			if _ANTIKICK_ORIG_NCI and _type(hookmetamethod) == "function" then
+				_pcall(function() hookmetamethod(LocalPlayer, "__namecall", _ANTIKICK_ORIG_NCI) end)
+			end
+			if _ANTIKICK_ORIG_NCG and _type(hookmetamethod) == "function" then
+				_pcall(function() hookmetamethod(game, "__namecall", _ANTIKICK_ORIG_NCG) end)
+			end
+
+			_ANTIKICK_ORIG_KICK = nil
+			_ANTIKICK_ORIG_NCI  = nil
+			_ANTIKICK_ORIG_NCG  = nil
+			_ANTIKICK_ACTIVE    = false
+			_CKLog("AntiKick: disabled — originals restored.")
+			return
+		end
+
+		if _ANTIKICK_ACTIVE then
+			_CKLog("AntiKick: already active.")
+			return
+		end
+
+		-- METHOD 1: hookfunction on LocalPlayer.Kick
+		if _type(hookfunction) == "function" then
+			_pcall(function()
+				_ANTIKICK_ORIG_KICK = hookfunction(
+					LocalPlayer.Kick,
+					_newcclosure(function() end)
+				)
+				_CKLog("AntiKick [M1]: hookfunction on LocalPlayer.Kick.")
 			end)
 		end
 
-  -- PRESET
-		if cfg.preset and Compkiller.MasterControl.Preset[cfg.preset] then
-			Compkiller.MasterControl.Preset[cfg.preset]()
+		-- METHOD 2: hookmetamethod on LocalPlayer __namecall
+		-- Exact pattern with checkcaller() guard + setreadonly bracket
+		if _type(hookmetamethod) == "function" then
+			_pcall(function()
+				_ANTIKICK_ORIG_NCI = hookmetamethod(
+					LocalPlayer,
+					"__namecall",
+					_newcclosure(function(self, ...)
+						if _checkcaller() then return _ANTIKICK_ORIG_NCI(self, ...) end
+						if self == LocalPlayer and _getnamecallmethod() == "Kick" then
+							_CKLog("AntiKick [M2]: blocked :Kick() on LocalPlayer.")
+							return nil
+						end
+						return _ANTIKICK_ORIG_NCI(self, ...)
+					end)
+				)
+				_CKLog("AntiKick [M2]: hookmetamethod on LocalPlayer.__namecall.")
+			end)
 		end
 
-		_CKLog("MasterControl.Apply: config applied")
-	end,
-}
+		-- METHOD 3: hookmetamethod on game __namecall
+		if _type(hookmetamethod) == "function" then
+			_pcall(function()
+				_ANTIKICK_ORIG_NCG = hookmetamethod(
+					game,
+					"__namecall",
+					_newcclosure(function(self, ...)
+						if _checkcaller() then return _ANTIKICK_ORIG_NCG(self, ...) end
+						if _getnamecallmethod() == "Kick"
+						and (self == LocalPlayer or self == Players.LocalPlayer) then
+							_CKLog("AntiKick [M3]: blocked game-level :Kick().")
+							return nil
+						end
+						return _ANTIKICK_ORIG_NCG(self, ...)
+					end)
+				)
+				_CKLog("AntiKick [M3]: hookmetamethod on game.__namecall.")
+			end)
+		end
+
+		-- METHOD 4: getrawmetatable fallback (CMD X pattern)
+		-- Used when hookmetamethod is unavailable — direct metatable write
+		if _type(hookmetamethod) ~= "function" and _type(_getrawmetatable) == "function" then
+			_pcall(function()
+				local mt    = _getrawmetatable(game)
+				if not mt then return end
+				local oldNC = mt.__namecall
+				if not oldNC then return end
+
+				_setreadonly(mt, false)
+				mt.__namecall = _newcclosure(function(self, ...)
+					if _checkcaller() then return oldNC(self, ...) end
+					if _getnamecallmethod() == "Kick"
+					and (self == LocalPlayer or self == Players.LocalPlayer) then
+						_CKLog("AntiKick [M4]: blocked via rawmetatable.")
+						return nil
+					end
+					return oldNC(self, ...)
+				end)
+				_setreadonly(mt, true)
+				_ANTIKICK_ORIG_NCG = oldNC   -- store so disable can restore
+				_CKLog("AntiKick [M4]: getrawmetatable fallback applied.")
+			end)
+		end
+
+		_ANTIKICK_ACTIVE = true
+		_CKLog("AntiKick: all available methods applied.")
+	end
+
+	local function enableAntiAFK(enabled)
+		if enabled == false then
+			if _ANTIAFK_CONN   then _pcall(function() _ANTIAFK_CONN:Disconnect()    end) _ANTIAFK_CONN   = nil end
+			if _ANTIAFK_THREAD then _pcall(function() task.cancel(_ANTIAFK_THREAD)  end) _ANTIAFK_THREAD = nil end
+			_CKLog("AntiAFK: disabled.")
+			return
+		end
+		if _ANTIAFK_CONN then
+			_CKLog("AntiAFK: already active.")
+			return
+		end
+		-- Hook the idle kick via VirtualUser
+		_pcall(function()
+			local VirtualUser = game:GetService("VirtualUser")
+			_ANTIAFK_CONN = _TrackConn(
+				Players.LocalPlayer.Idled:Connect(function()
+					VirtualUser:CaptureController()
+					VirtualUser:ClickButton2(Vector2.new())
+					_CKLog("AntiAFK: idle ping sent.")
+				end)
+			)
+		end)
+		-- Fallback: periodic dummy input every 15 minutes
+		_ANTIAFK_THREAD = _ckSpawn(function()
+			while _ANTIAFK_CONN do
+				task.wait(840)   -- 14 min
+				_pcall(function()
+					local VU = game:GetService("VirtualUser")
+					VU:CaptureController()
+					VU:ClickButton2(Vector2.new())
+				end)
+			end
+		end)
+		_tinsert(_CK_THREADS, _ANTIAFK_THREAD)
+		_CKLog("AntiAFK: enabled.")
+	end
+
+
+	-- ════════════════════════════════════════════════════════════════════════
+	-- BYPASS ENGINE — individual
+	-- ════════════════════════════════════════════════════════════════════════
+	local function enableGCBypass(enabled)
+		if enabled == false then _DisableGCBypass() else _EnableGCBypass() end
+	end
+
+	local function enableMemoryBypass(enabled)
+		if enabled == false then
+			-- Restore all hooks
+			if _MEM_HOOK1 and _type(hookfunction) == "function" then _pcall(function() hookfunction(_Stats.GetTotalMemoryUsageMb,   _MEM_HOOK1) end) end
+			if _MEM_HOOK2 and _type(hookfunction) == "function" then _pcall(function() hookfunction(_Stats.GetMemoryUsageMbForTag, _MEM_HOOK2) end) end
+			_MEM_ACTIVE = false
+			_CKLog("MemBypass: disabled.")
+		else
+			_EnableMemBypass()
+		end
+	end
+
+	local function enableContentBypass(enabled)
+		if enabled == false then
+			_CONTENT_ACTIVE = false
+			_CKLog("ContentBypass: disabled.")
+		else
+			_EnableContentBypass()
+		end
+	end
+
+	local function enableHoneyPotBypass(enabled)
+		if enabled == false then
+			_HONEYPOT_ACTIVE = false
+			_PROXY_TABLE     = {}
+			_CKLog("HoneyPotBypass: disabled.")
+		else
+			_EnableHoneyPotBypass()
+		end
+	end
+
+	local function enableGlobalScanBypass(enabled)
+		if enabled == false then
+			_GLOBAL_SCAN_ACTIVE = false
+			_CKLog("GlobalScanBypass: disabled (restart needed to fully revert _G hook).")
+		else
+			_EnableGlobalScanBypass()
+		end
+	end
+
+	local function enableMetaGuard(enabled)
+		if enabled == false then
+			_METAGUARD_ACTIVE = false
+			_CKLog("MetaGuard: disabled.")
+		else
+			_EnableMetaGuard()
+		end
+	end
+
+	local function enableRenvBypass(enabled)
+		if enabled == false then
+			_RENV_ACTIVE = false
+			_CKLog("RenvBypass: disabled.")
+		else
+			_EnableRenvBypass()
+		end
+	end
+
+	local function enableTextBoxBypass(enabled)
+		if enabled == false then
+			_TEXTBOX_BYPASS_ACTIVE = false
+			_CKLog("TextBoxBypass: disabled.")
+		else
+			_EnableTextBoxBypass()
+		end
+	end
+
+	local function enableMemorySpoof(enabled)
+		if enabled == false then
+			_MEMSPOOFED = false
+			_GCSPOOFED  = false
+			_CKLog("MemorySpoof: disabled (note: hooks persist until restart).")
+			return
+		end
+		if _MEMSPOOFED and _GCSPOOFED then
+			_CKLog("MemorySpoof: already active.")
+			return
+		end
+
+		local Stats = _pcall(function() return cloneref(game:GetService("Stats")) end)
+		if not Stats then Stats = game:GetService("Stats") end
+
+		-- GcInfo cosine spoof
+		if not _GCSPOOFED and _type(hookfunction) == "function" and _type(getrenv) == "function" then
+			_pcall(function()
+				-- Wait for gcinfo to peak so our baseline is accurate
+				local maxima = 0
+				local waited = 0
+				while waited < 60 do
+					local gc = gcinfo()
+					if gc >= maxima then maxima = gc else break end
+					task.wait(0.05)
+					waited = waited + 1
+				end
+				task.wait(0.3)
+
+				local baseGC   = gcinfo() + 200
+				local getGC    = _makeCosineSpoof(baseGC, 200)
+				local renv     = getrenv()
+
+				local _oldGc;   _oldGc  = hookfunction(renv.gcinfo, _newcclosure(function(...)
+					return getGC()
+				end))
+				local _oldCg;   _oldCg  = hookfunction(renv.collectgarbage, _newcclosure(function(arg, ...)
+					if not _checkcaller() and arg == "count" then
+						return getGC()
+					end
+					local ok, r = _pcall(_oldCg, arg, ...)
+					return ok and r or getGC()
+				end))
+
+				_GCSPOOFED = true
+				_CKLog("MemorySpoof: gcinfo/collectgarbage cosine spoof active.")
+			end)
+		end
+
+		-- Stats:GetTotalMemoryUsageMb spoof
+		if not _MEMSPOOFED and _type(hookmetamethod) == "function" then
+			_pcall(function()
+				local baseMem = Stats:GetTotalMemoryUsageMb()
+				local rand    = 0
+				_TrackConn(RunService.Stepped:Connect(function()
+					rand = Random.new():NextNumber(-10, 10)
+				end))
+				local function getMem() return baseMem + rand end
+
+				-- __namecall intercept
+				local _oldMemNC;  _oldMemNC = hookmetamethod(game, "__namecall", _newcclosure(function(self, ...)
+					if not _checkcaller() then
+						local m = _getnamecallmethod()
+						if _type(self) == "userdata" and
+						(m == "GetTotalMemoryUsageMb" or m == "getTotalMemoryUsageMb") then
+							return getMem()
+						end
+						if _type(self) == "userdata" and
+						(m == "GetMemoryUsageMbForTag" or m == "getMemoryUsageMbForTag") then
+							local tagRand = Random.new():NextNumber(-0.1, 0.1)
+							local baseTag = _pcall(function() return Stats:GetMemoryUsageMbForTag(Enum.DeveloperMemoryTag.Gui) end) or 0
+							return (type(baseTag) == "number" and baseTag or 0) + tagRand
+						end
+					end
+					return _oldMemNC(self, ...)
+				end))
+
+				-- Direct hookfunction on indexed method
+				local _oldMemF;  _oldMemF = hookfunction(Stats.GetTotalMemoryUsageMb, _newcclosure(function(self, ...)
+					if not _checkcaller() then return getMem() end
+					return _oldMemF(self, ...)
+				end))
+
+				_MEMSPOOFED = true
+				_CKLog("MemorySpoof: GetTotalMemoryUsageMb + GetMemoryUsageMbForTag spoofed.")
+			end)
+		end
+	end
+
+	local function enableContentProviderBypass(enabled)
+		if enabled == false then
+			_CPBYPASS_ACTIVE = false
+			_CKLog("ContentProviderBypass: disabled.")
+			return
+		end
+		if _CPBYPASS_ACTIVE then return end
+		if _type(hookmetamethod) ~= "function" then
+			_CKLog("ContentProviderBypass: hookmetamethod unavailable — skipped.")
+			return
+		end
+
+		_pcall(function()
+			local ContentRef = cloneref(game:GetService("ContentProvider"))
+			local CoreGuiRef = cloneref(game:GetService("CoreGui"))
+			local safePool   = _buildAssetPool()
+
+			-- __namecall intercept
+			local _oldCP; _oldCP = hookmetamethod(game, "__namecall", _newcclosure(function(self, instances, ...)
+				local method = _getnamecallmethod()
+				if not _checkcaller()
+				and (method == "PreloadAsync" or method == "preloadAsync")
+				and _type(self) == "userdata" then
+					-- If AC is scanning CoreGui or game root — feed safe shuffled list
+					if _type(instances) == "table"
+					and (instances[1] == CoreGuiRef or instances[1] == game) then
+						local safeList = _shuffleTable({table.unpack(safePool)})
+						return _oldCP(self, safeList, ...)
+					end
+				end
+				return _oldCP(self, instances, ...)
+			end))
+
+			-- hookfunction on indexed PreloadAsync too
+			local _oldCPF; _oldCPF = hookfunction(ContentRef.PreloadAsync, _newcclosure(function(self, instances, callback)
+				if not _checkcaller() and _type(instances) == "table" then
+					if instances[1] == CoreGuiRef or instances[1] == game then
+						local safeList = _shuffleTable({table.unpack(safePool)})
+						return _oldCPF(self, safeList, callback)
+					end
+				end
+				return _oldCPF(self, instances, callback)
+			end))
+
+			_CPBYPASS_ACTIVE = true
+			_CKLog(_sfmt("ContentProviderBypass: active — %d safe assets in pool.", #safePool))
+		end)
+	end
+
+	local function enableHoneypotBypass(enabled)
+		if enabled == false then
+			_HONEYPOT_ACTIVE  = false
+			_PROXY_STRONGHOLD = {}
+			_CKLog("HoneypotBypass: disabled.")
+			return
+		end
+		if _HONEYPOT_ACTIVE then return end
+		if _type(hookfunction) ~= "function" or _type(getrenv) ~= "function" then
+			_CKLog("HoneypotBypass: hookfunction/getrenv unavailable — skipped.")
+			return
+		end
+
+		_pcall(function()
+			local renv = getrenv()
+
+			-- Hook newproxy — every proxy created by any script goes into our stronghold
+			local _oldProxy; _oldProxy = hookfunction(renv.newproxy, _newcclosure(function(...)
+				local proxy = _oldProxy(...)
+				_tinsert(_PROXY_STRONGHOLD, proxy)
+				return proxy
+			end))
+
+			-- Also periodically scrub nil entries to prevent memory bloat
+			-- (entries only become nil if we explicitly remove them — since they're strong refs, they won't GC naturally)
+			_ckSpawn(function()
+				while _HONEYPOT_ACTIVE do
+					task.wait(30)
+					local clean = {}
+					for _, v in _ipairs(_PROXY_STRONGHOLD) do
+						if v ~= nil then _tinsert(clean, v) end
+					end
+					_PROXY_STRONGHOLD = clean
+				end
+			end)
+
+			-- Additional: hook setmetatable to detect and neutralize honeypot tables
+			-- If AC makes a weak-mode table containing CoreGui, swap __mode to "" (strong)
+			local _oldSMT; _oldSMT = hookfunction(renv.setmetatable, _newcclosure(function(t, mt)
+				if not _checkcaller() and _type(mt) == "table" then
+					local mode = _rawget(mt, "__mode")
+					if mode and (mode:find("v") or mode:find("k")) then
+						-- Check if this table contains CoreGui — if so it's a honeypot
+						if _type(t) == "table" then
+							for _, v in _ipairs(t) do
+								if v == game:GetService("CoreGui") then
+									-- Neutralize: remove weak mode so entries never GC
+									local safeMt = {}
+									for k, val in _pairs(mt) do safeMt[k] = val end
+									safeMt["__mode"] = ""
+									_CKLog("HoneypotBypass: neutralized CoreGui weak-table trap.")
+									return _oldSMT(t, safeMt)
+								end
+							end
+						end
+					end
+				end
+				return _oldSMT(t, mt)
+			end))
+
+			_HONEYPOT_ACTIVE = true
+			_CKLog("HoneypotBypass: newproxy stronghold + setmetatable guard active.")
+		end)
+	end
+
+	local function enableScanGuard(screenGui, enabled)
+		if enabled == false then
+			_SCANGUARD_ACTIVE = false
+			_CKLog("ScanGuard: disabled.")
+			return
+		end
+		if _SCANGUARD_ACTIVE then return end
+		if _type(hookmetamethod) ~= "function" then
+			_CKLog("ScanGuard: hookmetamethod unavailable — skipped.")
+			return
+		end
+
+		_pcall(function()
+			local _oldSG; _oldSG = hookmetamethod(game, "__namecall", _newcclosure(function(self, ...)
+				if _checkcaller() then return _oldSG(self, ...) end
+				local method = _getnamecallmethod()
+
+				-- Filter GetDescendants — remove our ScreenGui from returned table
+				if method == "GetDescendants" or method == "GetChildren" then
+					local results = {_oldSG(self, ...)}
+					if _type(results[1]) == "table" then
+						local filtered = {}
+						for _, v in _ipairs(results[1]) do
+							-- Hide our GUI and anything inside it
+							local isOurs = false
+							if screenGui and (v == screenGui or _pcall(function()
+								return v:IsDescendantOf(screenGui)
+							end) == true) then
+								isOurs = true
+							end
+							if not isOurs then _tinsert(filtered, v) end
+						end
+						return filtered
+					end
+					return table.unpack(results)
+				end
+
+				-- Block DescendantAdded connections that fire on our GUI
+				-- We can't stop the event but we can filter the callback's argument
+				if (method == "Connect" or method == "connect") and self then
+					_pcall(function()
+						-- Check if self is CoreGui.DescendantAdded or similar signal
+						-- We wrap the passed callback to filter out our GUI
+						local args = {...}
+						if _type(args[1]) == "function" then
+							local origCb = args[1]
+							args[1] = _newcclosure(function(obj)
+								-- If the added obj IS or IS INSIDE our screengui, swallow it
+								if screenGui and obj then
+									if obj == screenGui then return end
+									local ok, desc = _pcall(function()
+										return obj:IsDescendantOf(screenGui)
+									end)
+									if ok and desc then return end
+								end
+								origCb(obj)
+							end)
+							return _oldSG(self, table.unpack(args))
+						end
+					end)
+				end
+
+				return _oldSG(self, ...)
+			end))
+
+			_SCANGUARD_ACTIVE = true
+			_CKLog("ScanGuard: GetDescendants/DescendantAdded filter active.")
+		end)
+	end
+
+	local function enableNamecallGuard(enabled)
+		if enabled == false then
+			_NCGUARD_ACTIVE = false
+			_CKLog("NamecallGuard: disabled.")
+			return
+		end
+		if _NCGUARD_ACTIVE then return end
+		if _type(_getrawmetatable) ~= "function" then
+			_CKLog("NamecallGuard: getrawmetatable unavailable — skipped.")
+			return
+		end
+
+		_pcall(function()
+			local mt = _getrawmetatable(game)
+			if not mt then return end
+
+			-- Snapshot what our current __namecall is
+			_NC_OUR_HOOK = mt.__namecall
+
+			-- Poll every 0.5s — if AC replaced __namecall, reinstall ours on top
+			_ckSpawn(function()
+				while _NCGUARD_ACTIVE do
+					task.wait(0.5)
+					_pcall(function()
+						local current = _rawget(mt, "__namecall")
+						if current ~= _NC_OUR_HOOK and _islclosure(current) then
+							-- AC replaced it with a Lua spy — layer ours back on top
+							local acSpy = current
+							_setreadonly(mt, false)
+							mt.__namecall = _newcclosure(function(self, ...)
+								-- Call AC's spy but make it think it's an executor call
+								-- (we do NOT call acSpy — we swallow it and call our original)
+								_CKLog("NamecallGuard: AC __namecall spy intercepted and neutralized.")
+								return _NC_OUR_HOOK(self, ...)
+							end)
+							_setreadonly(mt, true)
+							_CKLog("NamecallGuard: __namecall restored over AC spy.")
+						end
+					end)
+				end
+			end)
+
+			_NCGUARD_ACTIVE = true
+			_CKLog("NamecallGuard: __namecall tamper watch active (polling every 0.5s).")
+		end)
+	end
+
+	local function enableExecutorCloaker(enabled)
+		if enabled == false then
+			_CLOAKER_ACTIVE = false
+			_CKLog("ExecutorCloaker: disabled (hooks persist until restart).")
+			return
+		end
+		if _CLOAKER_ACTIVE then return end
+
+		_pcall(function()
+			local renv = getrenv and getrenv() or nil
+
+			-- Hook rawget — intercept _G lookups for executor globals
+			if _type(hookfunction) == "function" then
+				local _oldRawget; _oldRawget = hookfunction(
+					getrenv and getrenv().rawget or rawget,
+					_newcclosure(function(t, k)
+						if not _checkcaller() and t == _G and _EXEC_SET[k] then
+							_CKLog("ExecutorCloaker: blocked rawget(_G, '" .. _tostring(k) .. "')")
+							return nil
+						end
+						return _oldRawget(t, k)
+					end)
+				)
+
+				-- Also cloak getrenv() gethui check (AntiCheat.txt line: getrenv().gethui)
+				if renv and _type(renv) == "table" then
+					local _oldGetrenv; _oldGetrenv = hookfunction(getrenv, _newcclosure(function(...)
+						if not _checkcaller() then
+							-- Return a proxy table that hides all executor globals
+							local realEnv = _oldGetrenv(...)
+							return setmetatable({}, {
+								__index = _newcclosure(function(_, k)
+									if _EXEC_SET[k] then
+										_CKLog("ExecutorCloaker: getrenv()." .. _tostring(k) .. " hidden.")
+										return nil
+									end
+									return realEnv[k]
+								end),
+								__newindex = _newcclosure(function(_, k, v)
+									realEnv[k] = v
+								end),
+							})
+						end
+						return _oldGetrenv(...)
+					end))
+				end
+			end
+
+			_CLOAKER_ACTIVE = true
+			_CKLog(_sfmt("ExecutorCloaker: active — %d globals cloaked.", #_EXEC_GLOBALS))
+		end)
+	end
+
+
+	-- ════════════════════════════════════════════════════════════════════════
+	-- BYPASS ENGINE — bulk
+	-- ════════════════════════════════════════════════════════════════════════
+	local function enableAllBypasses()
+		_ckSpawn(function()
+			task.wait(1)  -- wait for game to fully load so baselines are accurate
+			enableGCBypass(true)
+			enableMemoryBypass(true)
+			enableContentBypass(true)
+			enableHoneyPotBypass(true)
+			enableGlobalScanBypass(true)
+			enableMetaGuard(true)
+			enableRenvBypass(true)
+			enableTextBoxBypass(true)
+			_CKLog("AllBypasses: all 8 bypass systems active.")
+		end)
+	end
+
+	local function disableAllBypasses()
+		enableGCBypass(false)
+		enableMemoryBypass(false)
+		enableContentBypass(false)
+		enableHoneyPotBypass(false)
+		enableGlobalScanBypass(false)
+		enableMetaGuard(false)
+		enableRenvBypass(false)
+		enableTextBoxBypass(false)
+		_CKLog("AllBypasses: all systems disabled.")
+	end
+
+	local function armAntiDetection(cfg)
+		cfg = cfg or {}
+		local sg = cfg.screenGui  -- pass the ScreenGui reference for ScanGuard
+
+		if cfg.memorySpoof       ~= false then enableMemorySpoof(true)             end
+		if cfg.contentBypass     ~= false then enableContentProviderBypass(true)   end
+		if cfg.honeypotBypass    ~= false then enableHoneypotBypass(true)          end
+		if cfg.scanGuard         ~= false then enableScanGuard(sg, true)           end
+		if cfg.namecallGuard     ~= false then enableNamecallGuard(true)           end
+		if cfg.executorCloaker   ~= false then enableExecutorCloaker(true)         end
+
+		_CKLog("ArmAntiDetection: all requested bypasses armed.")
+	end
+
+
+	-- ════════════════════════════════════════════════════════════════════════
+	-- PRESETS
+	-- ════════════════════════════════════════════════════════════════════════
+	-- MC.preset("stealth"/"performance"/"balanced"/"secure"/"nuke")
+	-- MC.preset("nuke", { gcBypass=false }) → nuke with selective overrides
+	local function preset(name, overrides)
+		local p = {}
+		p.stealth = function()
+			setPerformanceProfile("LOW")
+			setSmartAnimations(false)
+			enableAdvancedOptimizations(false)
+			setSleepMode(true)
+			enableNameObfuscation(true)
+			_CKLog("Preset.stealth: active")
+		end
+		p.performance = function()
+			setPerformanceProfile("HIGH")
+			setSmartAnimations(true)
+			enableAdvancedOptimizations(true)
+			setSleepMode(false)
+			startRenderManager()
+			_CKLog("Preset.performance: active")
+		end
+		p.balanced = function()
+			setPerformanceProfile("MEDIUM")
+			setSmartAnimations(true)
+			enableAdvancedOptimizations(true)
+			setSleepMode(false)
+			_CKLog("Preset.balanced: active")
+		end
+		p.secure = function()
+			enableNameObfuscation(true)
+			startAnomalyDetector(5)
+			enableAntiAFK(true)
+			enableAntiKick(true)
+			setSafeCall(true)
+			_CKLog("Preset.secure: active")
+		end
+		p.nuke = function()
+			setPerformanceProfile("HIGH")
+			setSmartAnimations(true)
+			enableAdvancedOptimizations(true)
+			enableNameObfuscation(true)
+			startAnomalyDetector(5)
+			enableAntiAFK(true)
+			enableAntiKick(true)
+			setSafeCall(true)
+			enableAllBypasses()
+			if type(overrides) == "table" then
+				task.defer(function()
+					local map = {
+						gcBypass         = function(v) enableGCBypass(v)          end,
+						memBypass        = function(v) enableMemoryBypass(v)       end,
+						contentBypass    = function(v) enableContentBypass(v)      end,
+						honeyPotBypass   = function(v) enableHoneyPotBypass(v)     end,
+						globalScanBypass = function(v) enableGlobalScanBypass(v)   end,
+						metaGuard        = function(v) enableMetaGuard(v)          end,
+						renvBypass       = function(v) enableRenvBypass(v)         end,
+						textBoxBypass    = function(v) enableTextBoxBypass(v)      end,
+					}
+					for k, fn in pairs(map) do
+						if overrides[k] == false then _pcall(fn, false) end
+					end
+				end)
+			end
+			_CKLog("Preset.nuke: ALL systems armed.")
+		end
+		local fn = p[tostring(name):lower()]
+		if fn then fn()
+		else warn("[CK] MasterControl.preset: unknown '" .. tostring(name) ..
+			"' — valid: stealth  performance  balanced  secure  nuke") end
+	end
+
+
+	-- ════════════════════════════════════════════════════════════════════════
+	-- APPLY — fire everything from one config table
+	-- ════════════════════════════════════════════════════════════════════════
+	local function apply(cfg)
+		if type(cfg) ~= "table" then return end
+
+		-- DEBUG
+		if cfg.debug            ~= nil  then setDebug(cfg.debug)                                             end
+		if cfg.dumpStats        == true then dumpStats()                                                     end
+
+		-- PERFORMANCE
+		if cfg.performance      ~= nil  then
+			if cfg.performance == true  then setPerformanceProfile("HIGH")
+			elseif cfg.performance == false then setPerformanceProfile("LOW")
+			else setPerformanceProfile(tostring(cfg.performance):upper()) end
+		end
+		if cfg.tier             ~= nil  then
+			if cfg.tier == true  then setHardwareTier("HIGH")
+			elseif cfg.tier == false then setHardwareTier("LOW")
+			else setHardwareTier(tostring(cfg.tier):upper()) end
+		end
+		if cfg.animThreshold    ~= nil  then setAnimThreshold(cfg.animThreshold)                             end
+		if cfg.memInterval      ~= nil  then setMemInterval(cfg.memInterval)                                 end
+		if cfg.smartAnimations  ~= nil  then setSmartAnimations(cfg.smartAnimations)                         end
+		if cfg.advancedOpt      ~= nil  then enableAdvancedOptimizations(cfg.advancedOpt)                    end
+		if cfg.optimizeMode     ~= nil  then optimizeMode(cfg.optimizeMode)                                  end
+		if cfg.sleepMode        ~= nil  then setSleepMode(cfg.sleepMode)                                     end
+		if cfg.fpsCap           ~= nil  then fpsCap(cfg.fpsCap)                                              end
+
+		-- ANIMATIONS
+		if cfg.pauseAnimations  == true  then pauseAllAnimations()                                           end
+		if cfg.pauseAnimations  == false then resumeAllAnimations()                                          end
+		if cfg.forceGC          == true  then forceGC()                                                      end
+		if cfg.cleanupAll       == true  then cleanupAll()                                                   end
+
+		-- RENDER
+		if cfg.renderManager    == true  then startRenderManager()                                           end
+		if cfg.renderManager    == false then stopRenderManager()                                            end
+		if cfg.renderCull       == true  then renderCull()                                                   end
+		if cfg.renderCull       == false then renderResume()                                                 end
+
+		-- SANDBOX
+		if cfg.safeCall         ~= nil  then setSafeCall(cfg.safeCall)                                       end
+
+		-- GUI SHIELD
+		if cfg.obfuscate        ~= nil  then enableNameObfuscation(cfg.obfuscate)                            end
+		if cfg.hardReset        == true then hardReset()                                                     end
+		if cfg.indexHook        == true then indexHook()                                                     end
+		if cfg.turboScramble    ~= nil and cfg.turboScrambleGui then
+			enableTurboScramble(cfg.turboScrambleGui, cfg.turboScramble)
+		end
+
+		-- WINDOW POSITION
+		if cfg.savePosition     ~= nil  then saveWindowPosition(cfg.savePosition)                            end
+		if cfg.loadPosition     == true then loadWindowPosition()                                            end
+
+		-- ANOMALY
+		if cfg.anomalyWatch     == true  then startAnomalyDetector(_nv(cfg.anomalyInterval, 5))              end
+		if cfg.anomalyWatch     == false then stopAnomalyDetector()                                          end
+		if cfg.anomalyCallback  ~= nil  then setAnomalyCallback(cfg.anomalyCallback)                        end
+
+		-- SECURITY
+		if cfg.antiKick         ~= nil  then enableAntiKick(cfg.antiKick)                                    end
+		if cfg.antiAfk          ~= nil  then enableAntiAFK(cfg.antiAfk)                                      end
+
+		-- BYPASS ENGINE — bulk first, then individual overrides
+		if cfg.allBypasses      == true  then enableAllBypasses()                                            end
+		if cfg.allBypasses      == false then disableAllBypasses()                                           end
+		if cfg.gcBypass         ~= nil  then enableGCBypass(cfg.gcBypass)                                    end
+		if cfg.memBypass        ~= nil  then enableMemoryBypass(cfg.memBypass)                               end
+		if cfg.contentBypass    ~= nil  then enableContentBypass(cfg.contentBypass)                          end
+		if cfg.honeyPotBypass   ~= nil  then enableHoneyPotBypass(cfg.honeyPotBypass)                        end
+		if cfg.globalScanBypass ~= nil  then enableGlobalScanBypass(cfg.globalScanBypass)                    end
+		if cfg.metaGuard        ~= nil  then enableMetaGuard(cfg.metaGuard)                                  end
+		if cfg.renvBypass       ~= nil  then enableRenvBypass(cfg.renvBypass)                                end
+		if cfg.textBoxBypass    ~= nil  then enableTextBoxBypass(cfg.textBoxBypass)                          end
+		if cfg.memorySpoof      ~= nil  then enableMemorySpoof(cfg.memorySpoof)                              end
+		if cfg.contentProviderBypass ~= nil then enableContentProviderBypass(cfg.contentProviderBypass)      end
+		if cfg.honeypotBypass   ~= nil  then enableHoneypotBypass(cfg.honeypotBypass)                        end
+		if cfg.scanGuard        ~= nil  then enableScanGuard(cfg.scanGuardGui, cfg.scanGuard)                end
+		if cfg.namecallGuard    ~= nil  then enableNamecallGuard(cfg.namecallGuard)                          end
+		if cfg.executorCloaker  ~= nil  then enableExecutorCloaker(cfg.executorCloaker)                      end
+		if cfg.armAntiDetection ~= nil  then
+			armAntiDetection(type(cfg.armAntiDetection) == "table" and cfg.armAntiDetection or {})
+		end
+
+		-- DELAYED DIAGNOSTICS (after game settles)
+		if cfg.runDiagnostics == true or cfg.integrityTest == true or cfg.anomalyCheck == true then
+			_ckSpawn(function()
+				task.wait(cfg.diagnosticsDelay or 8)
+				if cfg.runDiagnostics == true then runDiagnostics()           end
+				if cfg.anomalyCheck   == true then runAnomalyCheck()          end
+				if cfg.integrityTest  == true then runExecutorIntegrityTest() end
+			end)
+		end
+
+		-- PRESET runs last so explicit keys take priority
+		if cfg.preset then preset(cfg.preset, cfg.presetOverrides) end
+
+		_CKLog("MasterControl.apply: done.")
+	end
+
+
+	-- ════════════════════════════════════════════════════════════════════════
+	-- RETURN CONTROLLER
+	-- Unknown keys → no-op + warn via __index
+	-- ════════════════════════════════════════════════════════════════════════
+	return setmetatable({
+		-- DEBUG
+		debug                   = setDebug,
+		dumpStats               = dumpStats,
+		version                 = getVersionInfo,
+		executorProfile         = getExecutorProfile,
+		missingEnv              = getMissingEnv,
+		isStudio                = isStudio,
+
+		-- PERFORMANCE
+		performance             = setPerformanceProfile,
+		tier                    = setHardwareTier,
+		animThreshold           = setAnimThreshold,
+		memInterval             = setMemInterval,
+		fpsCap                  = fpsCap,
+		sleepMode               = setSleepMode,
+		optimizeMode            = optimizeMode,
+		getFPS                  = getFPS,
+		getStats                = getOptimizerStats,
+		isMobile                = isMobileTier,
+
+		-- ANIMATIONS
+		smartAnimations         = setSmartAnimations,
+		advancedOpt             = enableAdvancedOptimizations,
+		pauseAnimations         = pauseAllAnimations,
+		resumeAnimations        = resumeAllAnimations,
+		forceGC                 = forceGC,
+		cleanupAll              = cleanupAll,
+
+		-- RENDER
+		renderManager           = startRenderManager,
+		renderStop              = stopRenderManager,
+		renderCull              = renderCull,
+		renderResume            = renderResume,
+
+		-- GUI SHIELD
+		obfuscate               = enableNameObfuscation,
+		turboScramble           = enableTurboScramble,
+		indexHook               = indexHook,
+		hardReset               = hardReset,
+		isOpen                  = isWindowOpen,
+
+		-- SANDBOX
+		safeCall                = setSafeCall,
+		exec                    = safeExec,
+		safeCallFn              = safeCall,
+		wrap                    = wrap,
+		newSandbox              = newSandbox,
+		newJanitor              = newJanitor,
+		newRateLimiter          = newRateLimiter,
+		getSandboxErrors        = getSandboxErrors,
+
+		-- WINDOW POSITION
+		savePosition            = saveWindowPosition,
+		loadPosition            = loadWindowPosition,
+
+		-- CONFIG / THEME
+		getConfig               = getConfig,
+		getTheme                = getTheme,
+		setTheme                = setTheme,
+		refreshColor            = refreshCurrentColor,
+		changeHighlight         = changeHighlightColor,
+		loader                  = loader,
+		preloadIcons            = preloadIcons,
+		cacheImage              = cacheImage,
+		getDate                 = getDate,
+		getTimeNow              = getTimeNow,
+		security                = security,
+		configManager           = configManager,
+
+		-- DIAGNOSTICS
+		diagnostics             = runDiagnostics,
+		getDiagnostics          = getDiagnostics,
+		anomalyWatch            = startAnomalyDetector,
+		anomalyStop             = stopAnomalyDetector,
+		anomalyCallback         = setAnomalyCallback,
+		anomalyCheck            = runAnomalyCheck,
+		getAnomalyReport        = getAnomalyReport,
+		integrityTest           = runExecutorIntegrityTest,
+		integrityGet            = getIntegrityReport,
+
+		-- SECURITY
+		antiKick                = enableAntiKick,
+		antiAfk                 = enableAntiAFK,
+
+		-- BYPASS ENGINE
+		gcBypass                = enableGCBypass,
+		memBypass               = enableMemoryBypass,
+		contentBypass           = enableContentBypass,
+		honeyPotBypass          = enableHoneyPotBypass,
+		globalScanBypass        = enableGlobalScanBypass,
+		metaGuard               = enableMetaGuard,
+		renvBypass              = enableRenvBypass,
+		textBoxBypass           = enableTextBoxBypass,
+		memorySpoof             = enableMemorySpoof,
+		contentProviderBypass   = enableContentProviderBypass,
+		honeypotBypass          = enableHoneypotBypass,
+		scanGuard               = enableScanGuard,
+		namecallGuard           = enableNamecallGuard,
+		executorCloaker         = enableExecutorCloaker,
+		allBypasses             = enableAllBypasses,
+		disableBypasses         = disableAllBypasses,
+		armAntiDetection        = armAntiDetection,
+
+		-- PRESET & APPLY
+		preset                  = preset,
+		apply                   = apply,
+
+	}, {
+		__index = function(_, key)
+			warn("[CK] MasterControl." .. tostring(key) .. " — unknown key.")
+			return function() end
+		end,
+	})
+end
+
 
 return Compkiller;
