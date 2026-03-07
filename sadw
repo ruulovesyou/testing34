@@ -2135,7 +2135,7 @@ function Compkiller:OptimizeMode(v)
 	Compkiller.PerformanceMode = v;
 end;
 
-function Compkiller:SetDebug(enabled: boolean)
+function Compkiller:SetDebug(enabled)
 	self.Debug = (enabled == true)
 	_CK_DEBUG  = self.Debug   -- sync boot flag too
 	_CKLog("Debug logging " .. (self.Debug and "ENABLED" or "DISABLED"))
@@ -2150,7 +2150,7 @@ function Compkiller:CustomIconHighlight()
 	Compkiller.CustomHighlightMode = true;
 end;
 
-function Compkiller:_SetNilP(Ins: Instance , Parent: Instance)
+function Compkiller:_SetNilP(Ins , Parent)
 	Compkiller.WindowsNil = Compkiller.WindowsNil or {};
 	Compkiller.NilFolder = Compkiller.NilFolder or Instance.new('Folder');
 
@@ -2163,7 +2163,7 @@ function Compkiller:_SetNilP(Ins: Instance , Parent: Instance)
 	Ins.Parent = Parent or Compkiller.NilFolder;
 end;
 
-function Compkiller:_GetIcon(name : string , font_aws) : string
+function Compkiller:_GetIcon(name , font_aws)
 	if Compkiller.SecureMode then
 		local AssetId;
 
@@ -2189,11 +2189,11 @@ function Compkiller:_GetIcon(name : string , font_aws) : string
 	return Compkiller.Lucide['lucide-'..tostring(name)] or Compkiller.Lucide[name] or Compkiller.Lucide[tostring(name)] or Compkiller.FontAwesome[name] or name;
 end;
 
-function Compkiller:_RandomString() : string
+function Compkiller:_RandomString()
 	return "CK="..string.char(math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102));	
 end;
 
-function Compkiller:_IsMouseOverFrame(Frame : Frame) : boolean
+function Compkiller:_IsMouseOverFrame(Frame)
 	if not Frame then return end
 	if not Mouse then return false end
 
@@ -2204,12 +2204,12 @@ function Compkiller:_IsMouseOverFrame(Frame : Frame) : boolean
 	end;
 end;
 
-function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
+function Compkiller:_Rounding(num, numDecimalPlaces)
 	local mult: number = 10 ^ (numDecimalPlaces or 0);
 	return math.floor(num * mult + 0.5) / mult;
 end;
 
-function Compkiller:_Animation(Self: Instance , Info: TweenInfo , Property :{[K] : V})
+function Compkiller:_Animation(Self , Info , Property)
 	if _OPT and _OPT._AnimPaused then
 		for prop, val in pairs(Property) do
 			pcall(function() Self[prop] = val end)
@@ -2224,7 +2224,7 @@ function Compkiller:_Animation(Self: Instance , Info: TweenInfo , Property :{[K]
 	return Tween;
 end;
 
-function Compkiller:_Input(Frame : Frame , Callback : () -> ()) : TextButton
+function Compkiller:_Input(Frame , Callback)
 	local Button = Instance.new('TextButton',Frame);
 
 	Button.ZIndex = Frame.ZIndex + 10;
@@ -2239,7 +2239,7 @@ function Compkiller:_Input(Frame : Frame , Callback : () -> ()) : TextButton
 	return Button;
 end;
 
-function Compkiller:GetCalculatePosition(planePos: number, planeNormal: number, rayOrigin: number, rayDirection: number) : number
+function Compkiller:GetCalculatePosition(planePos, planeNormal, rayOrigin, rayDirection)
 	local n = planeNormal;
 	local d = rayDirection;
 	local v = rayOrigin - planePos;
@@ -2251,7 +2251,7 @@ function Compkiller:GetCalculatePosition(planePos: number, planeNormal: number, 
 	return rayOrigin + (a * rayDirection);
 end;
 
-function Compkiller:_Blur(element : Frame , WindowRemote) : RBXScriptSignal
+function Compkiller:_Blur(element , WindowRemote)
 	if Compkiller.SecureMode and not Compkiller.SecurityConfig.BlurEnabled then
 		return game.Changed:Connect(function() end);
 	end;
@@ -2387,7 +2387,7 @@ function Compkiller:_Blur(element : Frame , WindowRemote) : RBXScriptSignal
 	return rbxsignal;
 end;
 
-function Compkiller:_AddDragBlacklist(Frame: Frame)
+function Compkiller:_AddDragBlacklist(Frame)
 	local IsAdded = false;
 	local BASE_TIME = 0.01;
 
@@ -2451,7 +2451,7 @@ function Compkiller.__SIGNAL(default)
 		__signals = {}	
 	};
 
-	function Binds:Connect(event)
+	function Binds(event)
 		event(Bindable:GetAttribute("Value"));
 
 		local signal = Bindable.Event:Connect(event);
@@ -2461,7 +2461,7 @@ function Compkiller.__SIGNAL(default)
 		return signal;
 	end;
 
-	function Binds:Fire(value)
+	function Binds(value)
 		local IsSame = Bindable:GetAttribute("Value") == value;
 
 		Bindable:SetAttribute('Value',value);
@@ -2478,7 +2478,7 @@ function Compkiller.__SIGNAL(default)
 	return Binds;
 end;
 
-function Compkiller:_Hover(Frame: Frame , OnHover: () -> any?, Release: () -> any?)
+function Compkiller:_Hover(Frame , OnHover, Release)
 	Frame.MouseEnter:Connect(OnHover);
 
 	Frame.MouseLeave:Connect(Release);
@@ -2496,7 +2496,7 @@ function Compkiller.__CONFIG(config , default)
 	return config;
 end;
 
-function Compkiller:Drag(InputFrame: Frame, MoveFrame: Frame, Speed : number)
+function Compkiller:Drag(InputFrame, MoveFrame, Speed)
 	local dragToggle: boolean = false;
 	local dragStart: Vector3 = nil;
 	local startPos: UDim2 = nil;
@@ -3125,7 +3125,7 @@ function Compkiller:_CreateBlock(Signal)
 		Tween = TweenInfo.new(0.25),
 	};
 
-	function rep:SetText(Text)
+	function rep(Text)
 		BlockText.Text = Text;
 	end;
 
@@ -3133,7 +3133,7 @@ function Compkiller:_CreateBlock(Signal)
 		return BlockText.Text;
 	end;
 
-	function rep:SetTextColor(Color)
+	function rep(Color)
 		local oldIndex = table.find(Compkiller.Elements.SwitchColor , BlockText);
 
 		table.remove(Compkiller.Elements.SwitchColor , oldIndex);
@@ -3147,7 +3147,7 @@ function Compkiller:_CreateBlock(Signal)
 
 	end;
 
-	function rep:SetLine(visible)
+	function rep(visible)
 		BlockLine.Visible = visible;
 
 		if not visible then
@@ -3157,7 +3157,7 @@ function Compkiller:_CreateBlock(Signal)
 		end;
 	end;
 
-	function rep:SetTransparency(num)
+	function rep(num)
 		rep.TextTransparency = num;
 
 		Compkiller:_Animation(BlockText,TweenInfo.new(0.3),{
@@ -3165,7 +3165,7 @@ function Compkiller:_CreateBlock(Signal)
 		});
 	end;
 
-	function rep:SetParent(parent: Frame)
+	function rep(parent)
 		GlobalBlock.Parent = parent;
 
 		local ZINDEX = parent.ZIndex;
@@ -3176,7 +3176,7 @@ function Compkiller:_CreateBlock(Signal)
 		BlockLine.ZIndex = ZINDEX + 2;
 	end;
 
-	function rep:SetVisible(bool)
+	function rep(bool)
 		if bool then
 			Compkiller:_Animation(BlockText,rep.Tween,{
 				TextTransparency = rep.TextTransparency
@@ -3196,14 +3196,14 @@ function Compkiller:_CreateBlock(Signal)
 		end;
 	end;
 
-	function rep:AddLink(Name , Default)
+	function rep(Name , Default)
 		return Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , rep , Signal);
 	end;
 
 	return rep;
 end;
 
-Compkiller.Hash = function(str: string)
+Compkiller.Hash = function(str)
 	if typeof(str) ~= "string" then
 		return "ck-unknow";
 	end;
@@ -3219,7 +3219,7 @@ Compkiller.Hash = function(str: string)
 	return "ck-"..tostring(math.round(hex + 15))..tostring(dh);
 end;
 
-function Compkiller:CacheImage(id: string) : string
+function Compkiller:CacheImage(id)
 	if not Compkiller.SecureMode or not id or not id:byte() then
 		return id or "";
 	end;
@@ -3305,7 +3305,7 @@ function Compkiller:PreloadIcons()
 	end;
 end;
 
-function Compkiller:Security(directory: string,Config: SecurityConfig) -- Security Mode
+function Compkiller:Security(directory, Config) -- Security Mode
 	directory = directory or "Compkiller-Cache";
 
 	if not isfolder(directory) then
@@ -3319,7 +3319,7 @@ function Compkiller:Security(directory: string,Config: SecurityConfig) -- Securi
 	Compkiller.CacheDirectory = directory;
 end;
 
-function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color: Color3) -> any?)
+function Compkiller:_AddColorPickerPanel(Button , Callback)
 	local Window = Compkiller:_GetWindowFromElement(Button);
 	local BaseZ_Index = math.random(1,15) * 100;
 
@@ -3800,7 +3800,7 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 	local H , S , V = 0,0,0;
 	local Transparency = 0;
 
-	function Args:SetColor(Color: Color3 , TransparencyValue: number)
+	function Args(Color , TransparencyValue)
 		H , S , V = Color:ToHSV();
 		Transparency = TransparencyValue;
 	end;
@@ -3933,7 +3933,7 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 	return Args;
 end;
 
-function Compkiller:_DrawKeybinds(Window: ScreenGui)
+function Compkiller:_DrawKeybinds(Window)
 	if Compkiller.__KEYBINDS_CACHE and Compkiller.__KEYBINDS_CACHE.Root
 		and Compkiller.__KEYBINDS_CACHE.Root.Parent ~= nil then
 		return Compkiller.__KEYBINDS_CACHE;
@@ -4245,19 +4245,19 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 
 		local frame_ref = {};
 
-		function frame_ref:SetName(str: string)
+		function frame_ref(str)
 			Label.Text = str or Label.Text;
 
 			UpdateScale();
 		end;
 
-		function frame_ref:SetType(str: string)
+		function frame_ref(str)
 			TypeLabel.Text = str or TypeLabel.Text;
 
 			UpdateScale();
 		end;
 
-		function frame_ref:SetVisible(v)
+		function frame_ref(v)
 			if v then
 				Compkiller:_Animation(Keyholder,TweenInfo.new(0.1),{
 					BackgroundTransparency = 0.600,
@@ -4311,7 +4311,7 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 	return Ref;
 end;
 
-function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , ElementAPI: Toggle & Slider , Signal , Zindex: number , ElementCFG: Slider)
+function Compkiller:_KeybindHandler(Parent , ObjectType , ElementAPI , Signal , Zindex , ElementCFG)
 	local Window = Compkiller:_GetWindowFromElement(Parent);
 	local KB_Signal = Compkiller.__SIGNAL(false);
 	local SubIndex = math.random(40,100);
@@ -4534,7 +4534,7 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 		};
 	end;
 
-	function APIRef:LoadSettings(cfg : KeybindSettings)
+	function APIRef(cfg)
 		Flag.ShowInKeybindList:SetValue(cfg.Name);
 		Flag.Off:SetValue(cfg.Off);
 		Flag.On:SetValue(cfg.On);
@@ -4603,7 +4603,7 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 	return APIRef;
 end;
 
-function Compkiller:_AddPropertyEvent(Target: Frame , Callback: (boolean) -> any)
+function Compkiller:_AddPropertyEvent(Target , Callback)
 	Target:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
 		Callback(Target.BackgroundTransparency <= 0.9)
 	end)
@@ -4614,7 +4614,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 	local Window = Compkiller:_GetWindowFromElement(Value.Root);
 	local Tween = TweenInfo.new(0.3,Enum.EasingStyle.Quint);
 
-	function Args:AddKeybind(Config: MiniKeybind)
+	function Args(Config)
 		Config = Compkiller.__CONFIG(Config,{
 			Name = "Keybind",
 			Default = nil,
@@ -4669,7 +4669,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 		Args.Flag = Config.Flag;
 
-		function Args:SetValue(value)
+		function Args(value)
 			Config.Default = value;
 
 			Keybind.SetValue(Config.Default);
@@ -4688,7 +4688,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		return Args;
 	end;
 
-	function Args:AddHelper(Config: Helper)
+	function Args(Config)
 		Config = Compkiller.__CONFIG(Config,{
 			Text = "Information."
 		});
@@ -4771,14 +4771,14 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 		local Args = {};
 
-		function Args:SetValue(value)
+		function Args(value)
 			Config.Text = value;
 		end;
 
 		return Args;
 	end;
 
-	function Args:AddColorPicker(Config: MiniColorPicker)
+	function Args(Config)
 		Config = Compkiller.__CONFIG(Config,{
 			Default = Color3.fromRGB(255,255,255),
 			Transparency = 0,
@@ -4806,7 +4806,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 		Args.Flag = Config.Flag;
 
-		function Args:SetValue(value,opc)
+		function Args(value,opc)
 			Config.Default = value;
 			Config.Transparency = opc;
 
@@ -4833,7 +4833,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		return Args;
 	end;
 
-	function Args:AddToggle(Config : MiniToggle)
+	function Args(Config)
 		Config = Compkiller.__CONFIG(Config,{
 			Flag = nil,
 			Default = false,
@@ -4854,7 +4854,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 		Args.Flag = Config.Flag
 
-		function Args:SetValue(value)
+		function Args(value)
 			Config.Default = value;
 
 			Toggle.ChangeValue(Config.Default);
@@ -5014,7 +5014,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 	return Args;
 end;
 
-function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
+function Compkiller:_LoadDropdown(BaseParent , Callback)
 	local Window = Compkiller:_GetWindowFromElement(BaseParent);
 
 	local BaseZ_Index = BaseParent.ZIndex + (math.random(1,15) * 100);
@@ -5331,11 +5331,11 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 
 	local Args = {};
 
-	function Args:SetDefault(v)
+	function Args(v)
 		Default = v;
 	end;
 
-	function Args:SetData(Def,Val,Multi,Vis)
+	function Args(Def,Val,Multi,Vis)
 		if Vis and ((tick() - _Delay) <= 0.5 or #Val > 10) then
 			_Delay = tick();
 			SpamUpdate = true;
@@ -5363,13 +5363,13 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	return Args;
 end;
 
-function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal , DisableStackKeybind)
+function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKeybind)
 	local Zindex = Parent.ZIndex + 1;
 	local Tween = TweenInfo.new(0.25,Enum.EasingStyle.Quint);
 
 	local Args = {};
 
-	function Args:AddToggle(Config : Toggle)
+	function Args(Config)
 		Config = Compkiller.__CONFIG(Config,{
 			Name = "Toggle",
 			Default = false,
@@ -5408,7 +5408,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		Args.Flag = Config.Flag;
 
-		function Args:SetValue(value)
+		function Args(value)
 			Config.Default = value;
 
 			Toggle.ChangeValue(Config.Default);
@@ -5429,7 +5429,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			return Config.Default;
 		end;
 
-		function Args:SetText(str : string)
+		function Args(str)
 			Block:SetText(str or Config.Name);
 		end;
 
@@ -5450,7 +5450,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		return Args;
 	end;
 
-	function Args:AddKeybind(Config : Keybind)
+	function Args(Config)
 		Config = Compkiller.__CONFIG(Config,{
 			Name = "Keybind",
 			Default = nil,
@@ -5515,7 +5515,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		Args.Flag = Config.Flag;
 
-		function Args:SetText(str : string)
+		function Args(str)
 			Block:SetText(str or Config.Name);
 		end;
 
@@ -5523,7 +5523,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			return Block:GetText();
 		end;
 
-		function Args:SetValue(value)
+		function Args(value)
 			Config.Default = value;
 
 			Keybind.SetValue(Config.Default);
@@ -5548,7 +5548,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		return Args;
 	end;
 
-	function Args:AddColorPicker(Config: ColorPicker)
+	function Args(Config)
 		Config = Compkiller.__CONFIG(Config,{
 			Name = "ColorPicker",
 			Default = Color3.fromRGB(255,255,255),
@@ -5588,7 +5588,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		Args.Flag = Config.Flag;
 
-		function Args:SetValue(value,opc)
+		function Args(value,opc)
 			Config.Default = value;
 			Config.Transparency = opc;
 
@@ -5598,7 +5598,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Config.Callback(value,opc);
 		end;
 
-		function Args:SetText(str : string)
+		function Args(str)
 			Block:SetText(str or Config.Name);
 		end;
 
@@ -5628,7 +5628,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		return Args;
 	end;
 
-	function Args:AddButton(Config: Button)
+	function Args(Config)
 		Config = Compkiller.__CONFIG(Config , {
 			Name = 'Button',
 			Callback = function() end
@@ -5773,7 +5773,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			end;
 		end);
 
-		function Args:SetText(t)
+		function Args(t)
 			Config.Name = t;
 			TextLabel.Text = Config.Name;
 		end;
@@ -5785,7 +5785,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		return Args;
 	end;
 
-	function Args:AddSlider(Config: Slider)
+	function Args(Config)
 		Config = Compkiller.__CONFIG(Config , {
 			Name = 'Slider',
 			Default = 50,
@@ -6022,7 +6022,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		Args.Flag = Config.Flag;
 
-		function Args:SetValue(Value)
+		function Args(Value)
 			Config.Default = Value;
 
 			ValueText.Text = tostring(Config.Default)..tostring(Config.Type)
@@ -6034,7 +6034,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Config.Callback(Value);
 		end;
 
-		function Args:SetText(str : string)
+		function Args(str)
 			BlockText.Text = str or Config.Name
 		end;
 
@@ -6127,7 +6127,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		return Args;
 	end;
 
-	function Args:AddParagraph(Config: Paragraph) -- request by Neptune
+	function Args(Config) -- request by Neptune
 		Config = Compkiller.__CONFIG(Config, {
 			Title = "Paragraph",
 			Content = "",
@@ -6235,12 +6235,12 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		local Args = {};
 
-		function Args:SetTitle(title)
+		function Args(title)
 			BlockText.Text = title;
 			UpdateScale();
 		end;
 
-		function Args:SetContent(content)
+		function Args(content)
 			DescriptionText.Text = content;
 			UpdateScale();
 		end;
@@ -6276,7 +6276,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		return Args;
 	end;
 
-	function Args:AddTextBox(Config: TextBoxConfig)
+	function Args(Config)
 		Config = Compkiller.__CONFIG(Config , {
 			Name = "TextBox",
 			Default = "",
@@ -6452,7 +6452,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		Args.Flag = Config.Flag;
 
-		function Args:SetText(str : string)
+		function Args(str)
 			BlockText.Text = str or Config.Name
 		end;
 
@@ -6460,7 +6460,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			return BlockText.Text;
 		end;
 
-		function Args:SetValue(Value)
+		function Args(Value)
 			Config.Default = Value;
 
 			TextBox_2.Text = tostring(Config.Default);
@@ -6517,7 +6517,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		return Args;
 	end;
 
-	function Args:AddDropdown(Config : Dropdown)
+	function Args(Config)
 		Config = Compkiller.__CONFIG(Config,{
 			Name = "Dropdown",
 			Default = nil,
@@ -6735,7 +6735,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		Args.Flag = Config.Flag;
 
-		function Args:SetValue(Value)
+		function Args(Value)
 			Config.Default = Value;
 
 			ValueText.Text = DaTabarser(Config.Default);
@@ -6745,7 +6745,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Config.Callback(Value);
 		end;
 
-		function Args:SetText(str : string)
+		function Args(str)
 			BlockText.Text = str or Config.Name
 		end;
 
@@ -6754,7 +6754,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			return BlockText.Text;
 		end;
 
-		function Args:SetValues(v)
+		function Args(v)
 			Config.Values = v;
 
 			repi:SetData(Config.Default,Config.Values,Config.Multi,true);
@@ -6988,7 +6988,7 @@ function Compkiller:RefreshCurrentColor()
 	end;
 end;
 
-function Compkiller:ChangeHighlightColor(NewColor: Color3)
+function Compkiller:ChangeHighlightColor(NewColor)
 	local H,S,V = NewColor:ToHSV();
 
 	Compkiller.Colors.Highlight = NewColor;
@@ -7007,7 +7007,7 @@ function Compkiller:ChangeHighlightColor(NewColor: Color3)
 	end;
 end;
 
-function Compkiller.new(Config : Window)
+function Compkiller.new(Config)
 	if not Config.Scale then
 		if Compkiller:_IsMobile() then
 			Config.Scale = Compkiller.Scale.Mobile;
@@ -7591,7 +7591,7 @@ function Compkiller.new(Config : Window)
 				end;
 			end);
 
-			function WindowArgs.UserSettings:Window(Value)
+			function WindowArgs.UserSettings(Value)
 				if Value then
 					Signal:Fire(true);
 
@@ -7641,11 +7641,11 @@ function Compkiller.new(Config : Window)
 		end;
 	end;
 
-	function WindowArgs:SetVisible(bool: boolean)
+	function WindowArgs(bool)
 		CompKiller.Enabled = bool;
 	end;
 
-	function WindowArgs:DrawCategory(config : Category)
+	function WindowArgs(config)
 		config = config or {};
 		config.Name = config.Name or "Category";
 
@@ -7725,7 +7725,7 @@ function Compkiller.new(Config : Window)
 		end);
 	end;
 
-	function WindowArgs:DrawContainerTab(TabConfig : ContainerTab)
+	function WindowArgs(TabConfig)
 		TabConfig = Compkiller.__CONFIG(TabConfig,{
 			Name = "Tab",
 			Icon = "eye",
@@ -8006,7 +8006,7 @@ function Compkiller.new(Config : Window)
 			end;
 		end);
 
-		function TabArgs:DrawTab(TabConfig : TabConfig) -- Internal Tab
+		function TabArgs(TabConfig) -- Internal Tab
 			TabConfig = Compkiller.__CONFIG(TabConfig,{
 				Name = "Tab",
 				Type = "Double",
@@ -8177,7 +8177,7 @@ function Compkiller.new(Config : Window)
 		return TabArgs;
 	end;
 
-	function WindowArgs:AddUnbind(UilistLayout: UIListLayout , Scrolling)
+	function WindowArgs(UilistLayout , Scrolling)
 
 		local upd = function()
 			Scrolling.ScrollingEnabled = true
@@ -8223,7 +8223,7 @@ function Compkiller.new(Config : Window)
 		table.insert(WindowArgs.THREADS,task.spawn(Executable))]]
 	end;
 
-	function WindowArgs:DrawConfig(Configuration : TabConfigManager , Internal)
+	function WindowArgs(Configuration , Internal)
 		Configuration = Compkiller.__CONFIG(Configuration,{
 			Name = "Config",
 			Icon = "folder",
@@ -9160,7 +9160,7 @@ function Compkiller.new(Config : Window)
 				Property = 'TextColor3'
 			});
 
-			function ConfigButton:SetInfo(Author , ConfigName)
+			function ConfigButton(Author , ConfigName)
 				local R,G,B = tostring(math.floor(Compkiller.Colors.Highlight.R * 255)) , tostring(math.floor(Compkiller.Colors.Highlight.G * 255)) , tostring(math.floor(Compkiller.Colors.Highlight.B * 255));
 
 				AuthorText.Text = string.format("Author: <font color=\"rgb(%s, %s, %s)\">%s</font>" ,R,G,B , tostring(Author));
@@ -9171,7 +9171,7 @@ function Compkiller.new(Config : Window)
 				end;
 			end;
 
-			function ConfigButton:Toggle(v)
+			function ConfigButton(v)
 				if v then
 					Compkiller:_Animation(ConfigBlock,Tween,{
 						BackgroundTransparency = 0
@@ -9408,7 +9408,7 @@ function Compkiller.new(Config : Window)
 		return TabArgs;
 	end;
 
-	function WindowArgs:DrawTab(TabConfig : TabConfig , Internal)
+	function WindowArgs(TabConfig , Internal)
 		TabConfig = Compkiller.__CONFIG(TabConfig,{
 			Name = "Tab",
 			Icon = "eye",
@@ -9852,7 +9852,7 @@ function Compkiller.new(Config : Window)
 			end);
 		end;
 
-		function TabArgs:_UpdateScrolling(Frame: ScrollingFrame , ListLayout: UIListLayout)
+		function TabArgs:_UpdateScrolling(Frame , ListLayout)
 			local frame;
 
 			local last = 0;
@@ -9927,7 +9927,7 @@ function Compkiller.new(Config : Window)
 		end);
 
 
-		function TabArgs:DrawSection(config: Section)
+		function TabArgs(config)
 			config = Compkiller.__CONFIG(config,{
 				Name = "Section",
 				Position = "left"
@@ -10421,7 +10421,7 @@ function Compkiller.new(Config : Window)
 
 			local Args = {};
 
-			function Args:AddText(Watermark : Watermark)
+			function Args(Watermark)
 				Watermark = Compkiller.__CONFIG(Watermark, {
 					Text = "Watermark",
 					Icon = "info"
@@ -10467,12 +10467,12 @@ function Compkiller.new(Config : Window)
 
 				local Arg = {};
 
-				function Arg:SetText(text)
+				function Arg(text)
 					TextLabel.Text = text;
 					Update();
 				end;
 
-				function Arg:Visible(v)
+				function Arg(v)
 					Icon.Visible = v;
 					TextLabel.Visible = v;
 
@@ -10496,7 +10496,7 @@ function Compkiller.new(Config : Window)
 			return Args;
 		end;
 
-		function WindowArgs:Toggle(Value: boolean)
+		function WindowArgs(Value)
 			if WindowArgs.PerformanceMode then
 				MainFrame.Visible = Value;
 			end;
@@ -10570,11 +10570,11 @@ function Compkiller.new(Config : Window)
 		end));
 	end;
 
-	function WindowArgs:SetMenuKey(new: string | Enum.KeyCode)
+	function WindowArgs(new.KeyCode)
 		Config.Keybind = new;
 	end;
 
-	function WindowArgs:Update(config: WindowUpdate)
+	function WindowArgs(config)
 		config = config or {};
 		config.Logo = config.Logo or Config.Logo;
 		config.Username = config.Username or LocalPlayer.DisplayName;
@@ -10735,7 +10735,7 @@ function Compkiller:GetTimeNow(Time)
 	return string.format("%s:%s:%s",val.hour,val.min,val.sec);
 end;
 
-function Compkiller:GetConfig(Type: string)
+function Compkiller:GetConfig(Type)
 	local ConfigFlags = {};
 
 	for i,v in next , Compkiller.Flags do
@@ -10788,7 +10788,7 @@ function Compkiller:_Path(...)
 	return table.concat(args, "/");
 end;
 
-function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunctions
+function Compkiller:ConfigManager(ConfigManager)
 	ConfigManager = Compkiller.__CONFIG(ConfigManager , {
 		Directory = "Compkiller",
 		Config = "Software"
@@ -10809,7 +10809,7 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 
 	local notify = Compkiller.newNotify();
 
-	function Args:WriteConfig(Config: WriteConfig)
+	function Args(Config)
 		Config = Compkiller.__CONFIG(Config , {
 			Name = Compkiller:_RandomString(),
 			Author = LocalPlayer.Name,
@@ -10835,7 +10835,7 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 		writefile(Compkiller:_Path(Args.Directory , Config.Name) , HttpService:JSONEncode(Flags));
 	end;
 
-	function Args:LoadConfigFromString(str: string)
+	function Args(str)
 		local decoded = HttpService:JSONDecode(str);
 
 		local Flags = Compkiller:GetConfig("KV");
@@ -10867,7 +10867,7 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 		return Compkiller:GetConfig("MK")
 	end;
 
-	function Args:ReadInfo(ConfigName: string)
+	function Args(ConfigName)
 		local _path = Compkiller:_Path(Args.Directory , ConfigName);
 
 		if isfile(_path) then
@@ -10909,7 +10909,7 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 		return names;
 	end;
 
-	function Args:DeleteConfig(ConfigName)
+	function Args(ConfigName)
 		local _path = Compkiller:_Path(Args.Directory,ConfigName);
 
 		if Args.EnableNotify then
@@ -10929,7 +10929,7 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 		return #listfiles(Args.Directory);
 	end;
 
-	function Args:LoadConfig(ConfigName: string)
+	function Args(ConfigName)
 		local _path = Compkiller:_Path(Args.Directory,ConfigName);
 
 		if isfile(_path) then
@@ -10980,7 +10980,7 @@ function Compkiller:ConfigManager(ConfigManager: ConfigManager) : ConfigFunction
 	return Args;
 end;
 
-function Compkiller:Loader(IconId,Duration)
+function Compkiller:Loader(IconId, Duration)
 	local CompKiller = Instance.new("ScreenGui")
 
 	CompKiller.Name = Compkiller:_RandomString()
@@ -11128,7 +11128,7 @@ function Compkiller.newNotify()
 
 	Compkiller.NOTIFY_CACHE = {
 		_gui = Notification,   -- held so newNotify() can check if it is still alive
-		new = function(Notify: Notify) : NotifyPayback
+		new = function(Notify)
 			Notify = Compkiller.__CONFIG(Notify, {
 				Icon = Compkiller.Logo,
 				Title = "Notification",
@@ -11377,7 +11377,7 @@ do
 end
 
 
-function Compkiller:EnableAdvancedOptimizations(enabled: boolean)
+function Compkiller:EnableAdvancedOptimizations(enabled)
     _OPT.Enabled = (enabled == true)
     if _OPT.Enabled then
         if not _OPT.MonitorThread then
@@ -11427,7 +11427,7 @@ function Compkiller:CleanupAll()
     return cancelled
 end
 
-function Compkiller:GetFPS(): number
+function Compkiller:GetFPS()
     local fps = math.floor(_OPT.FPS + 0.5)
     _CKLog("GetFPS: " .. fps .. " fps")
     return fps
@@ -11447,13 +11447,13 @@ function Compkiller:GetOptimizerStats()
     }
 end
 
-function Compkiller:SetAnimThreshold(fps: number)
+function Compkiller:SetAnimThreshold(fps)
     _OPT.AnimThreshold = math.clamp(math.floor(fps), 10, 144)
     _CKLog("SetAnimThreshold: " .. _OPT.AnimThreshold .. " fps")
     return _OPT.AnimThreshold
 end
 
-function Compkiller:SetMemInterval(seconds: number)
+function Compkiller:SetMemInterval(seconds)
     _OPT.MemInterval = math.max(10, seconds)
     _CKLog("SetMemInterval: " .. _OPT.MemInterval .. "s")
     return _OPT.MemInterval
@@ -11461,7 +11461,7 @@ end
 
 --
 --
-function Compkiller:_SmartAnimation(Self: Instance, Info: TweenInfo, Property: {[any]: any})
+function Compkiller:_SmartAnimation(Self, Info, Property)
     local currentFPS = _OPT.FPS
     local threshold  = _OPT.AnimThreshold
 
@@ -11563,7 +11563,7 @@ function Compkiller:ForceGC()
     return freed
 end
 
-function Compkiller:SetHardwareTier(tier: string)
+function Compkiller:SetHardwareTier(tier)
     local valid = {HIGH = true, MEDIUM = true, LOW = true}
     tier = tostring(tier):upper()
     if not valid[tier] then
@@ -11587,7 +11587,7 @@ function Compkiller:SetHardwareTier(tier: string)
     return self.HardwareTier
 end
 
-function Compkiller:SetSmartAnimations(enabled: boolean)
+function Compkiller:SetSmartAnimations(enabled)
     _OPT.Enabled = (enabled == true)
     _CKLog("SetSmartAnimations: " .. (_OPT.Enabled and "ENABLED" or "DISABLED") .. " | Threshold=" .. _OPT.AnimThreshold .. "fps")
     return _OPT.Enabled
@@ -11646,7 +11646,7 @@ do
         return nil
     end
 
-    function Compkiller:SaveWindowPosition(pos: UDim2)
+    function Compkiller:SaveWindowPosition(pos)
         if not pos then return end
         getgenv()[_POS_KEY] = {
             xs = pos.X.Scale,  xo = pos.X.Offset,
@@ -11654,7 +11654,7 @@ do
         }
     end
 
-    function Compkiller:_ApplyPositionMemory(MainFrame: Frame, MovementFrame: Frame)
+    function Compkiller:_ApplyPositionMemory(MainFrame, MovementFrame)
         -- Restore
         local saved = self:LoadWindowPosition()
         if saved then
@@ -11714,7 +11714,7 @@ function Compkiller:NewSandbox(cfg)
 
     local sandbox = {}
 
-    function sandbox:Run(fn, ...)
+    function sandbox(fn, ...)
         if _disabled then
             _CKLog("Sandbox: disabled after too many errors.")
             return false, "sandbox disabled"
@@ -11931,29 +11931,29 @@ do
         return setmetatable({ _items = {} }, Janitor)
     end
 
-    function Janitor:Add(connection)
+    function Janitor(connection)
         _tinsert(self._items, { type = "conn", ref = connection })
         return connection
     end
 
-    function Janitor:AddInstance(instance)
+    function Janitor(instance)
         _tinsert(self._items, { type = "inst", ref = instance })
         return instance
     end
 
-    function Janitor:AddFn(fn)
+    function Janitor(fn)
         _tinsert(self._items, { type = "fn", ref = fn })
         return fn
     end
 
     -- NEW: track a spawned thread for cleanup
-    function Janitor:AddThread(thread)
+    function Janitor(thread)
         _tinsert(self._items, { type = "thread", ref = thread })
         return thread
     end
 
     -- NEW: one-liner helper -- spawn + track in one call
-    function Janitor:Spawn(fn, ...)
+    function Janitor(fn, ...)
         local t = _ckSpawn(fn, ...)
         return self:AddThread(t)
     end
@@ -12097,7 +12097,7 @@ do
     local RateLimiter = {}
     RateLimiter.__index = RateLimiter
 
-    function RateLimiter.new(interval: number)
+    function RateLimiter.new(interval)
         local self = setmetatable({
             _interval = math.max(0.05, interval or 0.25),
             _queue    = {},
@@ -12106,7 +12106,7 @@ do
         return self
     end
 
-    function RateLimiter:Fire(remote, ...)
+    function RateLimiter(remote, ...)
         local args = {...}
         table.insert(self._queue, { remote = remote, args = args })
         if not self._running then
@@ -12129,7 +12129,7 @@ do
         _CKLog("RateLimiter: queue flushed.")
     end
 
-    function Compkiller:NewRateLimiter(interval: number)
+    function Compkiller:NewRateLimiter(interval)
         return RateLimiter.new(interval)
     end
 end
@@ -12212,7 +12212,7 @@ do
         return hooked
     end
 
-    function Compkiller:StartAnomalyDetector(interval: number)
+    function Compkiller:StartAnomalyDetector(interval)
         if _DETECTOR_THREAD then
             _CKLog("Anomaly: detector already running.")
             return
@@ -12376,12 +12376,12 @@ do
 	local _SAFE_CALL_ENABLED = false
 	local _SANDBOX_ERRORS    = {}
 
-	function Compkiller:SetSafeCall(enabled)
+ function Compkiller:SetSafeCall(enabled)
 		_SAFE_CALL_ENABLED = (enabled == true)
 		_CKLog("SetSafeCall: " .. (_SAFE_CALL_ENABLED and "ON" or "OFF"))
 	end
 
-	function Compkiller:SafeCall(fn, ...)
+ function Compkiller:SafeCall(fn, ...)
 		if not _SAFE_CALL_ENABLED then
 			return fn(...)
 		end
@@ -12647,7 +12647,7 @@ do
 	local _SLEEP_ACTIVE = false
 	local _SLEEP_PREV_THRESHOLD = nil
 
-	function Compkiller:SetSleepMode(enabled)
+ function Compkiller:SetSleepMode(enabled)
 		if enabled and not _SLEEP_ACTIVE then
 			_SLEEP_ACTIVE           = true
 			_SLEEP_PREV_THRESHOLD   = _OPT.AnimThreshold
@@ -13948,7 +13948,7 @@ Compkiller.MasterControl = function()
 	-- ========================================================================
 	-- DEBUG
 	-- ========================================================================
-	local function setDebug(enabled: boolean)
+	local function setDebug(enabled)
 		Compkiller.Debug = (enabled == true)
 		_CK_DEBUG  = Compkiller.Debug   -- sync boot flag too
 		_CKLog("Debug logging " .. (Compkiller.Debug and "ENABLED" or "DISABLED"))
@@ -14043,7 +14043,7 @@ Compkiller.MasterControl = function()
 		return Compkiller.HardwareTier
 	end
 
-	local function setHardwareTier(tier: string)
+	local function setHardwareTier(tier)
 		local valid = {HIGH = true, MEDIUM = true, LOW = true}
 		tier = tostring(tier):upper()
 		if not valid[tier] then
@@ -14067,13 +14067,13 @@ Compkiller.MasterControl = function()
 		return Compkiller.HardwareTier
 	end
 
-	local function setAnimThreshold(fps: number)
+	local function setAnimThreshold(fps)
 		_OPT.AnimThreshold = math.clamp(math.floor(fps), 10, 144)
 		_CKLog("SetAnimThreshold: " .. _OPT.AnimThreshold .. " fps")
 		return _OPT.AnimThreshold
 	end
 
-	local function setMemInterval(seconds: number)
+	local function setMemInterval(seconds)
 		_OPT.MemInterval = math.max(10, seconds)
 		_CKLog("SetMemInterval: " .. _OPT.MemInterval .. "s")
 		return _OPT.MemInterval
@@ -14100,7 +14100,7 @@ Compkiller.MasterControl = function()
 		Compkiller.PerformanceMode = v;
 	end;
 
-	local function getFPS(): number
+	local function getFPS()
 		local fps = math.floor(_OPT.FPS + 0.5)
 		_CKLog("GetFPS: " .. fps .. " fps")
 		return fps
@@ -14130,13 +14130,13 @@ Compkiller.MasterControl = function()
 	-- ========================================================================
 	-- ANIMATIONS
 	-- ========================================================================
-	local function setSmartAnimations(enabled: boolean)
+	local function setSmartAnimations(enabled)
 		_OPT.Enabled = (enabled == true)
 		_CKLog("SetSmartAnimations: " .. (_OPT.Enabled and "ENABLED" or "DISABLED") .. " | Threshold=" .. _OPT.AnimThreshold .. "fps")
 		return _OPT.Enabled
 	end
 
-	local function enableAdvancedOptimizations(enabled: boolean)
+	local function enableAdvancedOptimizations(enabled)
 		_OPT.Enabled = (enabled == true)
 		if _OPT.Enabled then
 			if not _OPT.MonitorThread then
@@ -14411,7 +14411,7 @@ Compkiller.MasterControl = function()
 
 		local sandbox = {}
 
-		function sandbox:Run(fn, ...)
+		function sandbox(fn, ...)
 			if _disabled then
 				_CKLog("Sandbox: disabled after too many errors.")
 				return false, "sandbox disabled"
@@ -14450,7 +14450,7 @@ Compkiller.MasterControl = function()
 		return Janitor.new()
 	end
 
-	local function newRateLimiter(interval: number)
+	local function newRateLimiter(interval)
 		return RateLimiter.new(interval)
 	end
 
@@ -14462,7 +14462,7 @@ Compkiller.MasterControl = function()
 	-- ========================================================================
 	-- WINDOW POSITION
 	-- ========================================================================
-	local function saveWindowPosition(pos: UDim2)
+	local function saveWindowPosition(pos)
 		if not pos then return end
 		getgenv()[_POS_KEY] = {
 			xs = pos.X.Scale,  xo = pos.X.Offset,
@@ -14482,7 +14482,7 @@ Compkiller.MasterControl = function()
 	-- ========================================================================
 	-- CONFIG / THEME / ASSETS
 	-- ========================================================================
-	local function getConfig(Type: string)
+	local function getConfig(Type)
 		local ConfigFlags = {};
 
 		for i,v in next , Compkiller.Flags do
@@ -14682,7 +14682,7 @@ Compkiller.MasterControl = function()
 		end;
 	end;
 
-	local function changeHighlightColor(NewColor: Color3)
+	local function changeHighlightColor(NewColor)
 		local H,S,V = NewColor:ToHSV();
 
 		Compkiller.Colors.Highlight = NewColor;
@@ -14836,7 +14836,7 @@ Compkiller.MasterControl = function()
 		end;
 	end;
 
-	local function cacheImage(id: string) : string
+	local function cacheImage(id)
 		if not Compkiller.SecureMode or not id or not id:byte() then
 			return id or "";
 		end;
@@ -14907,7 +14907,7 @@ Compkiller.MasterControl = function()
 		return string.format("%s:%s:%s",val.hour,val.min,val.sec);
 	end;
 
-	local function security(directory: string,Config: SecurityConfig) -- Security Mode
+	local function security(directory,Config) -- Security Mode
 		directory = directory or "Compkiller-Cache";
 
 		if not isfolder(directory) then
@@ -14921,7 +14921,7 @@ Compkiller.MasterControl = function()
 		Compkiller.CacheDirectory = directory;
 	end;
 
-	local function configManager(ConfigManager: ConfigManager) : ConfigFunctions
+	local function configManager(ConfigManager)
 		ConfigManager = Compkiller.__CONFIG(ConfigManager , {
 			Directory = "Compkiller",
 			Config = "Software"
@@ -14942,7 +14942,7 @@ Compkiller.MasterControl = function()
 
 		local notify = Compkiller.newNotify();
 
-		function Args:WriteConfig(Config: WriteConfig)
+		function Args(Config)
 			Config = Compkiller.__CONFIG(Config , {
 				Name = Compkiller:_RandomString(),
 				Author = LocalPlayer.Name,
@@ -14968,7 +14968,7 @@ Compkiller.MasterControl = function()
 			writefile(Compkiller:_Path(Args.Directory , Config.Name) , HttpService:JSONEncode(Flags));
 		end;
 
-		function Args:LoadConfigFromString(str: string)
+		function Args(str)
 			local decoded = HttpService:JSONDecode(str);
 
 			local Flags = getConfig("KV");
@@ -15000,7 +15000,7 @@ Compkiller.MasterControl = function()
 			return getConfig("MK")
 		end;
 
-		function Args:ReadInfo(ConfigName: string)
+		function Args(ConfigName)
 			local _path = Compkiller:_Path(Args.Directory , ConfigName);
 
 			if isfile(_path) then
@@ -15042,7 +15042,7 @@ Compkiller.MasterControl = function()
 			return names;
 		end;
 
-		function Args:DeleteConfig(ConfigName)
+		function Args(ConfigName)
 			local _path = Compkiller:_Path(Args.Directory,ConfigName);
 
 			if Args.EnableNotify then
@@ -15062,7 +15062,7 @@ Compkiller.MasterControl = function()
 			return #listfiles(Args.Directory);
 		end;
 
-		function Args:LoadConfig(ConfigName: string)
+		function Args(ConfigName)
 			local _path = Compkiller:_Path(Args.Directory,ConfigName);
 
 			if isfile(_path) then
@@ -15139,7 +15139,7 @@ Compkiller.MasterControl = function()
 		return _DIAG_CACHE
 	end
 
-	local function startAnomalyDetector(interval: number)
+	local function startAnomalyDetector(interval)
 		if _DETECTOR_THREAD then
 			_CKLog("Anomaly: detector already running.")
 			return
