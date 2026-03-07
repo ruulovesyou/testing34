@@ -25,27 +25,8 @@ do
     if type(task.wait) ~= "function" then
         task.wait = (type(wait) == "function" and wait)
             or function(n)
-                -- Yield-based fallback: avoids busy-wait thread starvation
-                local co = coroutine.running()
-                if co then
-                    local done = false
-                    local start = tick()
-                    -- Use a connected RunService step to yield properly
-                    local ok, rs = pcall(function() return game:GetService("RunService") end)
-                    if ok and rs then
-                        local conn
-                        conn = rs.Heartbeat:Connect(function()
-                            if tick() - start >= (n or 0) then
-                                conn:Disconnect()
-                                done = true
-                            end
-                        end)
-                        repeat coroutine.yield() until done
-                    else
-                        -- Last resort: bare yield loop (no busy spin at least)
-                        repeat coroutine.yield() until tick() - start >= (n or 0)
-                    end
-                end
+                local start = tick()
+                repeat coroutine.yield() until tick() - start >= (n or 0)
             end
     end
     if type(task.delay) ~= "function" then
@@ -159,27 +140,13 @@ do
     if type(getupvalues) ~= "function" then
         getupvalues = function() return {} end
     end
-
-    -- -- File system APIs -- not universal across executors --------------------
-    if type(isfile) ~= "function" then
-        isfile = function() return false end
-    end
-    if type(isfolder) ~= "function" then
-        isfolder = function() return false end
-    end
-    if type(readfile) ~= "function" then
-        readfile = function() return "" end
-    end
-    if type(writefile) ~= "function" then
-        writefile = function() end
-    end
-    if type(makefolder) ~= "function" then
-        makefolder = function() end
-    end
-    if type(listfiles) ~= "function" then
-        listfiles = function() return {} end
-    end
-    -- getcustomasset / getsynasset
+    -- File system APIs
+    if type(isfile) ~= "function" then isfile = function() return false end end
+    if type(isfolder) ~= "function" then isfolder = function() return false end end
+    if type(readfile) ~= "function" then readfile = function() return "" end end
+    if type(writefile) ~= "function" then writefile = function() end end
+    if type(makefolder) ~= "function" then makefolder = function() end end
+    if type(listfiles) ~= "function" then listfiles = function() return {} end end
     if type(getcustomasset) ~= "function" and type(getsynasset) ~= "function" then
         getcustomasset = function() return "" end
     end
@@ -196,7 +163,7 @@ local function _CKLog(msg)
 end
 
 local _CK_VERSION = "5.5.2"
-math.randomseed(os.time and os.time() or tick() * 1000)  -- seed RNG for unpredictable GUI names
+math.randomseed(os.time and os.time() or tick() * 1000)
 local _CK_BUILD   = "AntiDetection-Suite-Edition"
 
 -- CAPTURED ORIGINALS -- snapshot key globals BEFORE any hook can replace them
@@ -459,12 +426,9 @@ local _CK_THREADS     = {}
 
 local function _ckTrackThread(thread)
     if type(thread) == "thread" then
-        -- Prune dead threads before inserting (prevents unbounded growth)
         local live = {}
         for _, t in ipairs(_CK_THREADS) do
-            if coroutine.status(t) ~= "dead" then
-                live[#live+1] = t
-            end
+            if coroutine.status(t) ~= "dead" then live[#live+1] = t end
         end
         _CK_THREADS = live
         table.insert(_CK_THREADS, thread)
@@ -632,20 +596,10 @@ do
         end
     end
 
-    -- Fallback: PlayerGui (validate it exists first)
-    if not _GUI_PARENT then
-        local ok, pg = _pcall(function()
-            return game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui", 5)
-        end)
-        if ok and pg then
-            _GUI_PARENT        = pg
-            _GUI_SHIELD_METHOD = "PlayerGui"
-        end
-    end
-    -- Last resort: raw PlayerGui global if above failed
+    -- Fallback: PlayerGui
     if not _GUI_PARENT then
         _GUI_PARENT        = PlayerGui
-        _GUI_SHIELD_METHOD = "PlayerGui (raw)"
+        _GUI_SHIELD_METHOD = "PlayerGui"
     end
 
     _CKLog(_sfmt("GUI Shield: using '%s' as safe parent.", _GUI_SHIELD_METHOD))
@@ -719,20 +673,14 @@ local function _StartGuiIntegrityMonitor(screenGui)
         _tinsert(_CK_INTEGRITY_CONNS, conn2)
         _tinsert(_CK_CONNECTIONS, conn2)
     end
-
-    -- Cleanup: disconnect all integrity connections when GUI is destroyed
-    local connDestroy = _pcall(function()
+    -- Cleanup connections when GUI is destroyed
+    local connD = _pcall(function()
         return screenGui.Destroying:Connect(function()
-            for _, c in _ipairs(_CK_INTEGRITY_CONNS) do
-                _pcall(function() c:Disconnect() end)
-            end
+            for _, c in _ipairs(_CK_INTEGRITY_CONNS) do _pcall(function() c:Disconnect() end) end
             _CK_INTEGRITY_CONNS = {}
-            _CKLog("GuiIntegrity: GUI destroyed -- connections cleaned up.")
         end)
     end)
-    if _type(connDestroy) ~= "boolean" then
-        _tinsert(_CK_CONNECTIONS, connDestroy)
-    end
+    if _type(connD) ~= "boolean" then _tinsert(_CK_CONNECTIONS, connD) end
 end
 
 
@@ -742,6 +690,32 @@ end
 local _TURBO_CONN       = nil
 local _TURBO_NAME_POOL  = {}
 local _TURBO_ACTIVE     = false
+
+local function _BuildNamePool(screenGui)
+    _TURBO_NAME_POOL = {}
+    -- Seed with CK encrypted name variants
+    for i = 1, 20 do
+        _tinsert(_TURBO_NAME_POOL, _EncryptGuiName())
+    end
+    -- Seed with large random integers (CMD X technique)
+    for i = 1, 20 do
+        _tinsert(_TURBO_NAME_POOL, _tostring(_mrandom(-2000000000, 2000000000)))
+    end
+    -- Seed with existing descendant names (CMD X technique)
+    _pcall(function()
+        for _, v in _ipairs(screenGui:GetDescendants()) do
+            if v.Name and #v.Name > 0 then
+                _tinsert(_TURBO_NAME_POOL, v.Name)
+            end
+        end
+    end)
+    _CKLog(_sfmt("TurboScramble: name pool built (%d entries).", #_TURBO_NAME_POOL))
+end
+
+local function _GetPoolName()
+    if #_TURBO_NAME_POOL == 0 then return _tostring(_mrandom(1, 1000000)) end
+    return _TURBO_NAME_POOL[_mrandom(1, #_TURBO_NAME_POOL)]
+end
 
 
 local _CK_ENCRYPTED_NAMES = {}   -- registry of all encrypted names this run
@@ -764,49 +738,17 @@ local function _EncryptGuiName()
 
     local name = prefixes[rndPrefix] .. "_" .. hexPart .. "_" .. suffixes[rndSuffix]
 
-    -- Cap registry to last 200 entries (prevents unbounded memory growth)
-    if #_CK_ENCRYPTED_NAMES >= 200 then table.remove(_CK_ENCRYPTED_NAMES, 1) end
     table.insert(_CK_ENCRYPTED_NAMES, name)
     pcall(function()
         local reg = getgenv().__rbxGuiReg
         if type(reg) ~= "table" then
             getgenv().__rbxGuiReg = {}
         end
-        if #getgenv().__rbxGuiReg >= 200 then table.remove(getgenv().__rbxGuiReg, 1) end
         table.insert(getgenv().__rbxGuiReg, name)
     end)
 
     return name
 end
-
-local function _BuildNamePool(screenGui)
-    -- Clear old pool fully before rebuild (prevents unbounded growth)
-    _TURBO_NAME_POOL = {}
-    -- Seed with CK encrypted name variants (pcall-safe)
-    for i = 1, 20 do
-        local ok, n = pcall(_EncryptGuiName)
-        if ok and n then _tinsert(_TURBO_NAME_POOL, n) end
-    end
-    -- Seed with large random integers (CMD X technique)
-    for i = 1, 20 do
-        _tinsert(_TURBO_NAME_POOL, _tostring(_mrandom(-2000000000, 2000000000)))
-    end
-    -- Seed with existing descendant names (CMD X technique)
-    _pcall(function()
-        for _, v in _ipairs(screenGui:GetDescendants()) do
-            if v.Name and #v.Name > 0 then
-                _tinsert(_TURBO_NAME_POOL, v.Name)
-            end
-        end
-    end)
-    _CKLog(_sfmt("TurboScramble: name pool built (%d entries).", #_TURBO_NAME_POOL))
-end
-
-local function _GetPoolName()
-    if #_TURBO_NAME_POOL == 0 then return _tostring(_mrandom(1, 1000000)) end
-    return _TURBO_NAME_POOL[_mrandom(1, #_TURBO_NAME_POOL)]
-end
-
 
 pcall(function()
     local reg = getgenv().__rbxGuiReg
@@ -2451,7 +2393,7 @@ function Compkiller.__SIGNAL(default)
 		__signals = {}	
 	};
 
-	function Binds(event)
+	function Binds:Connect(event)
 		event(Bindable:GetAttribute("Value"));
 
 		local signal = Bindable.Event:Connect(event);
@@ -2461,7 +2403,7 @@ function Compkiller.__SIGNAL(default)
 		return signal;
 	end;
 
-	function Binds(value)
+	function Binds:Fire(value)
 		local IsSame = Bindable:GetAttribute("Value") == value;
 
 		Bindable:SetAttribute('Value',value);
@@ -3125,7 +3067,7 @@ function Compkiller:_CreateBlock(Signal)
 		Tween = TweenInfo.new(0.25),
 	};
 
-	function rep(Text)
+	function rep:SetText(Text)
 		BlockText.Text = Text;
 	end;
 
@@ -3133,7 +3075,7 @@ function Compkiller:_CreateBlock(Signal)
 		return BlockText.Text;
 	end;
 
-	function rep(Color)
+	function rep:SetTextColor(Color)
 		local oldIndex = table.find(Compkiller.Elements.SwitchColor , BlockText);
 
 		table.remove(Compkiller.Elements.SwitchColor , oldIndex);
@@ -3147,7 +3089,7 @@ function Compkiller:_CreateBlock(Signal)
 
 	end;
 
-	function rep(visible)
+	function rep:SetLine(visible)
 		BlockLine.Visible = visible;
 
 		if not visible then
@@ -3157,7 +3099,7 @@ function Compkiller:_CreateBlock(Signal)
 		end;
 	end;
 
-	function rep(num)
+	function rep:SetTransparency(num)
 		rep.TextTransparency = num;
 
 		Compkiller:_Animation(BlockText,TweenInfo.new(0.3),{
@@ -3165,7 +3107,7 @@ function Compkiller:_CreateBlock(Signal)
 		});
 	end;
 
-	function rep(parent)
+	function rep:SetParent(parent)
 		GlobalBlock.Parent = parent;
 
 		local ZINDEX = parent.ZIndex;
@@ -3176,7 +3118,7 @@ function Compkiller:_CreateBlock(Signal)
 		BlockLine.ZIndex = ZINDEX + 2;
 	end;
 
-	function rep(bool)
+	function rep:SetVisible(bool)
 		if bool then
 			Compkiller:_Animation(BlockText,rep.Tween,{
 				TextTransparency = rep.TextTransparency
@@ -3196,14 +3138,14 @@ function Compkiller:_CreateBlock(Signal)
 		end;
 	end;
 
-	function rep(Name , Default)
+	function rep:AddLink(Name , Default)
 		return Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , rep , Signal);
 	end;
 
 	return rep;
 end;
 
-Compkiller.Hash = function(str)
+Compkiller.Hash = function(str: string)
 	if typeof(str) ~= "string" then
 		return "ck-unknow";
 	end;
@@ -3305,7 +3247,7 @@ function Compkiller:PreloadIcons()
 	end;
 end;
 
-function Compkiller:Security(directory, Config) -- Security Mode
+function Compkiller:Security(directory,Config) -- Security Mode
 	directory = directory or "Compkiller-Cache";
 
 	if not isfolder(directory) then
@@ -3800,7 +3742,7 @@ function Compkiller:_AddColorPickerPanel(Button , Callback)
 	local H , S , V = 0,0,0;
 	local Transparency = 0;
 
-	function Args(Color , TransparencyValue)
+	function Args:SetColor(Color , TransparencyValue)
 		H , S , V = Color:ToHSV();
 		Transparency = TransparencyValue;
 	end;
@@ -4245,19 +4187,19 @@ function Compkiller:_DrawKeybinds(Window)
 
 		local frame_ref = {};
 
-		function frame_ref(str)
+		function frame_ref:SetName(str)
 			Label.Text = str or Label.Text;
 
 			UpdateScale();
 		end;
 
-		function frame_ref(str)
+		function frame_ref:SetType(str)
 			TypeLabel.Text = str or TypeLabel.Text;
 
 			UpdateScale();
 		end;
 
-		function frame_ref(v)
+		function frame_ref:SetVisible(v)
 			if v then
 				Compkiller:_Animation(Keyholder,TweenInfo.new(0.1),{
 					BackgroundTransparency = 0.600,
@@ -4534,7 +4476,7 @@ function Compkiller:_KeybindHandler(Parent , ObjectType , ElementAPI , Signal , 
 		};
 	end;
 
-	function APIRef(cfg)
+	function APIRef:LoadSettings(cfg)
 		Flag.ShowInKeybindList:SetValue(cfg.Name);
 		Flag.Off:SetValue(cfg.Off);
 		Flag.On:SetValue(cfg.On);
@@ -4614,7 +4556,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 	local Window = Compkiller:_GetWindowFromElement(Value.Root);
 	local Tween = TweenInfo.new(0.3,Enum.EasingStyle.Quint);
 
-	function Args(Config)
+	function Args:AddKeybind(Config)
 		Config = Compkiller.__CONFIG(Config,{
 			Name = "Keybind",
 			Default = nil,
@@ -4669,7 +4611,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 		Args.Flag = Config.Flag;
 
-		function Args(value)
+		function Args:SetValue(value)
 			Config.Default = value;
 
 			Keybind.SetValue(Config.Default);
@@ -4688,7 +4630,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		return Args;
 	end;
 
-	function Args(Config)
+	function Args:AddHelper(Config)
 		Config = Compkiller.__CONFIG(Config,{
 			Text = "Information."
 		});
@@ -4771,14 +4713,14 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 		local Args = {};
 
-		function Args(value)
+		function Args:SetValue(value)
 			Config.Text = value;
 		end;
 
 		return Args;
 	end;
 
-	function Args(Config)
+	function Args:AddColorPicker(Config)
 		Config = Compkiller.__CONFIG(Config,{
 			Default = Color3.fromRGB(255,255,255),
 			Transparency = 0,
@@ -4806,7 +4748,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 		Args.Flag = Config.Flag;
 
-		function Args(value,opc)
+		function Args:SetValue(value,opc)
 			Config.Default = value;
 			Config.Transparency = opc;
 
@@ -4833,7 +4775,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		return Args;
 	end;
 
-	function Args(Config)
+	function Args:AddToggle(Config)
 		Config = Compkiller.__CONFIG(Config,{
 			Flag = nil,
 			Default = false,
@@ -4854,7 +4796,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 		Args.Flag = Config.Flag
 
-		function Args(value)
+		function Args:SetValue(value)
 			Config.Default = value;
 
 			Toggle.ChangeValue(Config.Default);
@@ -5331,11 +5273,11 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 
 	local Args = {};
 
-	function Args(v)
+	function Args:SetDefault(v)
 		Default = v;
 	end;
 
-	function Args(Def,Val,Multi,Vis)
+	function Args:SetData(Def,Val,Multi,Vis)
 		if Vis and ((tick() - _Delay) <= 0.5 or #Val > 10) then
 			_Delay = tick();
 			SpamUpdate = true;
@@ -5369,7 +5311,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 	local Args = {};
 
-	function Args(Config)
+	function Args:AddToggle(Config)
 		Config = Compkiller.__CONFIG(Config,{
 			Name = "Toggle",
 			Default = false,
@@ -5408,7 +5350,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Args.Flag = Config.Flag;
 
-		function Args(value)
+		function Args:SetValue(value)
 			Config.Default = value;
 
 			Toggle.ChangeValue(Config.Default);
@@ -5429,7 +5371,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			return Config.Default;
 		end;
 
-		function Args(str)
+		function Args:SetText(str)
 			Block:SetText(str or Config.Name);
 		end;
 
@@ -5450,7 +5392,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 		return Args;
 	end;
 
-	function Args(Config)
+	function Args:AddKeybind(Config)
 		Config = Compkiller.__CONFIG(Config,{
 			Name = "Keybind",
 			Default = nil,
@@ -5515,7 +5457,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Args.Flag = Config.Flag;
 
-		function Args(str)
+		function Args:SetText(str)
 			Block:SetText(str or Config.Name);
 		end;
 
@@ -5523,7 +5465,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			return Block:GetText();
 		end;
 
-		function Args(value)
+		function Args:SetValue(value)
 			Config.Default = value;
 
 			Keybind.SetValue(Config.Default);
@@ -5548,7 +5490,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 		return Args;
 	end;
 
-	function Args(Config)
+	function Args:AddColorPicker(Config)
 		Config = Compkiller.__CONFIG(Config,{
 			Name = "ColorPicker",
 			Default = Color3.fromRGB(255,255,255),
@@ -5588,7 +5530,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Args.Flag = Config.Flag;
 
-		function Args(value,opc)
+		function Args:SetValue(value,opc)
 			Config.Default = value;
 			Config.Transparency = opc;
 
@@ -5598,7 +5540,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			Config.Callback(value,opc);
 		end;
 
-		function Args(str)
+		function Args:SetText(str)
 			Block:SetText(str or Config.Name);
 		end;
 
@@ -5628,7 +5570,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 		return Args;
 	end;
 
-	function Args(Config)
+	function Args:AddButton(Config)
 		Config = Compkiller.__CONFIG(Config , {
 			Name = 'Button',
 			Callback = function() end
@@ -5773,7 +5715,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			end;
 		end);
 
-		function Args(t)
+		function Args:SetText(t)
 			Config.Name = t;
 			TextLabel.Text = Config.Name;
 		end;
@@ -5785,7 +5727,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 		return Args;
 	end;
 
-	function Args(Config)
+	function Args:AddSlider(Config)
 		Config = Compkiller.__CONFIG(Config , {
 			Name = 'Slider',
 			Default = 50,
@@ -6022,7 +5964,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Args.Flag = Config.Flag;
 
-		function Args(Value)
+		function Args:SetValue(Value)
 			Config.Default = Value;
 
 			ValueText.Text = tostring(Config.Default)..tostring(Config.Type)
@@ -6034,7 +5976,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			Config.Callback(Value);
 		end;
 
-		function Args(str)
+		function Args:SetText(str)
 			BlockText.Text = str or Config.Name
 		end;
 
@@ -6127,7 +6069,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 		return Args;
 	end;
 
-	function Args(Config) -- request by Neptune
+	function Args:AddParagraph(Config) -- request by Neptune
 		Config = Compkiller.__CONFIG(Config, {
 			Title = "Paragraph",
 			Content = "",
@@ -6235,12 +6177,12 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		local Args = {};
 
-		function Args(title)
+		function Args:SetTitle(title)
 			BlockText.Text = title;
 			UpdateScale();
 		end;
 
-		function Args(content)
+		function Args:SetContent(content)
 			DescriptionText.Text = content;
 			UpdateScale();
 		end;
@@ -6276,7 +6218,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 		return Args;
 	end;
 
-	function Args(Config)
+	function Args:AddTextBox(Config)
 		Config = Compkiller.__CONFIG(Config , {
 			Name = "TextBox",
 			Default = "",
@@ -6452,7 +6394,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Args.Flag = Config.Flag;
 
-		function Args(str)
+		function Args:SetText(str)
 			BlockText.Text = str or Config.Name
 		end;
 
@@ -6460,7 +6402,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			return BlockText.Text;
 		end;
 
-		function Args(Value)
+		function Args:SetValue(Value)
 			Config.Default = Value;
 
 			TextBox_2.Text = tostring(Config.Default);
@@ -6517,7 +6459,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 		return Args;
 	end;
 
-	function Args(Config)
+	function Args:AddDropdown(Config)
 		Config = Compkiller.__CONFIG(Config,{
 			Name = "Dropdown",
 			Default = nil,
@@ -6735,7 +6677,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Args.Flag = Config.Flag;
 
-		function Args(Value)
+		function Args:SetValue(Value)
 			Config.Default = Value;
 
 			ValueText.Text = DaTabarser(Config.Default);
@@ -6745,7 +6687,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			Config.Callback(Value);
 		end;
 
-		function Args(str)
+		function Args:SetText(str)
 			BlockText.Text = str or Config.Name
 		end;
 
@@ -6754,7 +6696,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			return BlockText.Text;
 		end;
 
-		function Args(v)
+		function Args:SetValues(v)
 			Config.Values = v;
 
 			repi:SetData(Config.Default,Config.Values,Config.Multi,true);
@@ -7591,7 +7533,7 @@ function Compkiller.new(Config)
 				end;
 			end);
 
-			function WindowArgs.UserSettings(Value)
+			function WindowArgs.UserSettings:Window(Value)
 				if Value then
 					Signal:Fire(true);
 
@@ -7641,11 +7583,11 @@ function Compkiller.new(Config)
 		end;
 	end;
 
-	function WindowArgs(bool)
+	function WindowArgs:SetVisible(bool)
 		CompKiller.Enabled = bool;
 	end;
 
-	function WindowArgs(config)
+	function WindowArgs:DrawCategory(config)
 		config = config or {};
 		config.Name = config.Name or "Category";
 
@@ -7725,7 +7667,7 @@ function Compkiller.new(Config)
 		end);
 	end;
 
-	function WindowArgs(TabConfig)
+	function WindowArgs:DrawContainerTab(TabConfig)
 		TabConfig = Compkiller.__CONFIG(TabConfig,{
 			Name = "Tab",
 			Icon = "eye",
@@ -8006,7 +7948,7 @@ function Compkiller.new(Config)
 			end;
 		end);
 
-		function TabArgs(TabConfig) -- Internal Tab
+		function TabArgs:DrawTab(TabConfig) -- Internal Tab
 			TabConfig = Compkiller.__CONFIG(TabConfig,{
 				Name = "Tab",
 				Type = "Double",
@@ -8177,7 +8119,7 @@ function Compkiller.new(Config)
 		return TabArgs;
 	end;
 
-	function WindowArgs(UilistLayout , Scrolling)
+	function WindowArgs:AddUnbind(UilistLayout , Scrolling)
 
 		local upd = function()
 			Scrolling.ScrollingEnabled = true
@@ -8223,7 +8165,7 @@ function Compkiller.new(Config)
 		table.insert(WindowArgs.THREADS,task.spawn(Executable))]]
 	end;
 
-	function WindowArgs(Configuration , Internal)
+	function WindowArgs:DrawConfig(Configuration , Internal)
 		Configuration = Compkiller.__CONFIG(Configuration,{
 			Name = "Config",
 			Icon = "folder",
@@ -9160,7 +9102,7 @@ function Compkiller.new(Config)
 				Property = 'TextColor3'
 			});
 
-			function ConfigButton(Author , ConfigName)
+			function ConfigButton:SetInfo(Author , ConfigName)
 				local R,G,B = tostring(math.floor(Compkiller.Colors.Highlight.R * 255)) , tostring(math.floor(Compkiller.Colors.Highlight.G * 255)) , tostring(math.floor(Compkiller.Colors.Highlight.B * 255));
 
 				AuthorText.Text = string.format("Author: <font color=\"rgb(%s, %s, %s)\">%s</font>" ,R,G,B , tostring(Author));
@@ -9171,7 +9113,7 @@ function Compkiller.new(Config)
 				end;
 			end;
 
-			function ConfigButton(v)
+			function ConfigButton:Toggle(v)
 				if v then
 					Compkiller:_Animation(ConfigBlock,Tween,{
 						BackgroundTransparency = 0
@@ -9408,7 +9350,7 @@ function Compkiller.new(Config)
 		return TabArgs;
 	end;
 
-	function WindowArgs(TabConfig , Internal)
+	function WindowArgs:DrawTab(TabConfig , Internal)
 		TabConfig = Compkiller.__CONFIG(TabConfig,{
 			Name = "Tab",
 			Icon = "eye",
@@ -9927,7 +9869,7 @@ function Compkiller.new(Config)
 		end);
 
 
-		function TabArgs(config)
+		function TabArgs:DrawSection(config)
 			config = Compkiller.__CONFIG(config,{
 				Name = "Section",
 				Position = "left"
@@ -10421,7 +10363,7 @@ function Compkiller.new(Config)
 
 			local Args = {};
 
-			function Args(Watermark)
+			function Args:AddText(Watermark)
 				Watermark = Compkiller.__CONFIG(Watermark, {
 					Text = "Watermark",
 					Icon = "info"
@@ -10467,12 +10409,12 @@ function Compkiller.new(Config)
 
 				local Arg = {};
 
-				function Arg(text)
+				function Arg:SetText(text)
 					TextLabel.Text = text;
 					Update();
 				end;
 
-				function Arg(v)
+				function Arg:Visible(v)
 					Icon.Visible = v;
 					TextLabel.Visible = v;
 
@@ -10496,7 +10438,7 @@ function Compkiller.new(Config)
 			return Args;
 		end;
 
-		function WindowArgs(Value)
+		function WindowArgs:Toggle(Value)
 			if WindowArgs.PerformanceMode then
 				MainFrame.Visible = Value;
 			end;
@@ -10570,11 +10512,11 @@ function Compkiller.new(Config)
 		end));
 	end;
 
-	function WindowArgs(new.KeyCode)
+	function WindowArgs:SetMenuKey(new.KeyCode)
 		Config.Keybind = new;
 	end;
 
-	function WindowArgs(config)
+	function WindowArgs:Update(config)
 		config = config or {};
 		config.Logo = config.Logo or Config.Logo;
 		config.Username = config.Username or LocalPlayer.DisplayName;
@@ -10809,7 +10751,7 @@ function Compkiller:ConfigManager(ConfigManager)
 
 	local notify = Compkiller.newNotify();
 
-	function Args(Config)
+	function Args:WriteConfig(Config)
 		Config = Compkiller.__CONFIG(Config , {
 			Name = Compkiller:_RandomString(),
 			Author = LocalPlayer.Name,
@@ -10835,7 +10777,7 @@ function Compkiller:ConfigManager(ConfigManager)
 		writefile(Compkiller:_Path(Args.Directory , Config.Name) , HttpService:JSONEncode(Flags));
 	end;
 
-	function Args(str)
+	function Args:LoadConfigFromString(str)
 		local decoded = HttpService:JSONDecode(str);
 
 		local Flags = Compkiller:GetConfig("KV");
@@ -10867,7 +10809,7 @@ function Compkiller:ConfigManager(ConfigManager)
 		return Compkiller:GetConfig("MK")
 	end;
 
-	function Args(ConfigName)
+	function Args:ReadInfo(ConfigName)
 		local _path = Compkiller:_Path(Args.Directory , ConfigName);
 
 		if isfile(_path) then
@@ -10909,7 +10851,7 @@ function Compkiller:ConfigManager(ConfigManager)
 		return names;
 	end;
 
-	function Args(ConfigName)
+	function Args:DeleteConfig(ConfigName)
 		local _path = Compkiller:_Path(Args.Directory,ConfigName);
 
 		if Args.EnableNotify then
@@ -10929,7 +10871,7 @@ function Compkiller:ConfigManager(ConfigManager)
 		return #listfiles(Args.Directory);
 	end;
 
-	function Args(ConfigName)
+	function Args:LoadConfig(ConfigName)
 		local _path = Compkiller:_Path(Args.Directory,ConfigName);
 
 		if isfile(_path) then
@@ -10980,7 +10922,7 @@ function Compkiller:ConfigManager(ConfigManager)
 	return Args;
 end;
 
-function Compkiller:Loader(IconId, Duration)
+function Compkiller:Loader(IconId,Duration)
 	local CompKiller = Instance.new("ScreenGui")
 
 	CompKiller.Name = Compkiller:_RandomString()
@@ -11128,7 +11070,7 @@ function Compkiller.newNotify()
 
 	Compkiller.NOTIFY_CACHE = {
 		_gui = Notification,   -- held so newNotify() can check if it is still alive
-		new = function(Notify)
+		new = function(Notify: Notify) : NotifyPayback
 			Notify = Compkiller.__CONFIG(Notify, {
 				Icon = Compkiller.Logo,
 				Title = "Notification",
@@ -11635,8 +11577,7 @@ end
 
 do
     -- [PATCH #14] Session-randomised position key -- not a static detectable string
-    -- Fixed key so position persists across re-runs in the same session
-    local _POS_KEY = "__ck_window_pos_v1"
+    local _POS_KEY = "__ck_window_pos_v1"  -- stable key for cross-session persistence
 
     function Compkiller:LoadWindowPosition()
         local raw = getgenv()[_POS_KEY]
@@ -11714,7 +11655,7 @@ function Compkiller:NewSandbox(cfg)
 
     local sandbox = {}
 
-    function sandbox(fn, ...)
+    function sandbox:Run(fn, ...)
         if _disabled then
             _CKLog("Sandbox: disabled after too many errors.")
             return false, "sandbox disabled"
@@ -11854,13 +11795,9 @@ do
                     "__namecall",
                     _newcclosure(function(self, ...)
                         if _checkcaller() then return _ANTIKICK_ORIG_NCI(self, ...) end
-                        local method = _getnamecallmethod()
-                        -- Block Kick, and Teleport-to-kick patterns
-                        if self == LocalPlayer and (
-                            method == "Kick" or
-                            method == "KickToSelect"
-                        ) then
-                            _CKLog("AntiKick [M2]: blocked :" .. method .. "() on LocalPlayer.")
+                        local _ck_method = _getnamecallmethod()
+                        if self == LocalPlayer and (_ck_method == "Kick" or _ck_method == "KickToSelect") then
+                            _CKLog("AntiKick [M2]: blocked :" .. _ck_method .. "() on LocalPlayer.")
                             return nil
                         end
                         return _ANTIKICK_ORIG_NCI(self, ...)
@@ -11878,10 +11815,9 @@ do
                     "__namecall",
                     _newcclosure(function(self, ...)
                         if _checkcaller() then return _ANTIKICK_ORIG_NCG(self, ...) end
-                        local method = _getnamecallmethod()
-                        if (method == "Kick" or method == "KickToSelect")
+                        if _getnamecallmethod() == "Kick"
                         and (self == LocalPlayer or self == Players.LocalPlayer) then
-                            _CKLog("AntiKick [M3]: blocked game-level :" .. method .. "().")
+                            _CKLog("AntiKick [M3]: blocked game-level :Kick().")
                             return nil
                         end
                         return _ANTIKICK_ORIG_NCG(self, ...)
@@ -11903,7 +11839,7 @@ do
                 _setreadonly(mt, false)
                 mt.__namecall = _newcclosure(function(self, ...)
                     if _checkcaller() then return oldNC(self, ...) end
-                    if (_getnamecallmethod() == "Kick" or _getnamecallmethod() == "KickToSelect")
+                    if _getnamecallmethod() == "Kick"
                     and (self == LocalPlayer or self == Players.LocalPlayer) then
                         _CKLog("AntiKick [M4]: blocked via rawmetatable.")
                         return nil
@@ -11931,29 +11867,29 @@ do
         return setmetatable({ _items = {} }, Janitor)
     end
 
-    function Janitor(connection)
+    function Janitor:Add(connection)
         _tinsert(self._items, { type = "conn", ref = connection })
         return connection
     end
 
-    function Janitor(instance)
+    function Janitor:AddInstance(instance)
         _tinsert(self._items, { type = "inst", ref = instance })
         return instance
     end
 
-    function Janitor(fn)
+    function Janitor:AddFn(fn)
         _tinsert(self._items, { type = "fn", ref = fn })
         return fn
     end
 
     -- NEW: track a spawned thread for cleanup
-    function Janitor(thread)
+    function Janitor:AddThread(thread)
         _tinsert(self._items, { type = "thread", ref = thread })
         return thread
     end
 
     -- NEW: one-liner helper -- spawn + track in one call
-    function Janitor(fn, ...)
+    function Janitor:Spawn(fn, ...)
         local t = _ckSpawn(fn, ...)
         return self:AddThread(t)
     end
@@ -12106,7 +12042,7 @@ do
         return self
     end
 
-    function RateLimiter(remote, ...)
+    function RateLimiter:Fire(remote, ...)
         local args = {...}
         table.insert(self._queue, { remote = remote, args = args })
         if not self._running then
@@ -12376,12 +12312,12 @@ do
 	local _SAFE_CALL_ENABLED = false
 	local _SANDBOX_ERRORS    = {}
 
- function Compkiller:SetSafeCall(enabled)
+	function Compkiller:SetSafeCall(enabled)
 		_SAFE_CALL_ENABLED = (enabled == true)
 		_CKLog("SetSafeCall: " .. (_SAFE_CALL_ENABLED and "ON" or "OFF"))
 	end
 
- function Compkiller:SafeCall(fn, ...)
+	function Compkiller:SafeCall(fn, ...)
 		if not _SAFE_CALL_ENABLED then
 			return fn(...)
 		end
@@ -12647,7 +12583,7 @@ do
 	local _SLEEP_ACTIVE = false
 	local _SLEEP_PREV_THRESHOLD = nil
 
- function Compkiller:SetSleepMode(enabled)
+	function Compkiller:SetSleepMode(enabled)
 		if enabled and not _SLEEP_ACTIVE then
 			_SLEEP_ACTIVE           = true
 			_SLEEP_PREV_THRESHOLD   = _OPT.AnimThreshold
@@ -12702,13 +12638,11 @@ do
         local _wave_tick  = 0
         local OldGcInfo   = gcinfo() + Amplitude
 
-        -- Simple sine-based triangle wave: same visual shape, no acos overhead
         local function _wave()
-            local f = math.abs(math.sin(_pi * _wave_tick)) * Amplitude * 2 - Amplitude
+            local f = math.abs(math.sin(math.pi * _wave_tick)) * Amplitude * 2 - Amplitude
             return _mfloor(OldGcInfo + f)
         end
 
-        -- Advance wave on Stepped so it feels like real GC fluctuation
         _GCINFO_TICK_CONN = _TrackConn(_RunService.Stepped:Connect(function()
             _wave_tick = _wave_tick + 0.03
             if _wave_tick > 1 then _wave_tick = _wave_tick - 1 end
@@ -13289,20 +13223,27 @@ do
     -- Cosine-wave formula -- makes gcinfo() output look like natural GC fluctuation
     -- Original technique by Lego Hacker, adapted for CK
     local function _makeCosineSpoof(baseValue, amplitude)
+        local _cos    = math.cos
+        local _acos   = math.acos
         local _floor  = math.floor
         local _pi     = math.pi
         local tick_v  = 0
 
-        -- Simple sine-based wave: cheaper, same visual result as triangle wave
+        -- Advance tick on Stepped so the curve animates naturally
         _ckSpawn(function()
             _TrackConn(RunService.Stepped:Connect(function()
-                tick_v = tick_v + 0.03
-                if tick_v > 1 then tick_v = tick_v - 1 end
+                local formula = ((_acos(_cos(_pi * tick_v)) / _pi) * (amplitude * 2)) + -amplitude
+                local nextF   = ((_acos(_cos(_pi * tick_v + 0.01)) / _pi) * (amplitude * 2)) + -amplitude
+                if formula > nextF then
+                    tick_v = tick_v + 0.07
+                else
+                    tick_v = tick_v + 0.01
+                end
             end))
         end)
 
         return function()
-            local formula = math.abs(math.sin(_pi * tick_v)) * amplitude * 2 - amplitude
+            local formula = ((_acos(_cos(_pi * tick_v)) / _pi) * (amplitude * 2)) + -amplitude
             return _floor(baseValue + formula)
         end
     end
@@ -14100,7 +14041,7 @@ Compkiller.MasterControl = function()
 		Compkiller.PerformanceMode = v;
 	end;
 
-	local function getFPS()
+	local function getFPS(): number
 		local fps = math.floor(_OPT.FPS + 0.5)
 		_CKLog("GetFPS: " .. fps .. " fps")
 		return fps
@@ -14411,7 +14352,7 @@ Compkiller.MasterControl = function()
 
 		local sandbox = {}
 
-		function sandbox(fn, ...)
+		function sandbox:Run(fn, ...)
 			if _disabled then
 				_CKLog("Sandbox: disabled after too many errors.")
 				return false, "sandbox disabled"
@@ -14836,7 +14777,7 @@ Compkiller.MasterControl = function()
 		end;
 	end;
 
-	local function cacheImage(id)
+	local function cacheImage(id) : string
 		if not Compkiller.SecureMode or not id or not id:byte() then
 			return id or "";
 		end;
@@ -14921,7 +14862,7 @@ Compkiller.MasterControl = function()
 		Compkiller.CacheDirectory = directory;
 	end;
 
-	local function configManager(ConfigManager)
+	local function configManager(ConfigManager) : ConfigFunctions
 		ConfigManager = Compkiller.__CONFIG(ConfigManager , {
 			Directory = "Compkiller",
 			Config = "Software"
@@ -14942,7 +14883,7 @@ Compkiller.MasterControl = function()
 
 		local notify = Compkiller.newNotify();
 
-		function Args(Config)
+		function Args:WriteConfig(Config)
 			Config = Compkiller.__CONFIG(Config , {
 				Name = Compkiller:_RandomString(),
 				Author = LocalPlayer.Name,
@@ -14968,7 +14909,7 @@ Compkiller.MasterControl = function()
 			writefile(Compkiller:_Path(Args.Directory , Config.Name) , HttpService:JSONEncode(Flags));
 		end;
 
-		function Args(str)
+		function Args:LoadConfigFromString(str)
 			local decoded = HttpService:JSONDecode(str);
 
 			local Flags = getConfig("KV");
@@ -15000,7 +14941,7 @@ Compkiller.MasterControl = function()
 			return getConfig("MK")
 		end;
 
-		function Args(ConfigName)
+		function Args:ReadInfo(ConfigName)
 			local _path = Compkiller:_Path(Args.Directory , ConfigName);
 
 			if isfile(_path) then
@@ -15042,7 +14983,7 @@ Compkiller.MasterControl = function()
 			return names;
 		end;
 
-		function Args(ConfigName)
+		function Args:DeleteConfig(ConfigName)
 			local _path = Compkiller:_Path(Args.Directory,ConfigName);
 
 			if Args.EnableNotify then
@@ -15062,7 +15003,7 @@ Compkiller.MasterControl = function()
 			return #listfiles(Args.Directory);
 		end;
 
-		function Args(ConfigName)
+		function Args:LoadConfig(ConfigName)
 			local _path = Compkiller:_Path(Args.Directory,ConfigName);
 
 			if isfile(_path) then
@@ -15332,8 +15273,8 @@ Compkiller.MasterControl = function()
 					"__namecall",
 					_newcclosure(function(self, ...)
 						if _checkcaller() then return _ANTIKICK_ORIG_NCI(self, ...) end
-						if self == LocalPlayer and (_getnamecallmethod() == "Kick" or _getnamecallmethod() == "KickToSelect") then
-							_CKLog("AntiKick [M2]: blocked :<kick method>() on LocalPlayer.")
+						if self == LocalPlayer and _getnamecallmethod() == "Kick" then
+							_CKLog("AntiKick [M2]: blocked :Kick() on LocalPlayer.")
 							return nil
 						end
 						return _ANTIKICK_ORIG_NCI(self, ...)
@@ -15351,9 +15292,9 @@ Compkiller.MasterControl = function()
 					"__namecall",
 					_newcclosure(function(self, ...)
 						if _checkcaller() then return _ANTIKICK_ORIG_NCG(self, ...) end
-						if (_getnamecallmethod() == "Kick" or _getnamecallmethod() == "KickToSelect")
+						if _getnamecallmethod() == "Kick"
 						and (self == LocalPlayer or self == Players.LocalPlayer) then
-							_CKLog("AntiKick [M3]: blocked game-level :<kick method>().")
+							_CKLog("AntiKick [M3]: blocked game-level :Kick().")
 							return nil
 						end
 						return _ANTIKICK_ORIG_NCG(self, ...)
@@ -15375,7 +15316,7 @@ Compkiller.MasterControl = function()
 				_setreadonly(mt, false)
 				mt.__namecall = _newcclosure(function(self, ...)
 					if _checkcaller() then return oldNC(self, ...) end
-					if (_getnamecallmethod() == "Kick" or _getnamecallmethod() == "KickToSelect")
+					if _getnamecallmethod() == "Kick"
 					and (self == LocalPlayer or self == Players.LocalPlayer) then
 						_CKLog("AntiKick [M4]: blocked via rawmetatable.")
 						return nil
