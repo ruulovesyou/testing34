@@ -40,8 +40,7 @@ do
     end
     if type(task.cancel) ~= "function" then
         task.cancel = function(co)
-            pcall(
-    function(...)
+            pcall(function()
                 if type(co) == "thread" and coroutine.status(co) ~= "dead" then
                     coroutine.resume(co)
                 end
@@ -63,8 +62,7 @@ do
     -- Not available in Lua 5.1 environments used by some executors
     if type(coroutine.close) ~= "function" then
         coroutine.close = function(co)
-            pcall(
-    function(...)
+            pcall(function()
                 if coroutine.status(co) == "suspended" then
                     coroutine.resume(co)
                 end
@@ -220,8 +218,7 @@ do
 
     -- [PATCH #3] Pre-create syn silently so the global write happens inside
     -- a protected context -- avoids triggering __newindex watchers on _G
-    _pcall(
-	    function(...)
+    _pcall(function()
         if not rawget(_G, "syn") then
             rawset(_G, "syn", {})
         end
@@ -253,8 +250,7 @@ local _CK_MISSING_ENV   = {}      -- tracks which executor APIs are unavailable
 
 do
     -- Identify executor (Synapse X, Fluxus, Delta, KRNL, etc.)
-    _pcall(
-	    function(...)
+    _pcall(function()
         local name, ver = _identifyexecutor()
         _CK_EXECUTOR     = _tostring(name or "unknown")
         _CK_EXEC_VERSION = _tostring(ver  or "0")
@@ -262,8 +258,7 @@ do
 
     -- Elevation check -- lighter than probing with Instance.new (darkdex technique)
     -- CoreGui:GetFullName() errors on low-privilege executors
-    _CK_ELEVATED = _pcall(
-	    function(...)
+    _CK_ELEVATED = _pcall(function()
         game:GetService("CoreGui"):GetFullName()
     end)
 
@@ -341,8 +336,7 @@ do
         end
         return false
     end
-    _pcall(
-	    function(...)
+    _pcall(function()
         if _type(hookfunction) ~= "function" or _type(getrenv) ~= "function" then return end
         local renv = getrenv()
         local _op; _op = hookfunction(renv.print or print, _newcclosure(function(...)
@@ -364,26 +358,22 @@ local function _SmartKillGUIs()
     local parents = {}
     pcall(function() parents[#parents+1] = CoreGui end)
     pcall(function() if PlayerGui then parents[#parents+1] = PlayerGui end end)
-    pcall(
-    function(...)
+    pcall(function()
         local hg = get_hidden_gui and get_hidden_gui()
         if hg then parents[#parents+1] = hg end
     end)
     pcall(function() parents[#parents+1] = workspace.CurrentCamera end)
 
     for _, parent in ipairs(parents) do
-        pcall(
-    function(...)
+        pcall(function()
             for _, child in ipairs(parent:GetChildren()) do
-                pcall(
-    function(...)
+                pcall(function()
                     if child:IsA("ScreenGui") and child:GetAttribute(_CK_GUI_TAG) then
                         child:Destroy()
                         return
                     end
                 end)
-                pcall(
-    function(...)
+                pcall(function()
                     for _, name in ipairs(_CK_LEGACY_NAMES) do
                         if child.Name == name then
                             child:Destroy()
@@ -396,18 +386,15 @@ local function _SmartKillGUIs()
     end
 end
 
-pcall(
-    function(...)
+pcall(function()
     if getgenv().__rbxClnSvc then getgenv().__rbxClnSvc() end
 end)
 
-pcall(
-    function(...)
+pcall(function()
     local reg = getgenv().__rbxCoReg
     if type(reg) == "table" then
         for _, co in ipairs(reg) do
-            pcall(
-    function(...)
+            pcall(function()
                 if coroutine.status(co) ~= "dead" then
                     coroutine.close(co)
                 end
@@ -421,13 +408,11 @@ pcall(function() getgenv().__rbxCoReg = {} end)
 _SmartKillGUIs()
 
 local function SecureKill(target)
-    pcall(
-    function(...)
+    pcall(function()
         local c = CoreGui:FindFirstChild(target)
         if c then c:Destroy() end
     end)
-    pcall(
-    function(...)
+    pcall(function()
         if PlayerGui then
             local c = PlayerGui:FindFirstChild(target)
             if c then c:Destroy() end
@@ -582,8 +567,7 @@ do
 
     -- Attempt 2: RobloxGui inside CoreGui (most hidden hardcoded spot)
     if not _GUI_PARENT then
-        local ok, rg = _pcall(
-	    function(...)
+        local ok, rg = _pcall(function()
             return CoreGui:FindFirstChild("RobloxGui")
         end)
         if ok and rg then
@@ -601,8 +585,7 @@ do
 
     -- Attempt 4: CoreGui probe for executors where elevation wasn't detected
     if not _GUI_PARENT then
-        local ok = _pcall(
-	    function(...)
+        local ok = _pcall(function()
             local probe = Instance.new("ScreenGui")
             probe.Parent = CoreGui
             probe:Destroy()
@@ -629,8 +612,7 @@ end
 local _CK_HIDDEN_GUI_NAMES = {}   -- all names this GUI has ever had, kept in sync
 
 local function _InstallIndexHook()
-    _pcall(
-	    function(...)
+    _pcall(function()
         local mt       = _getrawmetatable(game)
         if not mt then return end
         local oldIndex = mt.__index
@@ -663,8 +645,7 @@ local _CK_INTEGRITY_CONNS = {}
 
 local function _StartGuiIntegrityMonitor(screenGui)
     -- Watch Parent -- re-parent immediately if moved
-    local conn1 = _pcall(
-	    function(...)
+    local conn1 = _pcall(function()
         return screenGui:GetPropertyChangedSignal("Parent"):Connect(function()
             if screenGui.Parent ~= _GUI_PARENT then
                 _pcall(function() screenGui.Parent = _GUI_PARENT end)
@@ -678,11 +659,9 @@ local function _StartGuiIntegrityMonitor(screenGui)
     end
 
     -- Watch Name -- re-encrypt immediately if renamed externally
-    local conn2 = _pcall(
-	    function(...)
+    local conn2 = _pcall(function()
         return screenGui:GetPropertyChangedSignal("Name"):Connect(function()
-            _pcall(
-	    function(...)
+            _pcall(function()
                 local newName = _EncryptGuiName()
                 screenGui.Name = newName
                 _tinsert(_CK_HIDDEN_GUI_NAMES, newName)
@@ -695,8 +674,7 @@ local function _StartGuiIntegrityMonitor(screenGui)
         _tinsert(_CK_CONNECTIONS, conn2)
     end
     -- Cleanup connections when GUI is destroyed
-    local connD = _pcall(
-	    function(...)
+    local connD = _pcall(function()
         return screenGui.Destroying:Connect(function()
             for _, c in _ipairs(_CK_INTEGRITY_CONNS) do _pcall(function() c:Disconnect() end) end
             _CK_INTEGRITY_CONNS = {}
@@ -724,8 +702,7 @@ local function _BuildNamePool(screenGui)
         _tinsert(_TURBO_NAME_POOL, _tostring(_mrandom(-2000000000, 2000000000)))
     end
     -- Seed with existing descendant names (CMD X technique)
-    _pcall(
-	    function(...)
+    _pcall(function()
         for _, v in _ipairs(screenGui:GetDescendants()) do
             if v.Name and #v.Name > 0 then
                 _tinsert(_TURBO_NAME_POOL, v.Name)
@@ -764,8 +741,7 @@ local function _EncryptGuiName()
     local name = prefixes[rndPrefix] .. "_" .. hexPart .. "_" .. suffixes[rndSuffix]
 
     table.insert(_CK_ENCRYPTED_NAMES, name)
-    pcall(
-    function(...)
+    pcall(function()
         local reg = getgenv().__rbxGuiReg
         if type(reg) ~= "table" then
             getgenv().__rbxGuiReg = {}
@@ -776,18 +752,15 @@ local function _EncryptGuiName()
     return name
 end
 
-pcall(
-    function(...)
+pcall(function()
     local reg = getgenv().__rbxGuiReg
     if type(reg) == "table" then
         for _, oldName in ipairs(reg) do
-            pcall(
-    function(...)
+            pcall(function()
                 local g = CoreGui:FindFirstChild(oldName)
                 if g then g:Destroy() end
             end)
-            pcall(
-    function(...)
+            pcall(function()
                 if PlayerGui then
                     local g = PlayerGui:FindFirstChild(oldName)
                     if g then g:Destroy() end
@@ -804,8 +777,7 @@ local function _ShieldParent(screenGui)
     _pcall(function() screenGui.ResetOnSpawn = false end)
 
     -- Encrypt name and register it in hidden name pool
-    _pcall(
-	    function(...)
+    _pcall(function()
         local encName = _EncryptGuiName()
         screenGui.Name = encName
         _tinsert(_CK_HIDDEN_GUI_NAMES, encName)
@@ -815,8 +787,7 @@ local function _ShieldParent(screenGui)
     -- Try every known protect_gui variant (Synapse, KRNL, Fluxus, Delta, etc.)
     -- islclosure guard: if protect_gui is a Lua closure it may have been hooked/replaced
     -- In that case skip it and fall back to gethui directly (darkdex technique)
-    _pcall(
-	    function(...)
+    _pcall(function()
         local protectFns = {
             protect_gui,
             protectgui,
@@ -864,8 +835,7 @@ local function _ShieldParent(screenGui)
     _pcall(function() _StartGuiIntegrityMonitor(screenGui) end)
 
     -- Install __namecall hook on the ScreenGui's metatable to block Destroy calls
-    _pcall(
-	    function(...)
+    _pcall(function()
         local sgmt = _getrawmetatable(screenGui)
         if not sgmt then return end
         local oldNC = sgmt.__namecall
@@ -912,8 +882,7 @@ local function _TrackThread(thread)
     return thread
 end
 
-pcall(
-    function(...)
+pcall(function()
 getgenv().__rbxClnSvc = function()
     for _, t in ipairs(_CK_THREADS) do
         pcall(task.cancel, t)
@@ -921,8 +890,7 @@ getgenv().__rbxClnSvc = function()
     _CK_THREADS = {}
 
     for _, tw in ipairs(_OPT.ActiveTweens) do
-        pcall(
-    function(...)
+        pcall(function()
             if tw and tw.PlaybackState == Enum.PlaybackState.Playing then
                 tw:Cancel()
             end
@@ -935,8 +903,7 @@ getgenv().__rbxClnSvc = function()
     end
     _CK_CONNECTIONS = {}
 
-    pcall(
-    function(...)
+    pcall(function()
         if Compkiller and Compkiller.NOTIFY_CACHE and Compkiller.NOTIFY_CACHE._gui then
             Compkiller.NOTIFY_CACHE._gui:Destroy()
         end
@@ -954,13 +921,11 @@ getgenv().__rbxClnSvc = function()
     _OPT.ActiveTweenMap = {}
     _OPT._DummyTween   = nil   -- rebuilt at bottom of next execution
 
-    pcall(
-    function(...)
+    pcall(function()
         local reg = getgenv().__rbxCoReg
         if type(reg) == "table" then
             for _, co in ipairs(reg) do
-                pcall(
-    function(...)
+                pcall(function()
                     if coroutine.status(co) ~= "dead" then
                         coroutine.close(co)
                     end
@@ -1028,8 +993,7 @@ end
 
 -- [PATCH #16] Auto-kill debug mode after 30s if accidentally left on in production
 -- Silent kill -- logging would expose the very thing we're protecting
-_ckSpawn(
-    function(...)
+_ckSpawn(function()
     task.wait(30)
     if Compkiller and Compkiller.Debug == true then
         Compkiller.Debug = false
@@ -1063,8 +1027,7 @@ function Compkiller:EnableTurboScramble(screenGui, enabled)
 
     -- RenderStepped -- rename GUI + ALL descendants every frame
     _TURBO_CONN = _TrackConn(RunService.RenderStepped:Connect(function()
-        _pcall(
-	    function(...)
+        _pcall(function()
             -- Rename root ScreenGui
             local newName = _GetPoolName()
             screenGui.Name = newName
@@ -2349,8 +2312,7 @@ function Compkiller:_Blur(element , WindowRemote)
 		end;
 	end));
 
-	local THREAD = _TrackThread(task.spawn(
-        function(...)
+	local THREAD = _TrackThread(task.spawn(function()
 		while true do task.wait(0.1)
 			pcall(UpdateFunction);
 		end;
@@ -3239,8 +3201,7 @@ function Compkiller:CacheImage(id)
 
 	local json = game:HttpGet(endpoint);
 
-	local JSON_Decode = select(2, pcall(
-    function(...)
+	local JSON_Decode = select(2, pcall(function()
 		return HttpService:JSONDecode(json);
 	end));
 
@@ -3275,8 +3236,7 @@ function Compkiller:PreloadIcons()
 
 	if Compkiller.SecureMode then
 		for i,v in next , RequiredAssets do task.wait()
-			pcall(
-    function(...)
+			pcall(function()
 				Compkiller:CacheImage(v);
 			end);
 		end;
@@ -3829,8 +3789,7 @@ function Compkiller:_AddColorPickerPanel(Button , Callback)
 				SPAWN_THREAD = nil;
 			end;
 
-		SPAWN_THREAD = task.spawn(
-        function(...)
+		SPAWN_THREAD = task.spawn(function()
 				local hb = RunService.Heartbeat
 				while Args.IsHold do
 					hb:Wait()
@@ -4063,8 +4022,7 @@ function Compkiller:_DrawKeybinds(Window)
 		Root = Keybinds
 	};
 
-	Ref.THREAD = _TrackThread(task.spawn(
-        function(...)
+	Ref.THREAD = _TrackThread(task.spawn(function()
 		while true do RunService.Heartbeat:Wait()
 			Compkiller:_Animation(MainFrame,TweenInfo.new(0.4),{
 				Size = UDim2.new(1, 30, 1, UIListLayout.AbsoluteContentSize.Y + 1)
@@ -4530,8 +4488,7 @@ function Compkiller:_KeybindHandler(Parent , ObjectType , ElementAPI , Signal , 
 		APIRef.Update();
 	end;
 
-	APIRef.Thread = _TrackThread(task.spawn(
-        function(...)
+	APIRef.Thread = _TrackThread(task.spawn(function()
 		while true do task.wait(0.05)
 			if APIRef.Mode ~= 1 then
 				if ElementAPI:GetValue() == APIRef.On then
@@ -6383,8 +6340,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 			local MainScale = ((scale.X > Base.X) and scale.X) or Base.X;
 
-			local xp = pcall(
-    function(...)
+			local xp = pcall(function()
 				Compkiller:_Animation(LinkValues,TweenInfo.new(0.25),{
 					Size = UDim2.fromOffset(math.clamp(MainScale + 7 , Base.X , TextBox.AbsoluteSize.X / 2) , 16)
 				})
@@ -8175,8 +8131,7 @@ function Compkiller.new(Config)
 
 		UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(upd);
 
-		return _TrackThread(task.defer(
-        function(...)
+		return _TrackThread(task.defer(function()
 			while true do task.wait(1)
 				upd();
 			end;
@@ -9377,8 +9332,7 @@ function Compkiller.new(Config)
 
 			Refresh();
 
-			Init.THREAD = _TrackThread(task.spawn(
-        function(...)
+			Init.THREAD = _TrackThread(task.spawn(function()
 				local OldIndex = Configuration.Config:GetConfigCount();
 
 				while true do task.wait(0.125);
@@ -10525,8 +10479,7 @@ function Compkiller.new(Config)
 			end);
 		end;
 
-		table.insert(WindowArgs.THREADS,_TrackThread(task.spawn(
-        function(...)
+		table.insert(WindowArgs.THREADS,_TrackThread(task.spawn(function()
 			while true do task.wait(0.15)
 				if Compkiller:_IsMobile() then
 					ToggleCloseUI(true);
@@ -10591,8 +10544,7 @@ function Compkiller.new(Config)
 		WindowArgs.Profile = config.UserProfile or WindowArgs.Profile;
 	end;
 
-	WindowArgs.LOOP_THREAD = _TrackThread(task.spawn(
-        function(...)
+	WindowArgs.LOOP_THREAD = _TrackThread(task.spawn(function()
 		local TimeTic = tick();
 
 		local BlurElement = Instance.new("Frame")
@@ -11094,8 +11046,7 @@ function Compkiller.newNotify()
 
 	-- [PATCH #6] Shield notify GUI immediately -- apply protect_gui + tag it
 	-- so it is invisible to AC DescendantAdded scans and GetAttribute probes
-	_pcall(
-	    function(...)
+	_pcall(function()
 		local _pfn = protect_gui or protectgui or (syn and syn.protect_gui)
 		if _pfn and not _islclosure(_pfn) then _pfn(Notification) end
 	end)
@@ -11375,8 +11326,7 @@ function Compkiller:EnableAdvancedOptimizations(enabled)
     if _OPT.Enabled then
         if not _OPT.MonitorThread then
             local thread
-            thread = task.spawn(
-        function(...)
+            thread = task.spawn(function()
                 while _OPT.Enabled and _OPT.MonitorThread == thread do
                     task.wait(_OPT.MemInterval)
                     if _OPT.Enabled and _OPT.MonitorThread == thread then
@@ -11760,8 +11710,7 @@ do
             return
         end
         -- Hook the idle kick via VirtualUser
-        _pcall(
-	    function(...)
+        _pcall(function()
             local VirtualUser = game:GetService("VirtualUser")
             _ANTIAFK_CONN = _TrackConn(
                 Players.LocalPlayer.Idled:Connect(function()
@@ -11772,12 +11721,10 @@ do
             )
         end)
         -- Fallback: periodic dummy input every 15 minutes
-        _ANTIAFK_THREAD = _ckSpawn(
-    function(...)
+        _ANTIAFK_THREAD = _ckSpawn(function()
             while _ANTIAFK_CONN do
                 task.wait(840)   -- 14 min
-                _pcall(
-	    function(...)
+                _pcall(function()
                     local VU = game:GetService("VirtualUser")
                     VU:CaptureController()
                     VU:ClickButton2(Vector2.new())
@@ -11832,8 +11779,7 @@ do
 
         -- METHOD 1: hookfunction on LocalPlayer.Kick
         if _type(hookfunction) == "function" then
-            _pcall(
-	    function(...)
+            _pcall(function()
                 _ANTIKICK_ORIG_KICK = hookfunction(
                     LocalPlayer.Kick,
                     _newcclosure(function() end)
@@ -11845,8 +11791,7 @@ do
         -- METHOD 2: hookmetamethod on LocalPlayer __namecall
         -- Exact pattern with checkcaller() guard + setreadonly bracket
         if _type(hookmetamethod) == "function" then
-            _pcall(
-	    function(...)
+            _pcall(function()
                 _ANTIKICK_ORIG_NCI = hookmetamethod(
                     LocalPlayer,
                     "__namecall",
@@ -11866,8 +11811,7 @@ do
 
         -- METHOD 3: hookmetamethod on game __namecall
         if _type(hookmetamethod) == "function" then
-            _pcall(
-	    function(...)
+            _pcall(function()
                 _ANTIKICK_ORIG_NCG = hookmetamethod(
                     game,
                     "__namecall",
@@ -11888,8 +11832,7 @@ do
         -- METHOD 4: getrawmetatable fallback (CMD X pattern)
         -- Used when hookmetamethod is unavailable -- direct metatable write
         if _type(hookmetamethod) ~= "function" and _type(_getrawmetatable) == "function" then
-            _pcall(
-	    function(...)
+            _pcall(function()
                 local mt    = _getrawmetatable(game)
                 if not mt then return end
                 local oldNC = mt.__namecall
@@ -11955,8 +11898,7 @@ do
 
     function Janitor:Destroy()
         for _, item in _ipairs(self._items) do
-            _pcall(
-	    function(...)
+            _pcall(function()
                 if item.type == "conn" then
                     item.ref:Disconnect()
                 elseif item.type == "inst" then
@@ -11988,8 +11930,7 @@ do
     local function _SaveCameraState()
         local cam = workspace.CurrentCamera
         local origFOV, origType, origCFrame
-        pcall(
-    function(...)
+        pcall(function()
             origFOV    = cam.FieldOfView
             origType   = cam.CameraType
             origCFrame = cam.CFrame
@@ -12002,8 +11943,7 @@ do
     end
 
     local function _SuppressRender()
-        pcall(
-    function(...)
+        pcall(function()
             local cam       = workspace.CurrentCamera
             cam.CameraType  = Enum.CameraType.Scriptable
             cam.FieldOfView = 1
@@ -12013,8 +11953,7 @@ do
     end
 
     local function _RestoreRender(state)
-        pcall(
-    function(...)
+        pcall(function()
             local cam       = workspace.CurrentCamera
             cam.CameraType  = state.ctype
             cam.FieldOfView = state.fov
@@ -12110,12 +12049,10 @@ do
         table.insert(self._queue, { remote = remote, args = args })
         if not self._running then
             self._running = true
-            _ckSpawn(
-    function(...)
+            _ckSpawn(function()
                 while #self._queue > 0 do
                     local item = table.remove(self._queue, 1)
-                    pcall(
-    function(...)
+                    pcall(function()
                         item.remote:FireServer((table.unpack or unpack)(item.args))
                     end)
                     task.wait(self._interval)
@@ -12223,8 +12160,7 @@ do
         _CKLog(_sfmt("Anomaly: baseline captured (%d targets), scanning every %ds.",
             #_WATCH, interval))
 
-        _DETECTOR_THREAD = _ckSpawn(
-    function(...)
+        _DETECTOR_THREAD = _ckSpawn(function()
             while _DETECTOR_THREAD do
                 task.wait(interval)
                 if not _DETECTOR_THREAD then break end
@@ -12616,8 +12552,7 @@ function Compkiller:EnableNameObfuscation(enabled)
 		_CKLog("EnableNameObfuscation: OFF (static name retained).")
 		return
 	end
-	pcall(
-    function(...)
+	pcall(function()
 		for _, win in ipairs(self.Windows) do
 			local sg = win and win._ScreenGui
 			if sg and sg.Parent then
@@ -12715,16 +12650,13 @@ do
             if _wave_tick > 1 then _wave_tick = _wave_tick - 1 end
         end))
 
-        _pcall(
-	    function(...)
-            _GCINFO_HOOK1 = hookfunction(getrenv().gcinfo, _newcclosure(
-        function(...)
+        _pcall(function()
+            _GCINFO_HOOK1 = hookfunction(getrenv().gcinfo, _newcclosure(function()
                 return _wave()
             end))
         end)
 
-        _pcall(
-	    function(...)
+        _pcall(function()
             _GCINFO_HOOK2 = hookfunction(getrenv().collectgarbage, _newcclosure(function(arg, ...)
                 local ok, val = _pcall(_GCINFO_HOOK2, arg, ...)
                 if ok and arg == "count" then return _wave() end
@@ -12804,15 +12736,13 @@ do
 
         -- hookfunction indexed versions as fallback
         if _type(hookfunction) == "function" then
-            _pcall(
-	    function(...)
+            _pcall(function()
                 _MEM_HOOK1 = hookfunction(_Stats.GetTotalMemoryUsageMb, _newcclosure(function(self, ...)
                     if _checkcaller() then return _MEM_HOOK1(self, ...) end
                     return _retTotal()
                 end))
             end)
-            _pcall(
-	    function(...)
+            _pcall(function()
                 _MEM_HOOK2 = hookfunction(_Stats.GetMemoryUsageMbForTag, _newcclosure(function(self, ...)
                     if _checkcaller() then return _MEM_HOOK2(self, ...) end
                     return _retGui()
@@ -12852,8 +12782,7 @@ do
 
     local function _BuildAssetWhitelist()
         -- Harvest real assets from CoreGui before any exploit GUI is loaded
-        _pcall(
-	    function(...)
+        _pcall(function()
             _ContentProv:PreloadAsync({_CoreGuiSvc}, function(assetId)
                 if assetId and assetId:find("rbxassetid://") then
                     _tinsert(_SAFE_ASSETS, assetId)
@@ -12861,8 +12790,7 @@ do
             end)
         end)
         -- Harvest clean game ImageLabel assets
-        _pcall(
-	    function(...)
+        _pcall(function()
             for _, v in _ipairs(game:GetDescendants()) do
                 if v:IsA("ImageLabel") and v.Image:find("rbxassetid://")
                    and not v:IsDescendantOf(_CoreGuiSvc) then
@@ -12951,8 +12879,7 @@ do
 
         -- Keep all newproxy results alive (defeats weak-table GC trap)
         if _type(hookfunction) == "function" and _type(getrenv) == "function" then
-            _pcall(
-	    function(...)
+            _pcall(function()
                 _PROXY_HOOK = hookfunction(getrenv().newproxy, _newcclosure(function(...)
                     local proxy = _PROXY_HOOK(...)
                     _tinsert(_PROXY_TABLE, proxy)   -- strong ref -> won't GC
@@ -12971,8 +12898,7 @@ do
 
         -- Suppress DescendantAdded events for our own CK ScreenGuis so AC scanners
         -- that do CoreGui.DescendantAdded:Connect(...) never see our GUI appear
-        _pcall(
-	    function(...)
+        _pcall(function()
             local mt     = _getrawmetatable(_CoreGuiSvc)
             if not mt then return end
             local oldNC  = mt.__namecall
@@ -12989,8 +12915,7 @@ do
                     if _type(cb) == "function" then
                         local safeCb = _newcclosure(function(obj)
                             -- If this is one of our own shielded GUIs, swallow the event
-                            if obj and _pcall(
-	    function(...)
+                            if obj and _pcall(function()
                                 return obj:IsA("ScreenGui")
                                     and obj:GetAttribute(_CK_GUI_TAG)
                             end) then return end
@@ -13044,8 +12969,7 @@ do
         local _suspSet = {}
         for _, k in _ipairs(_SUSPICIOUS_GLOBALS) do _suspSet[k] = true end
 
-        _pcall(
-	    function(...)
+        _pcall(function()
             local gmt = _getrawmetatable(_G)
             if not gmt then
                 -- _G may not have a metatable -- set one
@@ -13101,8 +13025,7 @@ do
             return
         end
 
-        _pcall(
-	    function(...)
+        _pcall(function()
             local mt = _getrawmetatable(game)
             if not mt then return end
 
@@ -13110,12 +13033,10 @@ do
             _METAGUARD_ORIG = mt.__namecall
 
             -- Poll every 2s -- if __namecall was overwritten by an AC spy, restore ours silently
-            _ckSpawn(
-    function(...)
+            _ckSpawn(function()
                 while _METAGUARD_ACTIVE do
                     task.wait(2)
-                    _pcall(
-	    function(...)
+                    _pcall(function()
                         local mt2    = _getrawmetatable(game)
                         local curr   = mt2 and _rawget(mt2, "__namecall")
                         -- If current __namecall is a non-executor Lua closure -> AC spy
@@ -13158,8 +13079,7 @@ do
             return
         end
 
-        _pcall(
-	    function(...)
+        _pcall(function()
             local renv    = getrenv()
             local renvMt  = _getrawmetatable(renv) or {}
             local renvOld = renvMt.__index
@@ -13221,8 +13141,7 @@ do
                 local tb = _TEXTBOX_NC_HOOK(self, ...)
                 if tb and _type(tb) == "userdata" then
                     -- If textbox is inside any CK-tagged GUI, hide it
-                    local hidden = _pcall(
-	    function(...)
+                    local hidden = _pcall(function()
                         local p = tb.Parent
                         while p do
                             if p:IsA("ScreenGui") and p:GetAttribute(_CK_GUI_TAG) then
@@ -13255,8 +13174,7 @@ do
 
     -- [BUNDLE] EnableAllBypasses -- one call to activate all 8 bypass systems
     function Compkiller:EnableAllBypasses()
-        _ckSpawn(
-    function(...)
+        _ckSpawn(function()
             task.wait(1)  -- wait for game to fully load so baselines are accurate
             self:EnableGCBypass(true)
             self:EnableMemoryBypass(true)
@@ -13307,8 +13225,7 @@ local function _makeCosineSpoof(baseValue, amplitude)
     local tick_v  = 0
 
     -- Advance tick on Stepped so the curve animates naturally
-    _ckSpawn(
-    function(...)
+    _ckSpawn(function()
         _TrackConn(RunService.Stepped:Connect(function()
             local formula = ((_acos(_cos(_pi * tick_v)) / _pi) * (amplitude * 2)) + -amplitude
             local nextF   = ((_acos(_cos(_pi * tick_v + 0.01)) / _pi) * (amplitude * 2)) + -amplitude
@@ -13339,8 +13256,7 @@ do
         local _pi     = math.pi
         local tick_v  = 0
 
-        _ckSpawn(
-    function(...)
+        _ckSpawn(function()
             _TrackConn(RunService.Stepped:Connect(function()
                 local formula = ((_acos(_cos(_pi * tick_v)) / _pi) * (amplitude * 2)) + -amplitude
                 local nextF   = ((_acos(_cos(_pi * tick_v + 0.01)) / _pi) * (amplitude * 2)) + -amplitude
@@ -13378,8 +13294,7 @@ do
         local CoreGuiRef = cloneref(game:GetService("CoreGui"))
 
         -- Collect from CoreGui itself
-        _pcall(
-	    function(...)
+        _pcall(function()
             game:GetService("ContentProvider"):PreloadAsync({CoreGuiRef}, function(assetId)
                 if assetId and assetId:find("rbxassetid://") then
                     _tinsert(pool, assetId)
@@ -13388,8 +13303,7 @@ do
         end)
 
         -- Collect ImageLabel assets from game tree
-        _pcall(
-	    function(...)
+        _pcall(function()
             for _, v in _ipairs(game:GetDescendants()) do
                 if v:IsA("ImageLabel") and v.Image:find("rbxassetid://")
                    and not v:IsDescendantOf(CoreGuiRef) then
@@ -13429,8 +13343,7 @@ do
             return
         end
 
-        _pcall(
-	    function(...)
+        _pcall(function()
             local ContentRef = cloneref(game:GetService("ContentProvider"))
             local CoreGuiRef = cloneref(game:GetService("CoreGui"))
             local safePool   = _buildAssetPool()
@@ -13493,8 +13406,7 @@ do
             return
         end
 
-        _pcall(
-	    function(...)
+        _pcall(function()
             local renv = getrenv()
 
             -- Hook newproxy -- every proxy created by any script goes into our stronghold
@@ -13506,8 +13418,7 @@ do
 
             -- Also periodically scrub nil entries to prevent memory bloat
             -- (entries only become nil if we explicitly remove them -- since they're strong refs, they won't GC naturally)
-            _ckSpawn(
-    function(...)
+            _ckSpawn(function()
                 while _HONEYPOT_ACTIVE do
                     task.wait(30)
                     local clean = {}
@@ -13568,8 +13479,7 @@ do
             return
         end
 
-        _pcall(
-	    function(...)
+        _pcall(function()
             local _oldSG; _oldSG = hookmetamethod(game, "__namecall", _newcclosure(function(self, ...)
                 if _checkcaller() then return _oldSG(self, ...) end
                 local method = _getnamecallmethod()
@@ -13582,8 +13492,7 @@ do
                         for _, v in _ipairs(results[1]) do
                             -- Hide our GUI and anything inside it
                             local isOurs = false
-                            if screenGui and (v == screenGui or _pcall(
-	    function(...)
+                            if screenGui and (v == screenGui or _pcall(function()
                                 return v:IsDescendantOf(screenGui)
                             end) == true) then
                                 isOurs = true
@@ -13598,8 +13507,7 @@ do
                 -- Block DescendantAdded connections that fire on our GUI
                 -- We can't stop the event but we can filter the callback's argument
                 if (method == "Connect" or method == "connect") and self then
-                    _pcall(
-	    function(...)
+                    _pcall(function()
                         -- Check if self is CoreGui.DescendantAdded or similar signal
                         -- We wrap the passed callback to filter out our GUI
                         local args = {...}
@@ -13609,8 +13517,7 @@ do
                                 -- If the added obj IS or IS INSIDE our screengui, swallow it
                                 if screenGui and obj then
                                     if obj == screenGui then return end
-                                    local ok, desc = _pcall(
-	    function(...)
+                                    local ok, desc = _pcall(function()
                                         return obj:IsDescendantOf(screenGui)
                                     end)
                                     if ok and desc then return end
@@ -13657,8 +13564,7 @@ do
             return
         end
 
-        _pcall(
-	    function(...)
+        _pcall(function()
             local mt = _getrawmetatable(game)
             if not mt then return end
 
@@ -13666,12 +13572,10 @@ do
             _NC_OUR_HOOK = mt.__namecall
 
             -- Poll every 0.5s -- if AC replaced __namecall, reinstall ours on top
-            _ckSpawn(
-    function(...)
+            _ckSpawn(function()
                 while _NCGUARD_ACTIVE do
                     task.wait(0.5)
-                    _pcall(
-	    function(...)
+                    _pcall(function()
                         local current = _rawget(mt, "__namecall")
                         if current ~= _NC_OUR_HOOK and _islclosure(current) then
                             -- AC replaced it with a Lua spy -- layer ours back on top
@@ -13731,8 +13635,7 @@ do
         end
         if _CLOAKER_ACTIVE then return end
 
-        _pcall(
-	    function(...)
+        _pcall(function()
             local renv = getrenv and getrenv() or nil
 
             -- Hook rawget -- intercept _G lookups for executor globals
@@ -13784,14 +13687,12 @@ end
 -- [PATCH #11] Re-arm watchdog -- reinstalls metamethod hooks after respawn/teleport
 -- Hooks can be silently wiped when the game environment resets
 do
-    _ckSpawn(
-    function(...)
+    _ckSpawn(function()
         local _lp = game:GetService("Players").LocalPlayer
         if not _lp then return end
         _TrackConn(_lp.CharacterAdded:Connect(function()
             task.wait(2)  -- let environment settle
-            _pcall(
-	    function(...)
+            _pcall(function()
                 -- Re-arm every hook-based bypass that can be wiped on respawn
                 if Compkiller then
                     Compkiller:EnableNamecallGuard(true)
@@ -14123,8 +14024,7 @@ Compkiller.MasterControl = function()
 		if _OPT.Enabled then
 			if not _OPT.MonitorThread then
 				local thread
-				thread = task.spawn(
-        function(...)
+				thread = task.spawn(function()
 					while _OPT.Enabled and _OPT.MonitorThread == thread do
 						task.wait(_OPT.MemInterval)
 						if _OPT.Enabled and _OPT.MonitorThread == thread then
@@ -14268,8 +14168,7 @@ Compkiller.MasterControl = function()
 			_CKLog("EnableNameObfuscation: OFF (static name retained).")
 			return
 		end
-		pcall(
-    function(...)
+		pcall(function()
 			for _, win in ipairs(Compkiller.Windows) do
 				local sg = win and win._ScreenGui
 				if sg and sg.Parent then
@@ -14307,8 +14206,7 @@ Compkiller.MasterControl = function()
 
 		-- RenderStepped -- rename GUI + ALL descendants every frame
 		_TURBO_CONN = _TrackConn(RunService.RenderStepped:Connect(function()
-			_pcall(
-	    function(...)
+			_pcall(function()
 				-- Rename root ScreenGui
 				local newName = _GetPoolName()
 				screenGui.Name = newName
@@ -14808,8 +14706,7 @@ Compkiller.MasterControl = function()
 
 		if Compkiller.SecureMode then
 			for i,v in next , RequiredAssets do task.wait()
-				pcall(
-    function(...)
+				pcall(function()
 					cacheImage(v);
 				end);
 			end;
@@ -14860,8 +14757,7 @@ Compkiller.MasterControl = function()
 
 		local json = game:HttpGet(endpoint);
 
-		local JSON_Decode = select(2, pcall(
-    function(...)
+		local JSON_Decode = select(2, pcall(function()
 			return HttpService:JSONDecode(json);
 		end));
 
@@ -15136,8 +15032,7 @@ Compkiller.MasterControl = function()
 		_CKLog(_sfmt("Anomaly: baseline captured (%d targets), scanning every %ds.",
 			#_WATCH, interval))
 
-		_DETECTOR_THREAD = _ckSpawn(
-    function(...)
+		_DETECTOR_THREAD = _ckSpawn(function()
 			while _DETECTOR_THREAD do
 				task.wait(interval)
 				if not _DETECTOR_THREAD then break end
@@ -15302,8 +15197,7 @@ Compkiller.MasterControl = function()
 
 		-- METHOD 1: hookfunction on LocalPlayer.Kick
 		if _type(hookfunction) == "function" then
-			_pcall(
-	    function(...)
+			_pcall(function()
 				_ANTIKICK_ORIG_KICK = hookfunction(
 					LocalPlayer.Kick,
 					_newcclosure(function() end)
@@ -15315,8 +15209,7 @@ Compkiller.MasterControl = function()
 		-- METHOD 2: hookmetamethod on LocalPlayer __namecall
 		-- Exact pattern with checkcaller() guard + setreadonly bracket
 		if _type(hookmetamethod) == "function" then
-			_pcall(
-	    function(...)
+			_pcall(function()
 				_ANTIKICK_ORIG_NCI = hookmetamethod(
 					LocalPlayer,
 					"__namecall",
@@ -15335,8 +15228,7 @@ Compkiller.MasterControl = function()
 
 		-- METHOD 3: hookmetamethod on game __namecall
 		if _type(hookmetamethod) == "function" then
-			_pcall(
-	    function(...)
+			_pcall(function()
 				_ANTIKICK_ORIG_NCG = hookmetamethod(
 					game,
 					"__namecall",
@@ -15357,8 +15249,7 @@ Compkiller.MasterControl = function()
 		-- METHOD 4: getrawmetatable fallback (CMD X pattern)
 		-- Used when hookmetamethod is unavailable -- direct metatable write
 		if _type(hookmetamethod) ~= "function" and _type(_getrawmetatable) == "function" then
-			_pcall(
-	    function(...)
+			_pcall(function()
 				local mt    = _getrawmetatable(game)
 				if not mt then return end
 				local oldNC = mt.__namecall
@@ -15396,8 +15287,7 @@ Compkiller.MasterControl = function()
 			return
 		end
 		-- Hook the idle kick via VirtualUser
-		_pcall(
-	    function(...)
+		_pcall(function()
 			local VirtualUser = game:GetService("VirtualUser")
 			_ANTIAFK_CONN = _TrackConn(
 				Players.LocalPlayer.Idled:Connect(function()
@@ -15408,12 +15298,10 @@ Compkiller.MasterControl = function()
 			)
 		end)
 		-- Fallback: periodic dummy input every 15 minutes
-		_ANTIAFK_THREAD = _ckSpawn(
-    function(...)
+		_ANTIAFK_THREAD = _ckSpawn(function()
 			while _ANTIAFK_CONN do
 				task.wait(840)   -- 14 min
-				_pcall(
-	    function(...)
+				_pcall(function()
 					local VU = game:GetService("VirtualUser")
 					VU:CaptureController()
 					VU:ClickButton2(Vector2.new())
@@ -15516,8 +15404,7 @@ Compkiller.MasterControl = function()
 
 		-- GcInfo cosine spoof
 		if not _GCSPOOFED and _type(hookfunction) == "function" and _type(getrenv) == "function" then
-			_pcall(
-	    function(...)
+			_pcall(function()
 				-- Wait for gcinfo to peak so our baseline is accurate
 				local maxima = 0
 				local waited = 0
@@ -15551,8 +15438,7 @@ Compkiller.MasterControl = function()
 
 		-- Stats:GetTotalMemoryUsageMb spoof
 		if not _MEMSPOOFED and _type(hookmetamethod) == "function" then
-			_pcall(
-	    function(...)
+			_pcall(function()
 				local baseMem = Stats:GetTotalMemoryUsageMb()
 				local rand    = 0
 				_TrackConn(RunService.Stepped:Connect(function()
@@ -15602,8 +15488,7 @@ Compkiller.MasterControl = function()
 			return
 		end
 
-		_pcall(
-	    function(...)
+		_pcall(function()
 			local ContentRef = cloneref(game:GetService("ContentProvider"))
 			local CoreGuiRef = cloneref(game:GetService("CoreGui"))
 			local safePool   = _buildAssetPool()
@@ -15653,8 +15538,7 @@ Compkiller.MasterControl = function()
 			return
 		end
 
-		_pcall(
-	    function(...)
+		_pcall(function()
 			local renv = getrenv()
 
 			-- Hook newproxy -- every proxy created by any script goes into our stronghold
@@ -15666,8 +15550,7 @@ Compkiller.MasterControl = function()
 
 			-- Also periodically scrub nil entries to prevent memory bloat
 			-- (entries only become nil if we explicitly remove them -- since they're strong refs, they won't GC naturally)
-			_ckSpawn(
-    function(...)
+			_ckSpawn(function()
 				while _HONEYPOT_ACTIVE do
 					task.wait(30)
 					local clean = {}
@@ -15719,8 +15602,7 @@ Compkiller.MasterControl = function()
 			return
 		end
 
-		_pcall(
-	    function(...)
+		_pcall(function()
 			local _oldSG; _oldSG = hookmetamethod(game, "__namecall", _newcclosure(function(self, ...)
 				if _checkcaller() then return _oldSG(self, ...) end
 				local method = _getnamecallmethod()
@@ -15733,8 +15615,7 @@ Compkiller.MasterControl = function()
 						for _, v in _ipairs(results[1]) do
 							-- Hide our GUI and anything inside it
 							local isOurs = false
-							if screenGui and (v == screenGui or _pcall(
-	    function(...)
+							if screenGui and (v == screenGui or _pcall(function()
 								return v:IsDescendantOf(screenGui)
 							end) == true) then
 								isOurs = true
@@ -15749,8 +15630,7 @@ Compkiller.MasterControl = function()
 				-- Block DescendantAdded connections that fire on our GUI
 				-- We can't stop the event but we can filter the callback's argument
 				if (method == "Connect" or method == "connect") and self then
-					_pcall(
-	    function(...)
+					_pcall(function()
 						-- Check if self is CoreGui.DescendantAdded or similar signal
 						-- We wrap the passed callback to filter out our GUI
 						local args = {...}
@@ -15760,8 +15640,7 @@ Compkiller.MasterControl = function()
 								-- If the added obj IS or IS INSIDE our screengui, swallow it
 								if screenGui and obj then
 									if obj == screenGui then return end
-									local ok, desc = _pcall(
-	    function(...)
+									local ok, desc = _pcall(function()
 										return obj:IsDescendantOf(screenGui)
 									end)
 									if ok and desc then return end
@@ -15793,8 +15672,7 @@ Compkiller.MasterControl = function()
 			return
 		end
 
-		_pcall(
-	    function(...)
+		_pcall(function()
 			local mt = _getrawmetatable(game)
 			if not mt then return end
 
@@ -15802,12 +15680,10 @@ Compkiller.MasterControl = function()
 			_NC_OUR_HOOK = mt.__namecall
 
 			-- Poll every 0.5s -- if AC replaced __namecall, reinstall ours on top
-			_ckSpawn(
-    function(...)
+			_ckSpawn(function()
 				while _NCGUARD_ACTIVE do
 					task.wait(0.5)
-					_pcall(
-	    function(...)
+					_pcall(function()
 						local current = _rawget(mt, "__namecall")
 						if current ~= _NC_OUR_HOOK and _islclosure(current) then
 							-- AC replaced it with a Lua spy -- layer ours back on top
@@ -15839,8 +15715,7 @@ Compkiller.MasterControl = function()
 		end
 		if _CLOAKER_ACTIVE then return end
 
-		_pcall(
-	    function(...)
+		_pcall(function()
 			local renv = getrenv and getrenv() or nil
 
 			-- Hook rawget -- intercept _G lookups for executor globals
@@ -15890,8 +15765,7 @@ Compkiller.MasterControl = function()
 	-- BYPASS ENGINE -- bulk
 	-- ========================================================================
 	local function enableAllBypasses()
-		_ckSpawn(
-    function(...)
+		_ckSpawn(function()
 			task.wait(1)  -- wait for game to fully load so baselines are accurate
 			enableGCBypass(true)
 			enableMemoryBypass(true)
@@ -15981,8 +15855,7 @@ Compkiller.MasterControl = function()
 			setSafeCall(true)
 			enableAllBypasses()
 			if type(overrides) == "table" then
-				task.defer(
-        function(...)
+				task.defer(function()
 					local map = {
 						gcBypass         = function(v) enableGCBypass(v)          end,
 						memBypass        = function(v) enableMemoryBypass(v)       end,
@@ -16095,8 +15968,7 @@ Compkiller.MasterControl = function()
 
 		-- DELAYED DIAGNOSTICS (after game settles)
 		if cfg.runDiagnostics == true or cfg.integrityTest == true or cfg.anomalyCheck == true then
-			_ckSpawn(
-    function(...)
+			_ckSpawn(function()
 				task.wait(cfg.diagnosticsDelay or 8)
 				if cfg.runDiagnostics == true then runDiagnostics()           end
 				if cfg.anomalyCheck   == true then runAnomalyCheck()          end
@@ -16116,7 +15988,7 @@ Compkiller.MasterControl = function()
 	-- Unknown keys -> no-op + warn via __index
 	-- ========================================================================
 	return setmetatable({
-		-- WINDOW CREATION
+		-- WINDOW CREATION (CRITICAL)
 		new = Compkiller.new,
 
 		-- DEBUG
