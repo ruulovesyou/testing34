@@ -1,8 +1,4 @@
--- ============================================================================
---  EXECUTOR COMPATIBILITY SHIM  --  normalises environment BEFORE anything runs
---  Supports: Synapse X, Synapse V3, KRNL, Fluxus, Delta, Solara, Electron,
---            Celery, Nihon, Comet, Velocity, Hydrogen, Arceus X, and others.
--- ============================================================================
+print("run")
 do
     -- -- unpack (table.unpack is Lua 5.2+, some executors only have global unpack) --
     if type(table.unpack) ~= "function" then
@@ -310,10 +306,13 @@ local CoreGui       = game:GetService("CoreGui")
 local Players       = game:GetService("Players")
 local LocalPlayer   = Players.LocalPlayer
 local PlayerGui     = LocalPlayer:FindFirstChild("PlayerGui")
+pcall(function()
+    math.randomseed(os.time() or tick())
+    math.random() math.random() -- Warm up
+end)
 
--- [PATCH #2] Session-randomised GUI tag -- static "__rbxCoreInst" replaced
--- Each run generates a unique hex tag so AC :GetAttribute() scans always miss
-local _CK_GUI_TAG = "__ck_" .. string.format("%08x", math.random(0, 0xFFFFFFFF))
+local _CK_GUI_TAG = "__ck_" .. string.format("%08x", math.random(1, 2147483647))
+
 local _CK_LEGACY_NAMES = {}
 
 -- [PATCH #5] Suppress CK console fingerprint from non-executor readers
