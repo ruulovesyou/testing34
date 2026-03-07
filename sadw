@@ -868,10 +868,7 @@ local _OPT = {
     ActiveTweens   = {},
     ActiveTweenMap = {},
     MonitorThread  = nil,
-    SmartAnimThread = nil,    -- smart animation monitor thread
     _DummyTween    = nil,     -- set at bottom of file; shared stub for instant-set returns
-    _AnimThrottled = false,   -- whether animations are currently throttled due to FPS
-    _AnimPaused    = false,   -- whether animations are manually paused
     Stats = { TweensCancelled = 0, InstantSets = 0, DedupCancels = 0, MemorySweeps = 0, LastSweepAt = 0 },
 }
 
@@ -14018,38 +14015,6 @@ Compkiller.MasterControl = function()
 	-- ========================================================================
 	local function setSmartAnimations(enabled)
 		_OPT.Enabled = (enabled == true)
-		
-		if _OPT.Enabled then
-			-- Start smart animation monitor thread
-			if not _OPT.SmartAnimThread then
-				local thread
-				thread = task.spawn(function()
-					while _OPT.Enabled and _OPT.SmartAnimThread == thread do
-						task.wait(0.25) -- Monitor FPS every 250ms
-						
-						-- Get current FPS
-						local currentFPS = getFPS()
-						
-						-- Throttle animations if FPS drops below threshold
-						if currentFPS < _OPT.AnimThreshold then
-							_OPT._AnimThrottled = true
-						else
-							_OPT._AnimThrottled = false
-						end
-					end
-					if _OPT.SmartAnimThread == thread then
-						_OPT.SmartAnimThread = nil
-					end
-				end)
-				_OPT.SmartAnimThread = thread
-				_TrackThread(thread)
-			end
-		else
-			-- Stop smart animation monitor thread
-			_OPT.SmartAnimThread = nil
-			_OPT._AnimThrottled = false
-		end
-		
 		_CKLog("SetSmartAnimations: " .. (_OPT.Enabled and "ENABLED" or "DISABLED") .. " | Threshold=" .. _OPT.AnimThreshold .. "fps")
 		return _OPT.Enabled
 	end
@@ -16023,6 +15988,9 @@ Compkiller.MasterControl = function()
 	-- Unknown keys -> no-op + warn via __index
 	-- ========================================================================
 	return setmetatable({
+		-- WINDOW CREATION (CRITICAL - WAS MISSING!)
+		new                     = Compkiller.new,
+
 		-- DEBUG
 		debug                   = setDebug,
 		dumpStats               = dumpStats,
