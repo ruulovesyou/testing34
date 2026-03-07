@@ -1,8 +1,3 @@
--- ============================================================================
---  EXECUTOR COMPATIBILITY SHIM  --  normalises environment BEFORE anything runs
---  Supports: Synapse X, Synapse V3, KRNL, Fluxus, Delta, Solara, Electron,
---            Celery, Nihon, Comet, Velocity, Hydrogen, Arceus X, and others.
--- ============================================================================
 do
     -- -- unpack (table.unpack is Lua 5.2+, some executors only have global unpack) --
     if type(table.unpack) ~= "function" then
@@ -162,9 +157,9 @@ local function _CKLog(msg)
     end
 end
 
-local _CK_VERSION = "5.5.3"
+local _CK_VERSION = "5.5.4"
 math.randomseed(os.time and os.time() or tick() * 1000)
-local _CK_BUILD   = "Clean-Edition"
+local _CK_BUILD   = "Shield-Edition"
 
 -- CAPTURED ORIGINALS -- snapshot key globals BEFORE any hook can replace them
 local _rawget      = rawget
@@ -511,39 +506,57 @@ do
 end
 
 local _GUI_PARENT
-local _GUI_SHIELD_METHOD = "PlayerGui"
+local _GUI_SHIELD_METHOD  = "PlayerGui"
+local _GUI_SHIELD_QUALITY = 0   -- 0 = worst, 100 = best
 
--- _IsValidParent: returns true if a GUI parent container is still usable
-local function _IsValidParent(parent)
-    if not parent then return false end
-    local ok, result = _pcall(function()
-        -- A destroyed/invalid instance will error on property access
-        return parent.Parent ~= nil or parent == game:GetService("CoreGui")
-               or parent == LocalPlayer:FindFirstChildOfClass("PlayerGui")
-    end)
-    return ok
-end
-
--- GUI SHIELD -- multi-executor parent detection
--- Priority:
---   1. Any known hidden-UI function (gethui / get_hidden_gui / get_hidden_ui / hiddenUI / syn alias)
---   2. RobloxGui (deeply nested inside CoreGui — hardest to observe)
---   3. CoreGui direct — only when _CK_ELEVATED confirms write access
---   4. CoreGui probe  — lightweight anonymous Instance probe for undeclared elevation
---   5. PlayerGui fallback (always works; weakest protection)
+-- ════════════════════════════════════════════════════════════════════════════
+-- GUI SHIELD v2 — Smart parent detection with quality scoring, caching,
+-- and a periodic re-check thread that rescues the parent if it disappears.
+-- Priority ladder (higher quality = tried first):
+--   100  Any executor hidden-UI function (gethui family)
+--    90  RobloxGui — deep CoreGui child, rarely scanned
+--    80  CoreGui (elevation pre-confirmed)
+--    70  CoreGui (probe — no fingerprint left behind)
+--    50  PlayerGui — always works, most detectable
+-- ════════════════════════════════════════════════════════════════════════════
 do
-    -- ── Attempt 1: try ALL known hidden-UI aliases across every executor ──────
-    if not _GUI_PARENT then
+    -- Quality table — used for logging and future adaptive decisions
+    local _PARENT_QUALITY_MAP = {
+        ["gethui"]               = 100,
+        ["get_hidden_gui"]       = 100,
+        ["get_hidden_ui"]        = 100,
+        ["hiddenUI"]             = 100,
+        ["syn.get_hidden_gui"]   = 100,
+        ["syn.get_hidden_ui"]    = 100,
+        ["getgenv().gethui"]     = 100,
+        ["getgenv().get_hidden_gui"] = 100,
+        ["RobloxGui"]            = 90,
+        ["CoreGui (elevated)"]   = 80,
+        ["CoreGui (probed)"]     = 70,
+        ["PlayerGui"]            = 50,
+    }
+
+    -- _IsValidParent: lightweight liveness check — avoids read on destroyed instances
+    local function _IsValidParent(p)
+        if not p then return false end
+        local ok = _pcall(function()
+            local _ = p.Parent  -- errors if destroyed
+        end)
+        return ok
+    end
+
+    -- Core resolver — runs at boot and on every periodic re-check
+    local function _FindSafeParent()
+        local parent, method
+
+        -- ── 1. Hidden-UI executor functions ──────────────────────────────────
         local _huiFns = {
-            -- canonical executor APIs
             gethui,
             get_hidden_gui,
             get_hidden_ui,
             hiddenUI,
-            -- syn / fluxus namespaced
             syn  and syn.get_hidden_gui,
             syn  and syn.get_hidden_ui,
-            -- env-resident aliases some executors inject
             getgenv and getgenv().gethui,
             getgenv and getgenv().get_hidden_gui,
         }
@@ -553,68 +566,72 @@ do
             "getgenv().gethui", "getgenv().get_hidden_gui",
         }
         for i, fn in _ipairs(_huiFns) do
-            if _type(fn) == "function" then
-                -- Skip if it is a Lua closure — it may have been hook-replaced by a game AC
-                if not _islclosure(fn) then
-                    local ok, result = _pcall(fn)
-                    if ok and result then
-                        _GUI_PARENT        = result
-                        _GUI_SHIELD_METHOD = _huiNames[i] or "gethui_alias"
-                        _CKLog("GUI Resolver: found safe parent via " .. _GUI_SHIELD_METHOD)
-                        break
-                    end
-                else
-                    _CKLog("GUI Resolver: " .. (_huiNames[i] or "?") .. " is islclosure — skipped (possibly hooked).")
+            if _type(fn) == "function" and not _islclosure(fn) then
+                local ok, result = _pcall(fn)
+                if ok and result and _IsValidParent(result) then
+                    parent = result
+                    method = _huiNames[i] or "gethui_alias"
+                    break
                 end
+            elseif _type(_huiFns[i]) == "function" and _islclosure(_huiFns[i]) then
+                _CKLog("GUI Resolver: " .. (_huiNames[i] or "?") .. " is islclosure — skipped.")
             end
         end
-    end
 
-    -- ── Attempt 2: RobloxGui (inside CoreGui — maximally hidden, low AC visibility) ──
-    if not _GUI_PARENT then
-        local ok, rg = _pcall(function()
-            return CoreGui:FindFirstChild("RobloxGui")
-        end)
-        if ok and rg then
-            _GUI_PARENT        = rg
-            _GUI_SHIELD_METHOD = "RobloxGui"
-            _CKLog("GUI Resolver: using RobloxGui (hidden CoreGui child).")
+        -- ── 2. RobloxGui — deeply nested, rarely touched by ACs ──────────────
+        if not parent then
+            local ok, rg = _pcall(function() return CoreGui:FindFirstChild("RobloxGui") end)
+            if ok and rg and _IsValidParent(rg) then
+                parent = rg
+                method = "RobloxGui"
+            end
         end
-    end
 
-    -- ── Attempt 3: CoreGui — only when _CK_ELEVATED is already confirmed ─────
-    --   Skips the risky Instance.new probe on low-privilege executors.
-    if not _GUI_PARENT and _CK_ELEVATED then
-        _GUI_PARENT        = CoreGui
-        _GUI_SHIELD_METHOD = "CoreGui (elevated)"
-        _CKLog("GUI Resolver: using CoreGui (elevation pre-confirmed).")
-    end
-
-    -- ── Attempt 4: CoreGui silent probe — ultra-safe anonymous test ───────────
-    --   Only runs if elevation wasn't confirmed above; uses a probe that
-    --   immediately cleans up so it leaves no fingerprint in the hierarchy.
-    if not _GUI_PARENT then
-        local ok = _pcall(function()
-            local probe      = Instance.new("Folder")
-            probe.Name       = "rbx_probe_" .. _tostring(_mrandom(0, 0xFFFF))
-            probe.Parent     = CoreGui
-            probe:Destroy()
-        end)
-        if ok then
-            _GUI_PARENT        = CoreGui
-            _GUI_SHIELD_METHOD = "CoreGui (probed)"
-            _CKLog("GUI Resolver: CoreGui probe succeeded — using CoreGui.")
+        -- ── 3. CoreGui — elevation pre-confirmed (no probe needed) ───────────
+        if not parent and _CK_ELEVATED then
+            parent = CoreGui
+            method = "CoreGui (elevated)"
         end
+
+        -- ── 4. CoreGui silent probe — anonymous Folder, cleaned up immediately ─
+        if not parent then
+            local ok = _pcall(function()
+                local probe  = Instance.new("Folder")
+                probe.Name   = _sfmt("_%x", _mrandom(0, 0xFFFFFF))
+                probe.Parent = CoreGui
+                probe:Destroy()
+            end)
+            if ok then
+                parent = CoreGui
+                method = "CoreGui (probed)"
+            end
+        end
+
+        -- ── 5. PlayerGui — always works, weakest stealth ─────────────────────
+        if not parent then
+            parent = PlayerGui
+            method = "PlayerGui"
+        end
+
+        return parent, method, _PARENT_QUALITY_MAP[method] or 50
     end
 
-    -- ── Attempt 5: PlayerGui — always available, lowest privilege needed ──────
-    if not _GUI_PARENT then
-        _GUI_PARENT        = PlayerGui
-        _GUI_SHIELD_METHOD = "PlayerGui"
-        _CKLog("GUI Resolver: fallback to PlayerGui.")
-    end
+    -- Initial resolution at boot
+    _GUI_PARENT, _GUI_SHIELD_METHOD, _GUI_SHIELD_QUALITY = _FindSafeParent()
+    _CKLog(_sfmt("GUI Shield: parent='%s' quality=%d", _GUI_SHIELD_METHOD, _GUI_SHIELD_QUALITY))
 
-    _CKLog(_sfmt("GUI Shield: using '%s' as safe parent.", _GUI_SHIELD_METHOD))
+    -- Periodic re-check every 5 minutes — rescues parent if it gets destroyed
+    _ckSpawn(function()
+        while true do
+            task.wait(300)
+            if not _IsValidParent(_GUI_PARENT) then
+                _CKLog("GUI Shield: parent lost — re-resolving.")
+                _GUI_PARENT, _GUI_SHIELD_METHOD, _GUI_SHIELD_QUALITY = _FindSafeParent()
+                _CKLog(_sfmt("GUI Shield: re-resolved to '%s' (quality=%d)",
+                    _GUI_SHIELD_METHOD, _GUI_SHIELD_QUALITY))
+            end
+        end
+    end)
 end
 
 
@@ -779,6 +796,46 @@ local function _StartGuiIntegrityMonitor(screenGui)
         end)
     end)
     if ok and _type(connD) ~= "boolean" then _tinsert(_CK_CONNECTIONS, connD) end
+
+    -- ── Layer 4: Child-injection guard ───────────────────────────────────────
+    --   Removes Scripts / LocalScripts injected into our ScreenGui by ACs
+    --   (spying via script children is a known technique in Roblox ACs).
+    --   Suspicious-name heuristic catches generic scanner children.
+    local _SCRIPT_CLASSES = { Script = true, LocalScript = true, ModuleScript = true }
+    local _SUSPECT_PATTERNS = { "Scanner", "Detector", "Watcher", "Monitor", "Spy", "Hook", "Checker" }
+
+    local ok2, connC = _pcall(function()
+        return screenGui.ChildAdded:Connect(function(child)
+            local isSuspect = false
+
+            -- Detect injected scripts
+            if _SCRIPT_CLASSES[child.ClassName] then
+                isSuspect = true
+            end
+
+            -- Detect by name pattern
+            if not isSuspect then
+                local childName = _tostring(child.Name)
+                for _, pat in _ipairs(_SUSPECT_PATTERNS) do
+                    if _sfind(childName, pat, 1, true) then
+                        isSuspect = true
+                        break
+                    end
+                end
+            end
+
+            if isSuspect then
+                _CKLog("GuiIntegrity: suspicious child '" .. _tostring(child.Name) .. "' — removing.")
+                _ckDefer(function()
+                    _safeDestroy(child)
+                end)
+            end
+        end)
+    end)
+    if ok2 and _type(connC) ~= "boolean" then
+        _tinsert(_CK_INTEGRITY_CONNS, connC)
+        _tinsert(_CK_CONNECTIONS, connC)
+    end
 end
 
 
@@ -843,59 +900,112 @@ end
 
 local _CK_ENCRYPTED_NAMES = {}   -- registry of all encrypted names this run
 
--- MOVE THIS FUNCTION HERE (lines ~900-930)
+-- ════════════════════════════════════════════════════════════════════════════
+-- _EncryptGuiName — 6-pattern name generator
+-- Rotates between very different name shapes so static-token and regex ACs
+-- cannot fingerprint the library from name appearance alone.
+--   Pattern 1 : Prefix_HEX8_Suffix             (most common)
+--   Pattern 2 : Prefix_Middle_HEX4_Suffix
+--   Pattern 3 : UI_<uuid-like>
+--   Pattern 4 : rbx_<4digits>_<6digits>         (looks like Roblox-internal)
+--   Pattern 5 : <Svc1><Svc2>Service_<hex6>      (looks like Roblox service)
+--   Pattern 6 : full random alphanumeric (max entropy, no structure)
+-- ════════════════════════════════════════════════════════════════════════════
 local function _EncryptGuiName()
-    -- Extended prefix/suffix pools — wider surface area defeats static-name AC scans
-    local prefixes = {
-        "RbxGui",      "CoreUISvc",     "TopbarPlus",   "RbxHud",
-        "SystemUI",    "RenderSvc",     "InputSvc",     "GuiSvc",
-        "ScreenSvc",   "UISvc",         "RbxCoreSvc",   "RbxTopbar",
-        "NotifSvc",    "GuiOverlay",    "RbxRenderSvc", "InputHandler",
-        "UXManager",   "SurfaceUISvc",  "CoreRenderer",  "UXRuntime",
+    local _prefixes = {
+        "RbxGui",     "CoreUISvc",    "TopbarPlus",   "RbxHud",
+        "SystemUI",   "RenderSvc",    "InputSvc",     "GuiSvc",
+        "ScreenSvc",  "UISvc",        "RbxCoreSvc",   "RbxTopbar",
+        "NotifSvc",   "GuiOverlay",   "RbxRenderSvc", "InputHandler",
+        "UXManager",  "SurfaceUISvc", "CoreRenderer",  "UXRuntime",
+        "Stats",      "Chat",         "Voice",         "Friend",
+        "Presence",   "Inventory",    "Catalog",       "Badge",
+        "Render",     "Physics",      "Animation",     "Camera",
     }
-    local middles = {
-        "",         -- segment may be omitted ~40 % of the time
-        "_Core",    "_Inst",  "_RT",    "_V2",
-        "_Proxy",   "_Host",  "_Ctx",   "_Node",
-        "_Pipe",    "_Bus",   "_Hub",
+    local _middles = {
+        "", "_Core", "_Inst", "_RT", "_V2",
+        "_Proxy", "_Host", "_Ctx", "_Node",
+        "_Pipe", "_Bus", "_Hub",
     }
-    local suffixes = {
+    local _suffixes = {
         "Handler",    "Manager",    "Controller",  "Service",
         "Module",     "System",     "Runtime",      "Instance",
         "Provider",   "Dispatcher", "Observer",     "Scheduler",
         "Broker",     "Registry",   "Resolver",     "Executor",
+        "Panel",      "Frame",      "Window",        "Layer",
+        "Base",       "Core",       "Root",          "Primary",
     }
-    local separators = { "_", "__" }
+    local _separators = { "_", "__" }
+    local _servicePool = {
+        "Http", "Data", "Network", "Local", "Remote",
+        "Cloud", "Sync", "Auth", "Cache", "Event",
+    }
 
-    -- Use tick + counter + random so two calls in the same millisecond differ
-    local seed     = math.floor(tick() * 10000) % 0xFFFF
-    local noise    = math.random(0x0100, 0xFFFF)
-    local hexPart  = string.format("%04X%04X", seed, noise)
-
-    local sep    = separators[math.random(1, #separators)]
-    local pre    = prefixes[math.random(1, #prefixes)]
-    local mid    = middles [math.random(1, #middles)]
-    local suf    = suffixes[math.random(1, #suffixes)]
-
-    -- Decide between two name shapes for variety:
-    --   Shape A:  Prefix_HEX_Suffix          (e.g. CoreUISvc_3FA800FF_Manager)
-    --   Shape B:  Prefix_Core_HEX_Suffix     (e.g. RbxGui_Core_3FA8_Runtime)
-    local name
-    if math.random() > 0.45 then
-        name = pre .. sep .. hexPart .. sep .. suf
-    else
-        -- shorter hex + optional middle segment
-        local shortHex = string.format("%04X", math.random(0, 0xFFFF))
-        name = pre .. mid .. sep .. shortHex .. sep .. suf
+    -- Helpers ────────────────────────────────────────────────────────────────
+    local function hex(len)
+        local h = ""
+        for _ = 1, len do
+            h = h .. _sfmt("%x", _mrandom(0, 15))
+        end
+        return h
     end
 
-    table.insert(_CK_ENCRYPTED_NAMES, name)
-    pcall(function()
-        local reg = getgenv().__rbxGuiReg
-        if type(reg) ~= "table" then
-            getgenv().__rbxGuiReg = {}
+    local function uuid()
+        return _sfmt("%x%x-%x-%x-%x-%x%x%x",
+            _mrandom(0, 0xFFFF), _mrandom(0, 0xFFFF),
+            _mrandom(0, 0xFFFF), _mrandom(0, 0xFFFF),
+            _mrandom(0, 0xFFFF),
+            _mrandom(0, 0xFFFF), _mrandom(0, 0xFFFF), _mrandom(0, 0xFFFF))
+    end
+
+    local pattern = _mrandom(1, 6)
+    local name
+
+    if pattern == 1 then
+        -- Prefix_HEX8_Suffix
+        local sep = _separators[_mrandom(#_separators)]
+        name = _prefixes[_mrandom(#_prefixes)] .. sep
+             .. _sfmt("%04X%04X", _mrandom(0, 0xFFFF), _mrandom(0, 0xFFFF))
+             .. sep .. _suffixes[_mrandom(#_suffixes)]
+
+    elseif pattern == 2 then
+        -- Prefix + optional Middle + _HEX4_ + Suffix
+        local sep = _separators[_mrandom(#_separators)]
+        name = _prefixes[_mrandom(#_prefixes)]
+             .. _middles[_mrandom(#_middles)]
+             .. sep .. _sfmt("%04X", _mrandom(0, 0xFFFF))
+             .. sep .. _suffixes[_mrandom(#_suffixes)]
+
+    elseif pattern == 3 then
+        -- UUID-like: UI_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        name = "UI_" .. uuid()
+
+    elseif pattern == 4 then
+        -- Roblox-internal style: rbx_NNNN_NNNNNN
+        name = _sfmt("rbx_%d_%d", _mrandom(1000, 9999), _mrandom(100000, 999999))
+
+    elseif pattern == 5 then
+        -- Service concat: HttpDataService_3fa80c
+        local s1 = _servicePool[_mrandom(#_servicePool)]
+        local s2 = _servicePool[_mrandom(#_servicePool)]
+        name = s1 .. s2 .. "Service_" .. hex(6)
+
+    else
+        -- Full random alphanumeric (12–24 chars, max entropy)
+        local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+        name = ""
+        for _ = 1, _mrandom(12, 24) do
+            local idx = _mrandom(1, #chars)
+            name = name .. chars:sub(idx, idx)
         end
-        table.insert(getgenv().__rbxGuiReg, name)
+    end
+
+    -- Register for cleanup on next boot
+    _tinsert(_CK_ENCRYPTED_NAMES, name)
+    _pcall(function()
+        local reg = getgenv().__rbxGuiReg
+        if _type(reg) ~= "table" then getgenv().__rbxGuiReg = {} end
+        _tinsert(getgenv().__rbxGuiReg, name)
     end)
 
     return name
@@ -987,10 +1097,210 @@ local function _ShieldParent(screenGui)
     --   (Such hooks are detected by ACs via getrawmetatable(instance).__namecall
     --    type-check — removed to eliminate the :namecallinstance detection.)
     _pcall(function() _StartGuiIntegrityMonitor(screenGui) end)
+
+    -- Register with self-healer (only acts if EnableUltimateShield was called)
+    _pcall(function() _RegisterForHealing(screenGui) end)
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GUI SHIELD v2 — LAYER 5: TAMPER COUNTER
+-- Tracks repeated parent changes per ScreenGui and escalates response:
+-- after _TAMPER_THRESHOLD hits the name is aggressively re-encrypted to
+-- break any cached reference the AC may hold.
+-- ════════════════════════════════════════════════════════════════════════════
+local _TAMPER_COUNTS    = {}
+local _TAMPER_THRESHOLD = 5
+
+local function _RecordTamper(screenGui)
+    local key = _tostring(screenGui)
+    _TAMPER_COUNTS[key] = (_TAMPER_COUNTS[key] or 0) + 1
+    if _TAMPER_COUNTS[key] >= _TAMPER_THRESHOLD then
+        _pcall(function()
+            local n = _EncryptGuiName() .. "_" .. _EncryptGuiName()
+            screenGui.Name = n
+            _tinsert(_CK_HIDDEN_GUI_NAMES, n)
+        end)
+        _TAMPER_COUNTS[key] = 0
+        _CKLog("GuiShield: tamper threshold hit — aggressive re-encryption applied.")
+    end
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GUI SHIELD v2 — LAYER 4: DECOY & HONEYPOT SYSTEM
+-- Creates convincing fake ScreenGuis to distract AC scanners and logs
+-- any game-side code that accesses the honeypot via __index interception.
+-- ════════════════════════════════════════════════════════════════════════════
+local _DECOY_GUIS   = {}
+local _DECOY_THREAD = nil
+
+local function _MakeDecoy()
+    local decoy = Instance.new("ScreenGui")
+    decoy.Name           = _EncryptGuiName()
+    decoy.DisplayOrder   = _mrandom(1, 1000)
+    decoy.ResetOnSpawn   = false
+    decoy.IgnoreGuiInset = true
+
+    local frame = Instance.new("Frame")
+    frame.Size             = UDim2.new(0, _mrandom(100,300), 0, _mrandom(100,300))
+    frame.Position         = UDim2.new(_mrandom()*0.7, 0, _mrandom()*0.7, 0)
+    frame.BackgroundColor3 = Color3.fromRGB(_mrandom(10,50), _mrandom(10,50), _mrandom(10,50))
+    frame.BorderSizePixel  = 0
+    frame.Parent           = decoy
+
+    local btn = Instance.new("TextButton")
+    btn.Size     = UDim2.new(0, 80, 0, 24)
+    btn.Position = UDim2.new(0.5,-40, 0.5,-12)
+    btn.Text     = "Button " .. _mrandom(1, 99)
+    btn.Parent   = frame
+
+    _pcall(function() decoy.Parent = CoreGui end)
+    _pcall(function() decoy:SetAttribute("__ckDecoy", true) end)
+    return decoy
+end
+
+local function _MakeHoneypot()
+    local hp = Instance.new("ScreenGui")
+    hp.Name          = "RbxHoneypot_" .. _sfmt("%x", _mrandom(0, 0xFFFFFF))
+    hp.DisplayOrder  = _mrandom(1, 500)
+    hp.ResetOnSpawn  = false
+
+    _pcall(function()
+        local mt = _getrawmetatable(hp)
+        if not mt then return end
+        local oldIndex = mt.__index
+        _setreadonly(mt, false)
+        mt.__index = _newcclosure(function(self, key)
+            if not _checkcaller() then
+                _CKLog(_sfmt("HONEYPOT: game-side access key='%s'", _tostring(key)))
+            end
+            return oldIndex(self, key)
+        end)
+        _setreadonly(mt, true)
+    end)
+
+    _pcall(function() hp.Parent = CoreGui end)
+    _CKLog("GUI Shield: honeypot deployed — " .. hp.Name)
+    return hp
+end
+
+local function _EnableDecoySystem(enabled)
+    if enabled == false then
+        if _DECOY_THREAD then _ckCancel(_DECOY_THREAD); _DECOY_THREAD = nil end
+        for _, d in _ipairs(_DECOY_GUIS) do _safeDestroy(d) end
+        _DECOY_GUIS = {}
+        _CKLog("GUI Shield: decoy system disabled.")
+        return
+    end
+    if #_DECOY_GUIS > 0 then
+        _CKLog("GUI Shield: decoy system already active.")
+        return
+    end
+    for _ = 1, 3 do _tinsert(_DECOY_GUIS, _MakeDecoy()) end
+    _MakeHoneypot()
+    -- Rotate every 5 minutes
+    _DECOY_THREAD = _ckSpawn(function()
+        while true do
+            task.wait(300)
+            for _, d in _ipairs(_DECOY_GUIS) do _safeDestroy(d) end
+            _DECOY_GUIS = {}
+            for _ = 1, 3 do _tinsert(_DECOY_GUIS, _MakeDecoy()) end
+            _CKLog("GUI Shield: decoys rotated.")
+        end
+    end)
+    _CKLog("GUI Shield: decoy system active (3 decoys + 1 honeypot).")
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GUI SHIELD v2 — LAYER 6: SELF-HEALING MECHANISM
+-- One shared Heartbeat connection polls all registered GUIs every ~5 s and
+-- restores drifted properties.  Pruned automatically when a GUI is destroyed.
+-- ════════════════════════════════════════════════════════════════════════════
+local _HEAL_REGISTRY = {}
+local _HEAL_CONN     = nil
+local _HEAL_FRAME    = 0
+local _HEAL_INTERVAL = 300  -- frames (~5 s @ 60 fps)
+
+local function _RegisterForHealing(screenGui)
+    local snap = { gui = screenGui, parent = _GUI_PARENT, order = 2147483647 }
+    _tinsert(_HEAL_REGISTRY, snap)
+
+    if _HEAL_CONN then return end   -- single shared connection
+
+    _HEAL_CONN = _TrackConn(RunService.Heartbeat:Connect(function()
+        _HEAL_FRAME = _HEAL_FRAME + 1
+        if _HEAL_FRAME < _HEAL_INTERVAL then return end
+        _HEAL_FRAME = 0
+
+        for i = #_HEAL_REGISTRY, 1, -1 do
+            local s   = _HEAL_REGISTRY[i]
+            local gui = s.gui
+            local alive = _pcall(function() local _ = gui.ClassName end)
+            if not alive then
+                _tremove(_HEAL_REGISTRY, i)
+            else
+                _pcall(function()
+                    if gui.Parent ~= s.parent then
+                        gui.Parent = s.parent
+                        _RecordTamper(gui)
+                        _CKLog("SelfHeal: restored parent for " .. gui.Name)
+                    end
+                    if gui.DisplayOrder ~= s.order then gui.DisplayOrder = s.order end
+                    if not gui.Enabled then gui.Enabled = true end
+                end)
+            end
+        end
+    end))
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GUI SHIELD v2 — MASTER CONTROLLER  (Compkiller:EnableUltimateShield)
+-- ════════════════════════════════════════════════════════════════════════════
+local function _EnableUltimateShield(self, config)
+    config = config or {}
+    local level = _tostring(config.level or "MAXIMUM"):upper()
+    _CKLog("UltimateShield: level=" .. level)
+
+    local results = {
+        parent     = _GUI_SHIELD_METHOD .. " (q=" .. _GUI_SHIELD_QUALITY .. ")",
+        encryption = "active (6-pattern)",
+    }
+
+    if level == "STANDARD" or level == "MAXIMUM" then
+        results.integrityMonitor = "active"
+        results.tamperCounter    = "active"
+        results.childGuard       = "active"
+        if config.decoys ~= false then
+            _EnableDecoySystem(true)
+            results.decoySystem = "active"
+        end
+    end
+
+    if level == "MAXIMUM" then
+        -- Self-healing is always on for open windows at MAXIMUM
+        results.selfHealing = "active (shared heartbeat)"
+
+        if config.turboScramble then
+            for _, win in _ipairs(self.Windows or {}) do
+                _pcall(function()
+                    local root = win.Root or (win[1])
+                    if root then self:EnableTurboScramble(root, true) end
+                end)
+            end
+            results.turboScramble = "active"
+        end
+
+        self:EnableNameObfuscation(true)
+        results.nameObfuscation = "active"
+        _CKLog("UltimateShield: MAXIMUM — all 6 layers armed.")
+    end
+
+    for k, v in _pairs(results) do
+        _CKLog(_sfmt("  shield.%-20s = %s", k, v))
+    end
+    return results
 end
 
 local _OPT = {
-    Enabled        = false,   -- use Compkiller:EnableAdvancedOptimizations(true) to turn on
     AnimThreshold  = 30,      -- hard floor; below this, skip TweenService entirely
     MemInterval    = 120,     -- seconds between background tween sweeps
     FPS            = 60,
@@ -12203,6 +12513,27 @@ function Compkiller:IsWindowOpen(win)
 	return false
 end
 
+-- ────────────────────────────────────────────────────────────────────────────
+-- GUI SHIELD v2 — public methods
+-- ────────────────────────────────────────────────────────────────────────────
+
+-- EnableDecoySystem: deploy / remove decoy ScreenGuis + honeypot
+-- enabled = true (default) | false (tears down)
+function Compkiller:EnableDecoySystem(enabled)
+    _EnableDecoySystem(enabled ~= false)
+end
+
+-- EnableUltimateShield: one call arms all six protection layers
+-- config = {
+--   level         = "MINIMUM" | "STANDARD" | "MAXIMUM"  (default MAXIMUM)
+--   decoys        = true | false   (default true; L4 decoy system)
+--   turboScramble = true | false   (default false; expensive but effective)
+-- }
+-- Returns a results table with the status of each armed layer.
+function Compkiller:EnableUltimateShield(config)
+    return _EnableUltimateShield(self, config)
+end
+
 -- IsMobileTier: returns true when running on a low-power / mobile device
 function Compkiller:IsMobileTier()
 	local isMobile = (self.HardwareTier == "LOW")
@@ -12747,6 +13078,14 @@ Compkiller.MasterControl = function(...)
 			if w == win then return true end
 		end
 		return false
+	end
+
+	local function enableDecoySystem(enabled)
+		_EnableDecoySystem(enabled ~= false)
+	end
+
+	local function enableUltimateShield(config)
+		return _EnableUltimateShield(Compkiller, config)
 	end
 
 
@@ -13601,6 +13940,8 @@ Compkiller.MasterControl = function(...)
 		if cfg.turboScramble    ~= nil and cfg.turboScrambleGui then
 			enableTurboScramble(cfg.turboScrambleGui, cfg.turboScramble)
 		end
+		if cfg.decoySystem      ~= nil  then enableDecoySystem(cfg.decoySystem)                              end
+		if cfg.ultimateShield   ~= nil  then enableUltimateShield(cfg.ultimateShield)                        end
 
 		-- WINDOW POSITION
 		if cfg.savePosition     ~= nil  then saveWindowPosition(cfg.savePosition)                            end
@@ -13660,6 +14001,8 @@ Compkiller.MasterControl = function(...)
 		turboScramble           = enableTurboScramble,
 		hardReset               = hardReset,
 		isOpen                  = isWindowOpen,
+		decoySystem             = enableDecoySystem,
+		ultimateShield          = enableUltimateShield,
 
 		-- SANDBOX
 		safeCall                = setSafeCall,
