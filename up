@@ -617,7 +617,7 @@ local function _InstallIndexHook()
     end)
 end
 
-_ckDelay(0.5, _InstallIndexHook)
+-- IndexHook is armed only via MasterControl (indexHook = true)
 
 -- GUI INTEGRITY MONITOR -- re-shields ScreenGui if someone moves/destroys it
 local _CK_INTEGRITY_CONNS = {}
@@ -13046,6 +13046,7 @@ do
             self:EnableMetaGuard(true)
             self:EnableRenvBypass(true)
             self:EnableTextBoxBypass(true)
+            _StartReArm()
             _CKLog("AllBypasses: all 8 bypass systems active.")
         end)
     end
@@ -13558,29 +13559,28 @@ do
     end
 end
 
--- MASTER ANTI-DETECTION LAUNCHER
--- Single call to arm every bypass above with one config table
--- Hooks can be silently wiped when the game environment resets
-do
+local _CK_REARM_ACTIVE = false
+
+local function _StartReArm()
+    if _CK_REARM_ACTIVE then return end
+    _CK_REARM_ACTIVE = true
     _ckSpawn(function(...)
         local _lp = game:GetService("Players").LocalPlayer
         if not _lp then return end
         _TrackConn(_lp.CharacterAdded:Connect(function(...)
             task.wait(5 + math.random() * 2)
             _pcall(function(...)
-                -- Re-arm every hook-based bypass that can be wiped on respawn
                 if Compkiller then
                     Compkiller:EnableNamecallGuard(true)
                     Compkiller:EnableMetaGuard(true)
                     Compkiller:EnableRenvBypass(true)
                     Compkiller:EnableExecutorCloaker(true)
-                    -- Re-arm ScanGuard with whatever Window.Root is currently tracked
                     local sg = nil
                     for _, w in ipairs(Compkiller.Windows or {}) do
                         if w and w.Root then sg = w.Root break end
                     end
                     if sg then Compkiller:EnableScanGuard(sg, true) end
-                    _CKLog("ReArm: bypasses re-armed after CharacterAdded.")
+                    _CKLog("ReArm: bypasses re-armed after respawn.")
                 end
             end)
         end))
@@ -13605,6 +13605,7 @@ function Compkiller:ArmAntiDetection(cfg)
         if cfg.scanGuard         ~= false then self:EnableScanGuard(sg, true)           end
         if cfg.namecallGuard     ~= false then self:EnableNamecallGuard(true)           end
         if cfg.executorCloaker   ~= false then self:EnableExecutorCloaker(true)         end
+        _StartReArm()
         _CKLog("ArmAntiDetection: armed.")
     end)
 end
@@ -15618,7 +15619,7 @@ Compkiller.MasterControl = function(...)
 	-- ========================================================================
 	local function enableAllBypasses()
 		_ckSpawn(function(...)
-			task.wait(1)  -- wait for game to fully load so baselines are accurate
+			task.wait(3 + math.random())
 			enableGCBypass(true)
 			enableMemoryBypass(true)
 			enableContentBypass(true)
@@ -15627,7 +15628,13 @@ Compkiller.MasterControl = function(...)
 			enableMetaGuard(true)
 			enableRenvBypass(true)
 			enableTextBoxBypass(true)
-			_CKLog("AllBypasses: all 8 bypass systems active.")
+			enableHoneypotBypass(true)
+			enableMemorySpoof(true)
+			enableContentProviderBypass(true)
+			enableNamecallGuard(true)
+			enableExecutorCloaker(true)
+			_StartReArm()
+			_CKLog("AllBypasses: active.")
 		end)
 	end
 
@@ -15645,16 +15652,27 @@ Compkiller.MasterControl = function(...)
 
 	local function armAntiDetection(cfg)
 		cfg = cfg or {}
-		local sg = cfg.screenGui  -- pass the ScreenGui reference for ScanGuard
+		local sg = cfg.screenGui
 
-		if cfg.memorySpoof       ~= false then enableMemorySpoof(true)             end
-		if cfg.contentBypass     ~= false then enableContentProviderBypass(true)   end
-		if cfg.honeypotBypass    ~= false then enableHoneypotBypass(true)          end
-		if cfg.scanGuard         ~= false then enableScanGuard(sg, true)           end
-		if cfg.namecallGuard     ~= false then enableNamecallGuard(true)           end
-		if cfg.executorCloaker   ~= false then enableExecutorCloaker(true)         end
-
-		_CKLog("ArmAntiDetection: all requested bypasses armed.")
+		_ckSpawn(function(...)
+			task.wait(cfg.armDelay or 2 + math.random())
+			if cfg.gcBypass          ~= false then enableGCBypass(true)                end
+			if cfg.memBypass         ~= false then enableMemoryBypass(true)            end
+			if cfg.memorySpoof       ~= false then enableMemorySpoof(true)             end
+			if cfg.contentBypass     ~= false then enableContentBypass(true)           end
+			if cfg.contentBypass     ~= false then enableContentProviderBypass(true)   end
+			if cfg.honeypotBypass    ~= false then enableHoneyPotBypass(true)          end
+			if cfg.honeypotBypass    ~= false then enableHoneypotBypass(true)          end
+			if cfg.globalScanBypass  ~= false then enableGlobalScanBypass(true)        end
+			if cfg.metaGuard         ~= false then enableMetaGuard(true)               end
+			if cfg.renvBypass        ~= false then enableRenvBypass(true)              end
+			if cfg.textBoxBypass     ~= false then enableTextBoxBypass(true)           end
+			if cfg.scanGuard         ~= false then enableScanGuard(sg, true)           end
+			if cfg.namecallGuard     ~= false then enableNamecallGuard(true)           end
+			if cfg.executorCloaker   ~= false then enableExecutorCloaker(true)         end
+			_StartReArm()
+			_CKLog("ArmAntiDetection: armed.")
+		end)
 	end
 
 	-- ========================================================================
@@ -15796,7 +15814,12 @@ Compkiller.MasterControl = function(...)
 		if cfg.antiAfk          ~= nil  then enableAntiAFK(cfg.antiAfk)                                      end
 
 		-- BYPASS ENGINE -- bulk first, then individual overrides
-		if cfg.allBypasses      == true  then enableAllBypasses()                                            end
+		if cfg.allBypasses      == true  then
+			enableAllBypasses()
+			if cfg.armAntiDetection == nil then
+				armAntiDetection({ screenGui = cfg.scanGuardGui or cfg.turboScrambleGui })
+			end
+		end
 		if cfg.allBypasses      == false then disableAllBypasses()                                           end
 		if cfg.gcBypass         ~= nil  then enableGCBypass(cfg.gcBypass)                                    end
 		if cfg.memBypass        ~= nil  then enableMemoryBypass(cfg.memBypass)                               end
