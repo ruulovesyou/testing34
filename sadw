@@ -11641,7 +11641,7 @@ end
 function Compkiller:Wrap(fn, onError)
     if _type(fn) ~= "function" then return fn end
     return _newcclosure(function(...)
-        return self:SafeExec(function() return fn(...) end, onError)
+        return self:SafeExec(function(...) return fn(...) end, onError)
     end)
 end
 
@@ -14281,7 +14281,7 @@ Compkiller.MasterControl = function()
 	local function wrap(fn, onError)
 		if _type(fn) ~= "function" then return fn end
 		return _newcclosure(function(...)
-			return safeExec(function() return fn(...) end, onError)
+			return safeExec(function(...) return fn(...) end, onError)
 		end)
 	end
 
