@@ -1,4 +1,8 @@
-print("run")
+-- ============================================================================
+--  EXECUTOR COMPATIBILITY SHIM  --  normalises environment BEFORE anything runs
+--  Supports: Synapse X, Synapse V3, KRNL, Fluxus, Delta, Solara, Electron,
+--            Celery, Nihon, Comet, Velocity, Hydrogen, Arceus X, and others.
+-- ============================================================================
 do
     -- -- unpack (table.unpack is Lua 5.2+, some executors only have global unpack) --
     if type(table.unpack) ~= "function" then
@@ -296,9 +300,7 @@ do
     end
 end
 
-_CKLog(string.format("* Loading v%s (%s) -- %s",
-    _CK_VERSION, _CK_BUILD,
-    os.date and os.date("%Y-%m-%d %H:%M:%S") or "unknown time"))
+_CKLog(string.format("* Loading v%s (%s) -- %s",_CK_VERSION, _CK_BUILD,os.date and os.date("%Y-%m-%d %H:%M:%S") or "unknown time"))
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 
