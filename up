@@ -19,7 +19,7 @@ do
             local args = {...}
             local co = coroutine.wrap(function(...) fn((table.unpack or unpack)(args)) end)
             local ok, err = pcall(co)
-            if not ok then warn("[CK:task.spawn] " .. tostring(err)) end
+            if not ok then _pcall(function() end) end
         end
     end
     if type(task.wait) ~= "function" then
@@ -158,13 +158,13 @@ local function _CKLog(msg)
     local enabled = _CK_DEBUG
         or (type(Compkiller) == "table" and Compkiller.Debug == true)
     if enabled then
-        print("[CK] " .. tostring(msg))
+        pcall(print, tostring(msg))
     end
 end
 
 local _CK_VERSION = "5.5.2"
 math.randomseed(os.time and os.time() or tick() * 1000)
-local _CK_BUILD   = "AntiDetection-Suite-Edition"
+local _CK_BUILD   = string.char(65,83,69)
 
 -- CAPTURED ORIGINALS -- snapshot key globals BEFORE any hook can replace them
 local _rawget      = rawget
@@ -210,7 +210,7 @@ do
                     local _renv = getrenv()
                     if _renv and type(_renv.warn) == "function" then return end
                 end
-                warn("[CK] BOOT-RACE: " .. name .. " is a Lua closure -- captured original may be hooked.")
+                _CKLog("BOOT-RACE: " .. name .. " is a Lua closure.")
             end)
         end
     end
@@ -297,7 +297,7 @@ do
     end
 end
 
-_CKLog(string.format("* Loading v%s (%s) -- %s",_CK_VERSION, _CK_BUILD,os.date and os.date("%Y-%m-%d %H:%M:%S") or "unknown time"))
+_CKLog(string.format("v%s init",_CK_VERSION))
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 
@@ -591,30 +591,33 @@ local _CK_HIDDEN_GUI_NAMES = {}   -- all names this GUI has ever had, kept in sy
 
 local function _InstallIndexHook()
     _pcall(function(...)
-        local mt       = _getrawmetatable(game)
+        local mt = _getrawmetatable(game)
         if not mt then return end
-        local oldIndex = mt.__index
+        local oldIndex = _rawget(mt, "__index")
         if not oldIndex then return end
 
-        _setreadonly(mt, false)
-        mt.__index = _newcclosure(function(self, key)
-            if _checkcaller() then
-                return oldIndex(self, key)
+        local _nameSet = {}
+        local function _refreshNameSet()
+            for _, n in _ipairs(_CK_HIDDEN_GUI_NAMES) do
+                _nameSet[n] = true
             end
-            -- If game-side code is trying to find our GUI by any name it's ever had -> hide it
-            for _, hiddenName in _ipairs(_CK_HIDDEN_GUI_NAMES) do
-                if key == hiddenName then
-                    return nil
-                end
-            end
+        end
+
+        local _hook = _newcclosure(function(self, key)
+            if _checkcaller() then return oldIndex(self, key) end
+            _refreshNameSet()
+            if _nameSet[key] then return nil end
             return oldIndex(self, key)
         end)
+
+        _setreadonly(mt, false)
+        _rawset(mt, "__index", _hook)
         _setreadonly(mt, true)
-        _CKLog("GuiShield: __index hook installed on game metatable.")
+        _CKLog("GuiShield: index hook installed.")
     end)
 end
 
-_ckSpawn(_InstallIndexHook)
+_ckDelay(0.5, _InstallIndexHook)
 
 -- GUI INTEGRITY MONITOR -- re-shields ScreenGui if someone moves/destroys it
 local _CK_INTEGRITY_CONNS = {}
@@ -11599,7 +11602,7 @@ function Compkiller:NewSandbox(cfg)
             _CKLog(_sfmt("Sandbox: error #%d -- %s", _errorCount, err))
             if _errorCount >= _MAX_ERRORS then
                 _disabled = true
-                warn("[CK:Sandbox] Too many errors -- sandbox disabled.")
+                _CKLog("Sandbox: too many errors -- disabled.")
             end
         end
         return ok, ok and nil or err
@@ -12092,7 +12095,7 @@ do
                 end
 
                 if #tampered > 0 then
-                    warn("[CK:Anomaly] (!) Tampered/Hooked: " .. table.concat(tampered, ", "))
+                    _CKLog("Anomaly: tampered globals: " .. table.concat(tampered, ", "))
                     if _type(_TAMPER_CALLBACK) == "function" then
                         _pcall(_TAMPER_CALLBACK, tampered)
                     end
@@ -12831,6 +12834,11 @@ do
         "get_hidden_ui", "getconnections", "getloadedmodules",
         "getnilinstances", "getreg", "getupvalues", "getconstants",
         "decompile", "saveinstance",
+        "islclosure", "isourclosure", "cloneref", "compareinstances",
+        "firetouchinterest", "fireclickdetector", "fireproximityprompt",
+        "getscripts", "getrunningscripts", "getloadedmodules",
+        "debug", "syn", "KRNL_ENV", "fluxus", "Delta", "Celery",
+        "pebc_execute", "secure_call", "solara", "is_sirhurt_closure",
     }
 
     local function _EnableGlobalScanBypass()
@@ -12899,16 +12907,15 @@ do
 
             _ckSpawn(function(...)
                 while _METAGUARD_ACTIVE do
-                    task.wait(2)
+                    task.wait(3 + math.random() * 2)
                     _pcall(function(...)
-                        local mt2    = _getrawmetatable(game)
-                        local curr   = mt2 and _rawget(mt2, "__namecall")
-                        -- If current __namecall is a non-executor Lua closure -> AC spy
+                        local mt2  = _getrawmetatable(game)
+                        local curr = mt2 and _rawget(mt2, "__namecall")
                         if curr and curr ~= _METAGUARD_ORIG and _islclosure(curr) then
                             _setreadonly(mt2, false)
-                            mt2.__namecall = _METAGUARD_ORIG
+                            _rawset(mt2, "__namecall", _METAGUARD_ORIG)
                             _setreadonly(mt2, true)
-                            _CKLog("MetaGuard: AC __namecall spy evicted and original restored.")
+                            _CKLog("MetaGuard: AC spy evicted.")
                         end
                     end)
                 end
@@ -13030,7 +13037,7 @@ do
     -- [BUNDLE] EnableAllBypasses -- one call to activate all 8 bypass systems
     function Compkiller:EnableAllBypasses()
         _ckSpawn(function(...)
-            task.wait(1)  -- wait for game to fully load so baselines are accurate
+            task.wait(3 + math.random())
             self:EnableGCBypass(true)
             self:EnableMemoryBypass(true)
             self:EnableContentBypass(true)
@@ -13322,14 +13329,13 @@ do
                     local mode = _rawget(mt, "__mode")
                     if mode and (mode:find("v") or mode:find("k")) then
                         -- Check if this table contains CoreGui -- if so it's a honeypot
-                        if _type(t) == "table" then
+                        if _type(t) == "table" and #t >= 3 then
                             for _, v in _ipairs(t) do
                                 if v == game:GetService("CoreGui") then
-                                    -- Neutralize: remove weak mode so entries never GC
                                     local safeMt = {}
                                     for k, val in _pairs(mt) do safeMt[k] = val end
                                     safeMt["__mode"] = ""
-                                    _CKLog("HoneypotBypass: neutralized CoreGui weak-table trap.")
+                                    _CKLog("HoneypotBypass: neutralized weak-table trap.")
                                     return _oldSMT(t, safeMt)
                                 end
                             end
@@ -13451,27 +13457,25 @@ do
             _NC_OUR_HOOK = mt.__namecall
 
             _ckSpawn(function(...)
+                task.wait(1 + math.random())
                 while _NCGUARD_ACTIVE do
-                    task.wait(0.5)
+                    task.wait(1.5 + math.random() * 1.5)
                     _pcall(function(...)
                         local current = _rawget(mt, "__namecall")
                         if current ~= _NC_OUR_HOOK and _islclosure(current) then
-                            local acSpy = current
                             _setreadonly(mt, false)
-                            mt.__namecall = _newcclosure(function(self, ...)
-                                -- (we do NOT call acSpy -- we swallow it and call our original)
-                                _CKLog("NamecallGuard: AC __namecall spy intercepted and neutralized.")
+                            _rawset(mt, "__namecall", _newcclosure(function(self, ...)
                                 return _NC_OUR_HOOK(self, ...)
-                            end)
+                            end))
                             _setreadonly(mt, true)
-                            _CKLog("NamecallGuard: __namecall restored over AC spy.")
+                            _CKLog("NamecallGuard: restored.")
                         end
                     end)
                 end
             end)
 
             _NCGUARD_ACTIVE = true
-            _CKLog("NamecallGuard: __namecall tamper watch active (polling every 0.5s).")
+            _CKLog("NamecallGuard: active.")
         end)
     end
 end
@@ -13562,7 +13566,7 @@ do
         local _lp = game:GetService("Players").LocalPlayer
         if not _lp then return end
         _TrackConn(_lp.CharacterAdded:Connect(function(...)
-            task.wait(2)  -- let environment settle
+            task.wait(5 + math.random() * 2)
             _pcall(function(...)
                 -- Re-arm every hook-based bypass that can be wiped on respawn
                 if Compkiller then
@@ -13585,16 +13589,24 @@ end
 
 function Compkiller:ArmAntiDetection(cfg)
     cfg = cfg or {}
-    local sg = cfg.screenGui  -- pass the ScreenGui reference for ScanGuard
+    local sg = cfg.screenGui
 
-    if cfg.memorySpoof       ~= false then self:EnableMemorySpoof(true)             end
-    if cfg.contentBypass     ~= false then self:EnableContentProviderBypass(true)   end
-    if cfg.honeypotBypass    ~= false then self:EnableHoneypotBypass(true)          end
-    if cfg.scanGuard         ~= false then self:EnableScanGuard(sg, true)           end
-    if cfg.namecallGuard     ~= false then self:EnableNamecallGuard(true)           end
-    if cfg.executorCloaker   ~= false then self:EnableExecutorCloaker(true)         end
-
-    _CKLog("ArmAntiDetection: all requested bypasses armed.")
+    _ckSpawn(function(...)
+        task.wait(cfg.armDelay or 2 + math.random())
+        if cfg.gcBypass          ~= false then self:EnableGCBypass(true)                end
+        if cfg.memBypass         ~= false then self:EnableMemoryBypass(true)            end
+        if cfg.memorySpoof       ~= false then self:EnableMemorySpoof(true)             end
+        if cfg.contentBypass     ~= false then self:EnableContentProviderBypass(true)   end
+        if cfg.honeypotBypass    ~= false then self:EnableHoneypotBypass(true)          end
+        if cfg.globalScanBypass  ~= false then self:EnableGlobalScanBypass(true)        end
+        if cfg.metaGuard         ~= false then self:EnableMetaGuard(true)               end
+        if cfg.renvBypass        ~= false then self:EnableRenvBypass(true)              end
+        if cfg.textBoxBypass     ~= false then self:EnableTextBoxBypass(true)           end
+        if cfg.scanGuard         ~= false then self:EnableScanGuard(sg, true)           end
+        if cfg.namecallGuard     ~= false then self:EnableNamecallGuard(true)           end
+        if cfg.executorCloaker   ~= false then self:EnableExecutorCloaker(true)         end
+        _CKLog("ArmAntiDetection: armed.")
+    end)
 end
 
 -- ==============================================================================
@@ -14173,7 +14185,7 @@ Compkiller.MasterControl = function(...)
 				_CKLog(_sfmt("Sandbox: error #%d -- %s", _errorCount, err))
 				if _errorCount >= _MAX_ERRORS then
 					_disabled = true
-					warn("[CK:Sandbox] Too many errors -- sandbox disabled.")
+					_CKLog("Sandbox: too many errors -- disabled.")
 				end
 			end
 			return ok, ok and nil or err
@@ -14912,7 +14924,7 @@ Compkiller.MasterControl = function(...)
 				end
 
 				if #tampered > 0 then
-					warn("[CK:Anomaly] (!) Tampered/Hooked: " .. table.concat(tampered, ", "))
+					_CKLog("Anomaly: tampered globals: " .. table.concat(tampered, ", "))
 					if _type(_TAMPER_CALLBACK) == "function" then
 						_pcall(_TAMPER_CALLBACK, tampered)
 					end
@@ -15527,20 +15539,18 @@ Compkiller.MasterControl = function(...)
 			_NC_OUR_HOOK = mt.__namecall
 
 			_ckSpawn(function(...)
+				task.wait(1 + math.random())
 				while _NCGUARD_ACTIVE do
-					task.wait(0.5)
+					task.wait(1.5 + math.random() * 1.5)
 					_pcall(function(...)
 						local current = _rawget(mt, "__namecall")
 						if current ~= _NC_OUR_HOOK and _islclosure(current) then
-							local acSpy = current
 							_setreadonly(mt, false)
-							mt.__namecall = _newcclosure(function(self, ...)
-								-- (we do NOT call acSpy -- we swallow it and call our original)
-								_CKLog("NamecallGuard: AC __namecall spy intercepted and neutralized.")
+							_rawset(mt, "__namecall", _newcclosure(function(self, ...)
 								return _NC_OUR_HOOK(self, ...)
-							end)
+							end))
 							_setreadonly(mt, true)
-							_CKLog("NamecallGuard: __namecall restored over AC spy.")
+							_CKLog("NamecallGuard: restored.")
 						end
 					end)
 				end
