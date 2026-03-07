@@ -3153,7 +3153,7 @@ Compkiller.Hash = function(str: string)
 	local hex = #str;
 
 	string.gsub(str,'.',function(byte)
-		hex += byte:byte() + #str;
+		hex = hex + byte:byte() + #str
 	end);
 
 	local dh = string.match(str,'%d+');
@@ -9806,7 +9806,7 @@ function Compkiller.new(Config)
 			for i,v in next ,Childrens do task.wait();
 				if v:IsA('Frame') then
 					if v.LayoutOrder > last then
-						scale += v.AbsoluteSize.Y + Offset;
+						scale = scale + v.AbsoluteSize.Y + Offset
 
 						last = v.LayoutOrder;
 						frame = v;
@@ -10029,8 +10029,8 @@ function Compkiller.new(Config)
 				for i,v: Frame in next , Childrens do task.wait();
 					if v:IsA('Frame') then
 						if v ~= Section then
-							frameFound += 1;
-							allscale += v:GetAttribute('HEIGHTSCALE') or v.AbsoluteSize.Y;
+							frameFound = frameFound + 1
+							allscale = allscale + v:GetAttribute('HEIGHTSCALE') or v.AbsoluteSize.Y
 
 							if v.LayoutOrder < Section.LayoutOrder then
 								if WindowArgs.THREADS[v] then
@@ -10038,7 +10038,7 @@ function Compkiller.new(Config)
 									WindowArgs.THREADS[v]();
 								end;
 
-								Latest += 1;
+								Latest = Latest + 1
 							end;
 						end;
 					end;
@@ -10058,7 +10058,7 @@ function Compkiller.new(Config)
 
 						for i,v in next , Parent:GetChildren() do
 							if v:IsA('Frame') then
-								parentScale += v:GetAttribute('HEIGHTSCALE') + ParentLayout.Padding.Offset;
+								parentScale = parentScale + v:GetAttribute('HEIGHTSCALE') + ParentLayout.Padding.Offset
 							end;
 						end;
 
@@ -11078,7 +11078,7 @@ function Compkiller.newNotify()
 				Duration = 3,
 			});
 
-			LayoutREF -= 5;
+			LayoutREF = LayoutREF - 5
 
 			local BlockFrame = Instance.new("Frame")
 			local NotifyFrame = Instance.new("Frame")
@@ -11309,10 +11309,10 @@ do
     local _fpsSamplerConn = RunService.Heartbeat:Connect(function(dt)
         local fps = 1 / math.max(dt, 0.001)
         if #_OPT.FpsSamples >= _OPT.FpsSampleMax then
-            _runSum -= table.remove(_OPT.FpsSamples, 1)
+            _runSum = _runSum - table.remove(_OPT.FpsSamples, 1)
         end
         table.insert(_OPT.FpsSamples, fps)
-        _runSum += fps
+        _runSum = _runSum + fps
         _OPT.FPS = _runSum / #_OPT.FpsSamples
     end)
     table.insert(_CK_CONNECTIONS, _fpsSamplerConn)
@@ -11351,7 +11351,7 @@ function Compkiller:CleanupAll()
         local ok, playing = pcall(function() return tw.PlaybackState end)
         if ok and playing == Enum.PlaybackState.Playing then
             pcall(function() tw:Cancel() end)
-            cancelled += 1
+            cancelled = cancelled + 1
         end
         _OPT.ActiveTweenMap[key] = nil
     end
@@ -11359,11 +11359,11 @@ function Compkiller:CleanupAll()
         local ok, playing = pcall(function() return tw.PlaybackState end)
         if ok and playing == Enum.PlaybackState.Playing then
             pcall(function() tw:Cancel() end)
-            cancelled += 1
+            cancelled = cancelled + 1
         end
     end
     _OPT.ActiveTweens = {}
-    _OPT.Stats.TweensCancelled += cancelled
+    _OPT.Stats.TweensCancelled = _OPT.Stats.TweensCancelled + cancelled
     Compkiller:_SweepMemory()
     _CKLog("CleanupAll: cancelled " .. cancelled .. " tweens.")
     return cancelled
@@ -11411,7 +11411,7 @@ function Compkiller:_SmartAnimation(Self, Info, Property)
         for prop, val in pairs(Property) do
             pcall(function() Self[prop] = val end)
         end
-        _OPT.Stats.InstantSets += 1
+        _OPT.Stats.InstantSets = _OPT.Stats.InstantSets + 1
         return _OPT._DummyTween
     end
 
@@ -11441,7 +11441,7 @@ function Compkiller:_SmartAnimation(Self, Info, Property)
             local ok, playing = pcall(function() return existing.PlaybackState end)
             if ok and playing == Enum.PlaybackState.Playing then
                 pcall(function() existing:Cancel() end)
-                _OPT.Stats.DedupCancels += 1
+                _OPT.Stats.DedupCancels = _OPT.Stats.DedupCancels + 1
             end
             _OPT.ActiveTweenMap[dedupKey] = nil
         end
@@ -11477,7 +11477,7 @@ function Compkiller:_SweepMemory()
         end
     end
     _OPT.ActiveTweens = kept
-    _OPT.Stats.MemorySweeps += 1
+    _OPT.Stats.MemorySweeps = _OPT.Stats.MemorySweeps + 1
     _OPT.Stats.LastSweepAt  = tick()
 end
 
@@ -11666,7 +11666,7 @@ function Compkiller:NewSandbox(cfg)
             return _tostring(e)
         end)
         if not ok then
-            _errorCount += 1
+            _errorCount = _errorCount + 1
             _tinsert(_errorLog, { time = _tick(), err = err })
             _CKLog(_sfmt("Sandbox: error #%d -- %s", _errorCount, err))
             if _errorCount >= _MAX_ERRORS then
@@ -12273,7 +12273,7 @@ do
 		for _, check in ipairs(_DIAG_CHECKS) do
 			local ok, err = pcall(check[2])
 			results[check[1]] = { pass = ok, err = ok and nil or tostring(err) }
-			if ok then passed += 1 else failed += 1 end
+   if ok then passed = passed + 1 else failed = failed + 1 end
 		end
 		results._passed = passed
 		results._failed = failed
@@ -14130,7 +14130,7 @@ Compkiller.MasterControl = function()
 			local ok, playing = pcall(function() return tw.PlaybackState end)
 			if ok and playing == Enum.PlaybackState.Playing then
 				pcall(function() tw:Cancel() end)
-				cancelled += 1
+				cancelled = cancelled + 1
 			end
 			_OPT.ActiveTweenMap[key] = nil
 		end
@@ -14138,11 +14138,11 @@ Compkiller.MasterControl = function()
 			local ok, playing = pcall(function() return tw.PlaybackState end)
 			if ok and playing == Enum.PlaybackState.Playing then
 				pcall(function() tw:Cancel() end)
-				cancelled += 1
+				cancelled = cancelled + 1
 			end
 		end
 		_OPT.ActiveTweens = {}
-		_OPT.Stats.TweensCancelled += cancelled
+		_OPT.Stats.TweensCancelled = _OPT.Stats.TweensCancelled + cancelled
 		Compkiller:_SweepMemory()
 		_CKLog("CleanupAll: cancelled " .. cancelled .. " tweens.")
 		return cancelled
@@ -14363,7 +14363,7 @@ Compkiller.MasterControl = function()
 				return _tostring(e)
 			end)
 			if not ok then
-				_errorCount += 1
+				_errorCount = _errorCount + 1
 				_tinsert(_errorLog, { time = _tick(), err = err })
 				_CKLog(_sfmt("Sandbox: error #%d -- %s", _errorCount, err))
 				if _errorCount >= _MAX_ERRORS then
@@ -15064,7 +15064,7 @@ Compkiller.MasterControl = function()
 		for _, check in ipairs(_DIAG_CHECKS) do
 			local ok, err = pcall(check[2])
 			results[check[1]] = { pass = ok, err = ok and nil or tostring(err) }
-			if ok then passed += 1 else failed += 1 end
+   if ok then passed = passed + 1 else failed = failed + 1 end
 		end
 		results._passed = passed
 		results._failed = failed
