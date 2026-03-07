@@ -24,7 +24,29 @@ do
     end
     if type(task.wait) ~= "function" then
         task.wait = (type(wait) == "function" and wait)
-            or function(n) local t = tick(); repeat until tick() - t >= (n or 0) end
+            or function(n)
+                -- Yield-based fallback: avoids busy-wait thread starvation
+                local co = coroutine.running()
+                if co then
+                    local done = false
+                    local start = tick()
+                    -- Use a connected RunService step to yield properly
+                    local ok, rs = pcall(function() return game:GetService("RunService") end)
+                    if ok and rs then
+                        local conn
+                        conn = rs.Heartbeat:Connect(function()
+                            if tick() - start >= (n or 0) then
+                                conn:Disconnect()
+                                done = true
+                            end
+                        end)
+                        repeat coroutine.yield() until done
+                    else
+                        -- Last resort: bare yield loop (no busy spin at least)
+                        repeat coroutine.yield() until tick() - start >= (n or 0)
+                    end
+                end
+            end
     end
     if type(task.delay) ~= "function" then
         task.delay = function(t, fn, ...)
@@ -137,6 +159,30 @@ do
     if type(getupvalues) ~= "function" then
         getupvalues = function() return {} end
     end
+
+    -- -- File system APIs -- not universal across executors --------------------
+    if type(isfile) ~= "function" then
+        isfile = function() return false end
+    end
+    if type(isfolder) ~= "function" then
+        isfolder = function() return false end
+    end
+    if type(readfile) ~= "function" then
+        readfile = function() return "" end
+    end
+    if type(writefile) ~= "function" then
+        writefile = function() end
+    end
+    if type(makefolder) ~= "function" then
+        makefolder = function() end
+    end
+    if type(listfiles) ~= "function" then
+        listfiles = function() return {} end
+    end
+    -- getcustomasset / getsynasset
+    if type(getcustomasset) ~= "function" and type(getsynasset) ~= "function" then
+        getcustomasset = function() return "" end
+    end
 end
 -- ============================================================================
 
@@ -149,7 +195,8 @@ local function _CKLog(msg)
     end
 end
 
-local _CK_VERSION = "5.5.1"
+local _CK_VERSION = "5.5.2"
+math.randomseed(os.time and os.time() or tick() * 1000)  -- seed RNG for unpredictable GUI names
 local _CK_BUILD   = "AntiDetection-Suite-Edition"
 
 -- CAPTURED ORIGINALS -- snapshot key globals BEFORE any hook can replace them
@@ -412,6 +459,14 @@ local _CK_THREADS     = {}
 
 local function _ckTrackThread(thread)
     if type(thread) == "thread" then
+        -- Prune dead threads before inserting (prevents unbounded growth)
+        local live = {}
+        for _, t in ipairs(_CK_THREADS) do
+            if coroutine.status(t) ~= "dead" then
+                live[#live+1] = t
+            end
+        end
+        _CK_THREADS = live
         table.insert(_CK_THREADS, thread)
     end
     return thread
@@ -577,10 +632,20 @@ do
         end
     end
 
-    -- Fallback: PlayerGui
+    -- Fallback: PlayerGui (validate it exists first)
+    if not _GUI_PARENT then
+        local ok, pg = _pcall(function()
+            return game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui", 5)
+        end)
+        if ok and pg then
+            _GUI_PARENT        = pg
+            _GUI_SHIELD_METHOD = "PlayerGui"
+        end
+    end
+    -- Last resort: raw PlayerGui global if above failed
     if not _GUI_PARENT then
         _GUI_PARENT        = PlayerGui
-        _GUI_SHIELD_METHOD = "PlayerGui"
+        _GUI_SHIELD_METHOD = "PlayerGui (raw)"
     end
 
     _CKLog(_sfmt("GUI Shield: using '%s' as safe parent.", _GUI_SHIELD_METHOD))
@@ -654,6 +719,20 @@ local function _StartGuiIntegrityMonitor(screenGui)
         _tinsert(_CK_INTEGRITY_CONNS, conn2)
         _tinsert(_CK_CONNECTIONS, conn2)
     end
+
+    -- Cleanup: disconnect all integrity connections when GUI is destroyed
+    local connDestroy = _pcall(function()
+        return screenGui.Destroying:Connect(function()
+            for _, c in _ipairs(_CK_INTEGRITY_CONNS) do
+                _pcall(function() c:Disconnect() end)
+            end
+            _CK_INTEGRITY_CONNS = {}
+            _CKLog("GuiIntegrity: GUI destroyed -- connections cleaned up.")
+        end)
+    end)
+    if _type(connDestroy) ~= "boolean" then
+        _tinsert(_CK_CONNECTIONS, connDestroy)
+    end
 end
 
 
@@ -663,32 +742,6 @@ end
 local _TURBO_CONN       = nil
 local _TURBO_NAME_POOL  = {}
 local _TURBO_ACTIVE     = false
-
-local function _BuildNamePool(screenGui)
-    _TURBO_NAME_POOL = {}
-    -- Seed with CK encrypted name variants
-    for i = 1, 20 do
-        _tinsert(_TURBO_NAME_POOL, _EncryptGuiName())
-    end
-    -- Seed with large random integers (CMD X technique)
-    for i = 1, 20 do
-        _tinsert(_TURBO_NAME_POOL, _tostring(_mrandom(-2000000000, 2000000000)))
-    end
-    -- Seed with existing descendant names (CMD X technique)
-    _pcall(function()
-        for _, v in _ipairs(screenGui:GetDescendants()) do
-            if v.Name and #v.Name > 0 then
-                _tinsert(_TURBO_NAME_POOL, v.Name)
-            end
-        end
-    end)
-    _CKLog(_sfmt("TurboScramble: name pool built (%d entries).", #_TURBO_NAME_POOL))
-end
-
-local function _GetPoolName()
-    if #_TURBO_NAME_POOL == 0 then return _tostring(_mrandom(1, 1000000)) end
-    return _TURBO_NAME_POOL[_mrandom(1, #_TURBO_NAME_POOL)]
-end
 
 
 local _CK_ENCRYPTED_NAMES = {}   -- registry of all encrypted names this run
@@ -711,17 +764,49 @@ local function _EncryptGuiName()
 
     local name = prefixes[rndPrefix] .. "_" .. hexPart .. "_" .. suffixes[rndSuffix]
 
+    -- Cap registry to last 200 entries (prevents unbounded memory growth)
+    if #_CK_ENCRYPTED_NAMES >= 200 then table.remove(_CK_ENCRYPTED_NAMES, 1) end
     table.insert(_CK_ENCRYPTED_NAMES, name)
     pcall(function()
         local reg = getgenv().__rbxGuiReg
         if type(reg) ~= "table" then
             getgenv().__rbxGuiReg = {}
         end
+        if #getgenv().__rbxGuiReg >= 200 then table.remove(getgenv().__rbxGuiReg, 1) end
         table.insert(getgenv().__rbxGuiReg, name)
     end)
 
     return name
 end
+
+local function _BuildNamePool(screenGui)
+    -- Clear old pool fully before rebuild (prevents unbounded growth)
+    _TURBO_NAME_POOL = {}
+    -- Seed with CK encrypted name variants (pcall-safe)
+    for i = 1, 20 do
+        local ok, n = pcall(_EncryptGuiName)
+        if ok and n then _tinsert(_TURBO_NAME_POOL, n) end
+    end
+    -- Seed with large random integers (CMD X technique)
+    for i = 1, 20 do
+        _tinsert(_TURBO_NAME_POOL, _tostring(_mrandom(-2000000000, 2000000000)))
+    end
+    -- Seed with existing descendant names (CMD X technique)
+    _pcall(function()
+        for _, v in _ipairs(screenGui:GetDescendants()) do
+            if v.Name and #v.Name > 0 then
+                _tinsert(_TURBO_NAME_POOL, v.Name)
+            end
+        end
+    end)
+    _CKLog(_sfmt("TurboScramble: name pool built (%d entries).", #_TURBO_NAME_POOL))
+end
+
+local function _GetPoolName()
+    if #_TURBO_NAME_POOL == 0 then return _tostring(_mrandom(1, 1000000)) end
+    return _TURBO_NAME_POOL[_mrandom(1, #_TURBO_NAME_POOL)]
+end
+
 
 pcall(function()
     local reg = getgenv().__rbxGuiReg
@@ -11550,7 +11635,8 @@ end
 
 do
     -- [PATCH #14] Session-randomised position key -- not a static detectable string
-    local _POS_KEY = "__ck_p" .. string.format("%06x", math.random(0, 0xFFFFFF))
+    -- Fixed key so position persists across re-runs in the same session
+    local _POS_KEY = "__ck_window_pos_v1"
 
     function Compkiller:LoadWindowPosition()
         local raw = getgenv()[_POS_KEY]
@@ -11768,8 +11854,13 @@ do
                     "__namecall",
                     _newcclosure(function(self, ...)
                         if _checkcaller() then return _ANTIKICK_ORIG_NCI(self, ...) end
-                        if self == LocalPlayer and _getnamecallmethod() == "Kick" then
-                            _CKLog("AntiKick [M2]: blocked :Kick() on LocalPlayer.")
+                        local method = _getnamecallmethod()
+                        -- Block Kick, and Teleport-to-kick patterns
+                        if self == LocalPlayer and (
+                            method == "Kick" or
+                            method == "KickToSelect"
+                        ) then
+                            _CKLog("AntiKick [M2]: blocked :" .. method .. "() on LocalPlayer.")
                             return nil
                         end
                         return _ANTIKICK_ORIG_NCI(self, ...)
@@ -11787,9 +11878,10 @@ do
                     "__namecall",
                     _newcclosure(function(self, ...)
                         if _checkcaller() then return _ANTIKICK_ORIG_NCG(self, ...) end
-                        if _getnamecallmethod() == "Kick"
+                        local method = _getnamecallmethod()
+                        if (method == "Kick" or method == "KickToSelect")
                         and (self == LocalPlayer or self == Players.LocalPlayer) then
-                            _CKLog("AntiKick [M3]: blocked game-level :Kick().")
+                            _CKLog("AntiKick [M3]: blocked game-level :" .. method .. "().")
                             return nil
                         end
                         return _ANTIKICK_ORIG_NCG(self, ...)
@@ -11811,7 +11903,7 @@ do
                 _setreadonly(mt, false)
                 mt.__namecall = _newcclosure(function(self, ...)
                     if _checkcaller() then return oldNC(self, ...) end
-                    if _getnamecallmethod() == "Kick"
+                    if (_getnamecallmethod() == "Kick" or _getnamecallmethod() == "KickToSelect")
                     and (self == LocalPlayer or self == Players.LocalPlayer) then
                         _CKLog("AntiKick [M4]: blocked via rawmetatable.")
                         return nil
@@ -12610,16 +12702,16 @@ do
         local _wave_tick  = 0
         local OldGcInfo   = gcinfo() + Amplitude
 
+        -- Simple sine-based triangle wave: same visual shape, no acos overhead
         local function _wave()
-            local f = ((_acos(_cos(_pi * _wave_tick)) / _pi) * (Amplitude * 2)) - Amplitude
+            local f = math.abs(math.sin(_pi * _wave_tick)) * Amplitude * 2 - Amplitude
             return _mfloor(OldGcInfo + f)
         end
 
         -- Advance wave on Stepped so it feels like real GC fluctuation
         _GCINFO_TICK_CONN = _TrackConn(_RunService.Stepped:Connect(function()
-            local f0 = ((_acos(_cos(_pi * _wave_tick)) / _pi) * (Amplitude * 2)) - Amplitude
-            local f1 = ((_acos(_cos(_pi * (_wave_tick + 0.01))) / _pi) * (Amplitude * 2)) - Amplitude
-            _wave_tick = _wave_tick + (f0 > f1 and 0.07 or 0.01)
+            _wave_tick = _wave_tick + 0.03
+            if _wave_tick > 1 then _wave_tick = _wave_tick - 1 end
         end))
 
         _pcall(function()
@@ -13197,27 +13289,20 @@ do
     -- Cosine-wave formula -- makes gcinfo() output look like natural GC fluctuation
     -- Original technique by Lego Hacker, adapted for CK
     local function _makeCosineSpoof(baseValue, amplitude)
-        local _cos    = math.cos
-        local _acos   = math.acos
         local _floor  = math.floor
         local _pi     = math.pi
         local tick_v  = 0
 
-        -- Advance tick on Stepped so the curve animates naturally
+        -- Simple sine-based wave: cheaper, same visual result as triangle wave
         _ckSpawn(function()
             _TrackConn(RunService.Stepped:Connect(function()
-                local formula = ((_acos(_cos(_pi * tick_v)) / _pi) * (amplitude * 2)) + -amplitude
-                local nextF   = ((_acos(_cos(_pi * tick_v + 0.01)) / _pi) * (amplitude * 2)) + -amplitude
-                if formula > nextF then
-                    tick_v = tick_v + 0.07
-                else
-                    tick_v = tick_v + 0.01
-                end
+                tick_v = tick_v + 0.03
+                if tick_v > 1 then tick_v = tick_v - 1 end
             end))
         end)
 
         return function()
-            local formula = ((_acos(_cos(_pi * tick_v)) / _pi) * (amplitude * 2)) + -amplitude
+            local formula = math.abs(math.sin(_pi * tick_v)) * amplitude * 2 - amplitude
             return _floor(baseValue + formula)
         end
     end
@@ -15247,8 +15332,8 @@ Compkiller.MasterControl = function()
 					"__namecall",
 					_newcclosure(function(self, ...)
 						if _checkcaller() then return _ANTIKICK_ORIG_NCI(self, ...) end
-						if self == LocalPlayer and _getnamecallmethod() == "Kick" then
-							_CKLog("AntiKick [M2]: blocked :Kick() on LocalPlayer.")
+						if self == LocalPlayer and (_getnamecallmethod() == "Kick" or _getnamecallmethod() == "KickToSelect") then
+							_CKLog("AntiKick [M2]: blocked :<kick method>() on LocalPlayer.")
 							return nil
 						end
 						return _ANTIKICK_ORIG_NCI(self, ...)
@@ -15266,9 +15351,9 @@ Compkiller.MasterControl = function()
 					"__namecall",
 					_newcclosure(function(self, ...)
 						if _checkcaller() then return _ANTIKICK_ORIG_NCG(self, ...) end
-						if _getnamecallmethod() == "Kick"
+						if (_getnamecallmethod() == "Kick" or _getnamecallmethod() == "KickToSelect")
 						and (self == LocalPlayer or self == Players.LocalPlayer) then
-							_CKLog("AntiKick [M3]: blocked game-level :Kick().")
+							_CKLog("AntiKick [M3]: blocked game-level :<kick method>().")
 							return nil
 						end
 						return _ANTIKICK_ORIG_NCG(self, ...)
@@ -15290,7 +15375,7 @@ Compkiller.MasterControl = function()
 				_setreadonly(mt, false)
 				mt.__namecall = _newcclosure(function(self, ...)
 					if _checkcaller() then return oldNC(self, ...) end
-					if _getnamecallmethod() == "Kick"
+					if (_getnamecallmethod() == "Kick" or _getnamecallmethod() == "KickToSelect")
 					and (self == LocalPlayer or self == Players.LocalPlayer) then
 						_CKLog("AntiKick [M4]: blocked via rawmetatable.")
 						return nil
