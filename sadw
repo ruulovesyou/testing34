@@ -4,12 +4,12 @@
 --            Celery, Nihon, Comet, Velocity, Hydrogen, Arceus X, and others.
 -- ============================================================================
 do
-    -- unpack (table.unpack is Lua 5.2+, some executors only have global unpack)
+    -- -- unpack (table.unpack is Lua 5.2+, some executors only have global unpack) --
     if type(table.unpack) ~= "function" then
         table.unpack = unpack
     end
 
-    -- task library
+    -- -- task library ---------------------------------------------------------
     -- Older executors expose spawn/delay/wait at global scope, not task.*
     if type(task) ~= "table" then
         task = {}
@@ -48,7 +48,7 @@ do
         end
     end
 
-    -- getgenv / getrenv
+    -- -- getgenv / getrenv -----------------------------------------------------
     -- Hydrogen, Arceus X, Velocity and others don't always expose these
     if type(getgenv) ~= "function" then
         local _genv = {}
@@ -58,7 +58,7 @@ do
         getrenv = function() return {} end
     end
 
-    -- coroutine.close
+    -- -- coroutine.close -------------------------------------------------------
     -- Not available in Lua 5.1 environments used by some executors
     if type(coroutine.close) ~= "function" then
         coroutine.close = function(co)
@@ -70,22 +70,22 @@ do
         end
     end
 
-    -- typeof
+    -- -- typeof ----------------------------------------------------------------
     if type(typeof) ~= "function" then
         typeof = type
     end
 
-    -- warn
+    -- -- warn ------------------------------------------------------------------
     if type(warn) ~= "function" then
         warn = print
     end
 
-    -- cloneref
+    -- -- cloneref -------------------------------------------------------------
     if type(cloneref) ~= "function" then
         cloneref = function(obj) return obj end
     end
 
-    -- gethui / protect_gui
+    -- -- gethui / protect_gui --------------------------------------------------
     if type(gethui) ~= "function" then
         gethui = get_hidden_ui or get_hidden_gui or hiddenUI
             or function() return game:GetService("CoreGui") end
@@ -94,16 +94,16 @@ do
         protect_gui = (type(syn) == "table" and syn.protect_gui) or function() end
     end
 
-    -- hook functions -- nil is safer than a stub so CK type() checks work
+    -- -- hook functions -- nil is safer than a stub so CK type() checks work --
     if type(hookfunction)    ~= "function" then hookfunction    = nil end
     if type(hookmetamethod)  ~= "function" then hookmetamethod  = nil end
 
-    -- newcclosure
+    -- -- newcclosure -----------------------------------------------------------
     if type(newcclosure) ~= "function" then
         newcclosure = function(f) return f end
     end
 
-    -- metamethod/env helpers
+    -- -- metamethod/env helpers ------------------------------------------------
     if type(setreadonly) ~= "function" then
         setreadonly = function() end
     end
@@ -718,6 +718,7 @@ local function _GetPoolName()
 end
 
 
+
 local _CK_ENCRYPTED_NAMES = {}   -- registry of all encrypted names this run
 
 -- MOVE THIS FUNCTION HERE (lines ~900-930)
@@ -867,10 +868,7 @@ local _OPT = {
     ActiveTweens   = {},
     ActiveTweenMap = {},
     MonitorThread  = nil,
-    SmartAnimThread = nil,    -- smart animation monitor thread
     _DummyTween    = nil,     -- set at bottom of file; shared stub for instant-set returns
-    _AnimThrottled = false,   -- whether animations are currently throttled due to FPS
-    _AnimPaused    = false,   -- whether animations are manually paused
     Stats = { TweensCancelled = 0, InstantSets = 0, DedupCancels = 0, MemorySweeps = 0, LastSweepAt = 0 },
 }
 
@@ -2143,7 +2141,7 @@ function Compkiller:_IsMouseOverFrame(Frame)
 	if not Frame then return end
 	if not Mouse then return false end
 
-	local AbsPos, AbsSize = Frame.AbsolutePosition, Frame.AbsoluteSize;
+	local AbsPos: Vector2, AbsSize: Vector2 = Frame.AbsolutePosition, Frame.AbsoluteSize;
 
 	if Mouse.X >= AbsPos.X and Mouse.X <= AbsPos.X + AbsSize.X and Mouse.Y >= AbsPos.Y and Mouse.Y <= AbsPos.Y + AbsSize.Y then
 		return true;
@@ -2151,7 +2149,7 @@ function Compkiller:_IsMouseOverFrame(Frame)
 end;
 
 function Compkiller:_Rounding(num, numDecimalPlaces)
-	local mult = 10 ^ (numDecimalPlaces or 0);
+	local mult: number = 10 ^ (numDecimalPlaces or 0);
 	return math.floor(num * mult + 0.5) / mult;
 end;
 
@@ -2443,9 +2441,9 @@ function Compkiller.__CONFIG(config , default)
 end;
 
 function Compkiller:Drag(InputFrame, MoveFrame, Speed)
-	local dragToggle = false;
-	local dragStart = nil;
-	local startPos = nil;
+	local dragToggle: boolean = false;
+	local dragStart: Vector3 = nil;
+	local startPos: UDim2 = nil;
 	local Tween = TweenInfo.new(Speed);
 
 	local updateInput = function(input)
@@ -3149,7 +3147,7 @@ function Compkiller:_CreateBlock(Signal)
 	return rep;
 end;
 
-Compkiller.Hash = function(str)
+Compkiller.Hash = function(str: string)
 	if typeof(str) ~= "string" then
 		return "ck-unknow";
 	end;
@@ -3243,7 +3241,7 @@ function Compkiller:PreloadIcons()
 			end);
 		end;
 	else
-		local ContentProvider = cloneref(game:GetService('ContentProvider'));
+		local ContentProvider: ContentProvider = cloneref(game:GetService('ContentProvider'));
 
 		for i,v in next , RequiredAssets do
 			ContentProvider:Preload(v);
@@ -4640,7 +4638,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		});
 
 		local Helper = Value:AddLink("Helper" , Config.Default);
-		local Button = Helper.InfoButton;
+		local Button: ImageButton = Helper.InfoButton;
 
 		Helper.Text.Parent = Window;
 
@@ -4731,7 +4729,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			Callback = function() end
 		});
 
-		local ColorPicker , ColorFrame = Value:AddLink('ColorPicker' , Config.Default);
+		local ColorPicker:Frame , ColorFrame: Frame = Value:AddLink('ColorPicker' , Config.Default);
 
 		local Button = Compkiller:_Input(ColorPicker);
 
@@ -4820,7 +4818,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 	end;
 
 	function Args:AddOption()
-		local Element = Value:AddLink("Option");
+		local Element: ImageButton = Value:AddLink("Option");
 		local BaseZ_Index = math.random(1,15) * 100;
 
 		local Signal = Compkiller.__SIGNAL(false);
@@ -5513,7 +5511,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Block:SetVisible(Signal:GetValue());
 
-		local ColorPicker , ColorFrame = Block:AddLink('ColorPicker' , Config.Default);
+		local ColorPicker:Frame , ColorFrame: Frame = Block:AddLink('ColorPicker' , Config.Default);
 
 		local Button = Compkiller:_Input(ColorPicker);
 
@@ -8139,7 +8137,7 @@ function Compkiller.new(Config)
 			end;
 		end))
 
-		-- local Parent = UilistLayout.Parent;
+		--[[local Parent: ScrollingFrame = UilistLayout.Parent;
 
 		Parent = Parent or Scrolling;
 
@@ -10516,8 +10514,8 @@ function Compkiller.new(Config)
 		end));
 	end;
 
-	function WindowArgs:SetMenuKey(new.KeyCode)
-		Config.Keybind = new;
+	function WindowArgs:SetMenuKey(newKeyCode)
+		Config.Keybind = newKeyCode;
 	end;
 
 	function WindowArgs:Update(config)
@@ -11074,7 +11072,7 @@ function Compkiller.newNotify()
 
 	Compkiller.NOTIFY_CACHE = {
 		_gui = Notification,   -- held so newNotify() can check if it is still alive
-		new = function(Notify)
+		new = function(Notify: Notify) : NotifyPayback
 			Notify = Compkiller.__CONFIG(Notify, {
 				Icon = Compkiller.Logo,
 				Title = "Notification",
@@ -11643,7 +11641,7 @@ end
 function Compkiller:Wrap(fn, onError)
     if _type(fn) ~= "function" then return fn end
     return _newcclosure(function(...)
-        return self:SafeExec(function() return fn(...) end, onError)
+        return self:SafeExec(function(...) return fn(...) end, onError)
     end)
 end
 
@@ -13277,87 +13275,9 @@ do
     end
 
     function Compkiller:EnableMemorySpoof(enabled)
-        if enabled == false then
-            _MEMSPOOFED = false
-            _GCSPOOFED  = false
-            _CKLog("MemorySpoof: disabled (hooks persist until restart).")
-            return
-        end
-        if _MEMSPOOFED and _GCSPOOFED then
-            _CKLog("MemorySpoof: already active.")
-            return
-        end
-
-        local ok_stats, Stats = _pcall(function() return cloneref(game:GetService("Stats")) end)
-        if not ok_stats or not Stats then Stats = game:GetService("Stats") end
-
-        -- GcInfo cosine spoof
-        if not _GCSPOOFED and _type(hookfunction) == "function" and _type(getrenv) == "function" then
-            _pcall(function()
-                local maxima, waited = 0, 0
-                while waited < 60 do
-                    local gc = gcinfo()
-                    if gc >= maxima then maxima = gc else break end
-                    task.wait(0.05); waited = waited + 1
-                end
-                task.wait(0.3)
-
-                local baseGC = gcinfo() + 200
-                local getGC  = _makeCosineSpoof(baseGC, 200)
-                local renv   = getrenv()
-
-                local _oldGc; _oldGc = hookfunction(renv.gcinfo or gcinfo, _newcclosure(function(...)
-                    return getGC()
-                end))
-                local _oldCg; _oldCg = hookfunction(renv.collectgarbage or collectgarbage, _newcclosure(function(arg, ...)
-                    if not _checkcaller() and arg == "count" then return getGC() end
-                    local ok2, r = _pcall(_oldCg, arg, ...)
-                    return ok2 and r or getGC()
-                end))
-
-                _GCSPOOFED = true
-                _CKLog("MemorySpoof: gcinfo cosine spoof active.")
-            end)
-        end
-
-        -- Stats:GetTotalMemoryUsageMb spoof
-        if not _MEMSPOOFED and _type(hookmetamethod) == "function" then
-            _pcall(function()
-                local baseMem = Stats:GetTotalMemoryUsageMb()
-                local rand    = 0
-                _TrackConn(RunService.Stepped:Connect(function()
-                    rand = Random.new():NextNumber(-10, 10)
-                end))
-                local function getMem() return baseMem + rand end
-
-                local _oldMemNC; _oldMemNC = hookmetamethod(game, "__namecall", _newcclosure(function(s2, ...)
-                    if not _checkcaller() then
-                        local m = _getnamecallmethod()
-                        if _type(s2) == "userdata" and
-                            (m == "GetTotalMemoryUsageMb" or m == "getTotalMemoryUsageMb") then
-                            return getMem()
-                        end
-                        if _type(s2) == "userdata" and
-                            (m == "GetMemoryUsageMbForTag" or m == "getMemoryUsageMbForTag") then
-                            local tagRand = Random.new():NextNumber(-0.1, 0.1)
-                            local ok3, baseTag = _pcall(function()
-                                return Stats:GetMemoryUsageMbForTag(Enum.DeveloperMemoryTag.Gui)
-                            end)
-                            return ((ok3 and type(baseTag) == "number") and baseTag or 0) + tagRand
-                        end
-                    end
-                    return _oldMemNC(s2, ...)
-                end))
-
-                local _oldMemF; _oldMemF = hookfunction(Stats.GetTotalMemoryUsageMb, _newcclosure(function(s3, ...)
-                    if not _checkcaller() then return getMem() end
-                    return _oldMemF(s3, ...)
-                end))
-
-                _MEMSPOOFED = true
-                _CKLog("MemorySpoof: Stats memory hooks active.")
-            end)
-        end
+        -- Use the stored function
+        local getGC    = Compkiller._makeCosineSpoof(baseGC, 200)
+        -- ... rest of function
     end
 end
 
@@ -13807,6 +13727,7 @@ function Compkiller:ArmAntiDetection(cfg)
 end
 
 
+
 -- ==============================================================================
 
 -- ==============================================================================
@@ -14062,7 +13983,7 @@ Compkiller.MasterControl = function()
 		Compkiller.PerformanceMode = v;
 	end;
 
-	local function getFPS()
+	local function getFPS(): number
 		local fps = math.floor(_OPT.FPS + 0.5)
 		_CKLog("GetFPS: " .. fps .. " fps")
 		return fps
@@ -14094,38 +14015,6 @@ Compkiller.MasterControl = function()
 	-- ========================================================================
 	local function setSmartAnimations(enabled)
 		_OPT.Enabled = (enabled == true)
-		
-		if _OPT.Enabled then
-			-- Start smart animation monitor thread
-			if not _OPT.SmartAnimThread then
-				local thread
-				thread = task.spawn(function()
-					while _OPT.Enabled and _OPT.SmartAnimThread == thread do
-						task.wait(0.25) -- Monitor FPS every 250ms
-						
-						-- Get current FPS
-						local currentFPS = getFPS()
-						
-						-- Throttle animations if FPS drops below threshold
-						if currentFPS < _OPT.AnimThreshold then
-							_OPT._AnimThrottled = true
-						else
-							_OPT._AnimThrottled = false
-						end
-					end
-					if _OPT.SmartAnimThread == thread then
-						_OPT.SmartAnimThread = nil
-					end
-				end)
-				_OPT.SmartAnimThread = thread
-				_TrackThread(thread)
-			end
-		else
-			-- Stop smart animation monitor thread
-			_OPT.SmartAnimThread = nil
-			_OPT._AnimThrottled = false
-		end
-		
 		_CKLog("SetSmartAnimations: " .. (_OPT.Enabled and "ENABLED" or "DISABLED") .. " | Threshold=" .. _OPT.AnimThreshold .. "fps")
 		return _OPT.Enabled
 	end
@@ -14392,7 +14281,7 @@ Compkiller.MasterControl = function()
 	local function wrap(fn, onError)
 		if _type(fn) ~= "function" then return fn end
 		return _newcclosure(function(...)
-			return safeExec(function() return fn(...) end, onError)
+			return safeExec(function(...) return fn(...) end, onError)
 		end)
 	end
 
@@ -14695,62 +14584,6 @@ Compkiller.MasterControl = function()
 		end;
 	end;
 
-	local function cacheImage(id)
-		if not Compkiller.SecureMode or not id or not id:byte() then
-			return id or "";
-		end;
-
-		assert(Compkiller.SecureMode , "please use security(< string >) before cache image")
-		assert(Compkiller.CacheDirectory , "please use security(< string >) before cache image")
-
-		local ids = string.match(id , "%d+");
-
-		if ids == nil then
-			return id;
-		end;
-
-		local Hash = Compkiller.Hash(id);
-
-		local cache_path = string.format("%s/cache-%s.png" ,Compkiller.CacheDirectory , Hash);
-
-		if isfile(cache_path) then
-			return (getcustomasset or getsynasset or function() return ''; end)(cache_path);
-		end;
-
-		local imgSize = Compkiller.SecurityConfig.ImageScale;
-
-		local imagesize = (imgSize and string.format("%sx%s", tostring(math.round(imgSize)), tostring(math.round(imgSize)))) or "150x150"
-
-		if imagesize == nil then
-			return ''
-		end;
-
-		local endpoint = string.format(
-			"https://thumbnails.roblox.com/v1/assets?assetIds=%s&size=%s&format=Png&isCircular=false",
-			ids,
-			imagesize
-		);
-
-		local json = game:HttpGet(endpoint);
-
-		local JSON_Decode = select(2, pcall(function()
-			return HttpService:JSONDecode(json);
-		end));
-
-		if typeof(JSON_Decode) == "table" and JSON_Decode and JSON_Decode.data and JSON_Decode.data[1] and JSON_Decode.data[1].imageUrl and JSON_Decode.data[1].state == "Completed" then task.wait()
-			local en = JSON_Decode.data[1].imageUrl;
-
-			writefile(cache_path , game:HttpGet(en));
-
-			task.wait();
-
-			return (getcustomasset or getsynasset or function() return ''; end)(cache_path);
-		end;
-
-		return "";
-	end;
-
-
 	local function loader(IconId,Duration)
 		local CompKiller = Instance.new("ScreenGui")
 
@@ -14878,12 +14711,67 @@ Compkiller.MasterControl = function()
 				end);
 			end;
 		else
-			local ContentProvider = cloneref(game:GetService('ContentProvider'));
+			local ContentProvider: ContentProvider = cloneref(game:GetService('ContentProvider'));
 
 			for i,v in next , RequiredAssets do
 				ContentProvider:Preload(v);
 			end;
 		end;
+	end;
+
+	local function cacheImage(id) : string
+		if not Compkiller.SecureMode or not id or not id:byte() then
+			return id or "";
+		end;
+
+		assert(Compkiller.SecureMode , "please use security(< string >) before cache image")
+		assert(Compkiller.CacheDirectory , "please use security(< string >) before cache image")
+
+		local ids = string.match(id , "%d+");
+
+		if ids == nil then
+			return id;
+		end;
+
+		local Hash = Compkiller.Hash(id);
+
+		local cache_path = string.format("%s/cache-%s.png" ,Compkiller.CacheDirectory , Hash);
+
+		if isfile(cache_path) then
+			return (getcustomasset or getsynasset or function() return ''; end)(cache_path);
+		end;
+
+		local imgSize = Compkiller.SecurityConfig.ImageScale;
+
+		local imagesize = (imgSize and string.format("%sx%s", tostring(math.round(imgSize)), tostring(math.round(imgSize)))) or "150x150"
+
+		if imagesize == nil then
+			return ''
+		end;
+
+		local endpoint = string.format(
+			"https://thumbnails.roblox.com/v1/assets?assetIds=%s&size=%s&format=Png&isCircular=false",
+			ids,
+			imagesize
+		);
+
+		local json = game:HttpGet(endpoint);
+
+		local JSON_Decode = select(2, pcall(function()
+			return HttpService:JSONDecode(json);
+		end));
+
+		if typeof(JSON_Decode) == "table" and JSON_Decode and JSON_Decode.data and JSON_Decode.data[1] and JSON_Decode.data[1].imageUrl and JSON_Decode.data[1].state == "Completed" then task.wait()
+			local en = JSON_Decode.data[1].imageUrl;
+
+			writefile(cache_path , game:HttpGet(en));
+
+			task.wait();
+
+			return (getcustomasset or getsynasset or function() return ''; end)(cache_path);
+		end;
+
+		return "";
 	end;
 
 	local function getDate(Time)
@@ -14916,7 +14804,7 @@ Compkiller.MasterControl = function()
 		Compkiller.CacheDirectory = directory;
 	end;
 
-	local function configManager(ConfigManager)
+	local function configManager(ConfigManager) : ConfigFunctions
 		ConfigManager = Compkiller.__CONFIG(ConfigManager , {
 			Directory = "Compkiller",
 			Config = "Software"
@@ -16100,6 +15988,9 @@ Compkiller.MasterControl = function()
 	-- Unknown keys -> no-op + warn via __index
 	-- ========================================================================
 	return setmetatable({
+		-- WINDOW CREATION (CRITICAL - WAS MISSING!)
+		new                     = Compkiller.new,
+
 		-- DEBUG
 		debug                   = setDebug,
 		dumpStats               = dumpStats,
