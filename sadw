@@ -718,8 +718,10 @@ local function _GetPoolName()
 end
 
 
+
 local _CK_ENCRYPTED_NAMES = {}   -- registry of all encrypted names this run
 
+-- MOVE THIS FUNCTION HERE (lines ~900-930)
 local function _EncryptGuiName()
     local prefixes = {
         "RbxGui", "CoreUISvc", "TopbarPlus", "RbxHud",
@@ -866,7 +868,10 @@ local _OPT = {
     ActiveTweens   = {},
     ActiveTweenMap = {},
     MonitorThread  = nil,
+    SmartAnimThread = nil,    -- smart animation monitor thread
     _DummyTween    = nil,     -- set at bottom of file; shared stub for instant-set returns
+    _AnimThrottled = false,   -- whether animations are currently throttled due to FPS
+    _AnimPaused    = false,   -- whether animations are manually paused
     Stats = { TweensCancelled = 0, InstantSets = 0, DedupCancels = 0, MemorySweeps = 0, LastSweepAt = 0 },
 }
 
@@ -13215,21 +13220,45 @@ end -- end bypass engine do block
 --  [10] newproxy tracker (keeps weak-table proxies alive vs GC)
 
 
--- [1+2+3] MEMORY & GCINFO SPOOF
+local function _makeCosineSpoof(baseValue, amplitude)
+    local _cos    = math.cos
+    local _acos   = math.acos
+    local _floor  = math.floor
+    local _pi     = math.pi
+    local tick_v  = 0
+
+    -- Advance tick on Stepped so the curve animates naturally
+    _ckSpawn(function()
+        _TrackConn(RunService.Stepped:Connect(function()
+            local formula = ((_acos(_cos(_pi * tick_v)) / _pi) * (amplitude * 2)) + -amplitude
+            local nextF   = ((_acos(_cos(_pi * tick_v + 0.01)) / _pi) * (amplitude * 2)) + -amplitude
+            if formula > nextF then
+                tick_v = tick_v + 0.07
+            else
+                tick_v = tick_v + 0.01
+            end
+        end))
+    end)
+
+    return function()
+        local formula = ((_acos(_cos(_pi * tick_v)) / _pi) * (amplitude * 2)) + -amplitude
+        return _floor(baseValue + formula)
+    end
+end
+
+
 do
     local _MEMSPOOFED  = false
     local _GCSPOOFED   = false
 
-    -- Cosine-wave formula -- makes gcinfo() output look like natural GC fluctuation
-    -- Original technique by Lego Hacker, adapted for CK
-    local function _makeCosineSpoof(baseValue, amplitude)
+    -- Store it in Compkiller so it's accessible
+    Compkiller._makeCosineSpoof = function(baseValue, amplitude)
         local _cos    = math.cos
         local _acos   = math.acos
         local _floor  = math.floor
         local _pi     = math.pi
         local tick_v  = 0
 
-        -- Advance tick on Stepped so the curve animates naturally
         _ckSpawn(function()
             _TrackConn(RunService.Stepped:Connect(function()
                 local formula = ((_acos(_cos(_pi * tick_v)) / _pi) * (amplitude * 2)) + -amplitude
@@ -13249,95 +13278,11 @@ do
     end
 
     function Compkiller:EnableMemorySpoof(enabled)
-        if enabled == false then
-            _MEMSPOOFED = false
-            _GCSPOOFED  = false
-            _CKLog("MemorySpoof: disabled (note: hooks persist until restart).")
-            return
-        end
-        if _MEMSPOOFED and _GCSPOOFED then
-            _CKLog("MemorySpoof: already active.")
-            return
-        end
-
-        local Stats = _pcall(function() return cloneref(game:GetService("Stats")) end)
-        if not Stats then Stats = game:GetService("Stats") end
-
-        -- GcInfo cosine spoof
-        if not _GCSPOOFED and _type(hookfunction) == "function" and _type(getrenv) == "function" then
-            _pcall(function()
-                -- Wait for gcinfo to peak so our baseline is accurate
-                local maxima = 0
-                local waited = 0
-                while waited < 60 do
-                    local gc = gcinfo()
-                    if gc >= maxima then maxima = gc else break end
-                    task.wait(0.05)
-                    waited = waited + 1
-                end
-                task.wait(0.3)
-
-                local baseGC   = gcinfo() + 200
-                local getGC    = _makeCosineSpoof(baseGC, 200)
-                local renv     = getrenv()
-
-                local _oldGc;   _oldGc  = hookfunction(renv.gcinfo, _newcclosure(function(...)
-                    return getGC()
-                end))
-                local _oldCg;   _oldCg  = hookfunction(renv.collectgarbage, _newcclosure(function(arg, ...)
-                    if not _checkcaller() and arg == "count" then
-                        return getGC()
-                    end
-                    local ok, r = _pcall(_oldCg, arg, ...)
-                    return ok and r or getGC()
-                end))
-
-                _GCSPOOFED = true
-                _CKLog("MemorySpoof: gcinfo/collectgarbage cosine spoof active.")
-            end)
-        end
-
-        -- Stats:GetTotalMemoryUsageMb spoof
-        if not _MEMSPOOFED and _type(hookmetamethod) == "function" then
-            _pcall(function()
-                local baseMem = Stats:GetTotalMemoryUsageMb()
-                local rand    = 0
-                _TrackConn(RunService.Stepped:Connect(function()
-                    rand = Random.new():NextNumber(-10, 10)
-                end))
-                local function getMem() return baseMem + rand end
-
-                -- __namecall intercept
-                local _oldMemNC;  _oldMemNC = hookmetamethod(game, "__namecall", _newcclosure(function(self, ...)
-                    if not _checkcaller() then
-                        local m = _getnamecallmethod()
-                        if _type(self) == "userdata" and
-                           (m == "GetTotalMemoryUsageMb" or m == "getTotalMemoryUsageMb") then
-                            return getMem()
-                        end
-                        if _type(self) == "userdata" and
-                           (m == "GetMemoryUsageMbForTag" or m == "getMemoryUsageMbForTag") then
-                            local tagRand = Random.new():NextNumber(-0.1, 0.1)
-                            local baseTag = _pcall(function() return Stats:GetMemoryUsageMbForTag(Enum.DeveloperMemoryTag.Gui) end) or 0
-                            return (type(baseTag) == "number" and baseTag or 0) + tagRand
-                        end
-                    end
-                    return _oldMemNC(self, ...)
-                end))
-
-                -- Direct hookfunction on indexed method
-                local _oldMemF;  _oldMemF = hookfunction(Stats.GetTotalMemoryUsageMb, _newcclosure(function(self, ...)
-                    if not _checkcaller() then return getMem() end
-                    return _oldMemF(self, ...)
-                end))
-
-                _MEMSPOOFED = true
-                _CKLog("MemorySpoof: GetTotalMemoryUsageMb + GetMemoryUsageMbForTag spoofed.")
-            end)
-        end
+        -- Use the stored function
+        local getGC    = Compkiller._makeCosineSpoof(baseGC, 200)
+        -- ... rest of function
     end
 end
-
 
 -- [4] CONTENTPROVIDER PRELOADASYNC COREGUI SCAN BYPASS
 -- AC calls PreloadAsync({CoreGui}) or PreloadAsync({game}) and reads asset IDs
@@ -14073,6 +14018,38 @@ Compkiller.MasterControl = function()
 	-- ========================================================================
 	local function setSmartAnimations(enabled)
 		_OPT.Enabled = (enabled == true)
+		
+		if _OPT.Enabled then
+			-- Start smart animation monitor thread
+			if not _OPT.SmartAnimThread then
+				local thread
+				thread = task.spawn(function()
+					while _OPT.Enabled and _OPT.SmartAnimThread == thread do
+						task.wait(0.25) -- Monitor FPS every 250ms
+						
+						-- Get current FPS
+						local currentFPS = getFPS()
+						
+						-- Throttle animations if FPS drops below threshold
+						if currentFPS < _OPT.AnimThreshold then
+							_OPT._AnimThrottled = true
+						else
+							_OPT._AnimThrottled = false
+						end
+					end
+					if _OPT.SmartAnimThread == thread then
+						_OPT.SmartAnimThread = nil
+					end
+				end)
+				_OPT.SmartAnimThread = thread
+				_TrackThread(thread)
+			end
+		else
+			-- Stop smart animation monitor thread
+			_OPT.SmartAnimThread = nil
+			_OPT._AnimThrottled = false
+		end
+		
 		_CKLog("SetSmartAnimations: " .. (_OPT.Enabled and "ENABLED" or "DISABLED") .. " | Threshold=" .. _OPT.AnimThreshold .. "fps")
 		return _OPT.Enabled
 	end
