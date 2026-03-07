@@ -4,6 +4,11 @@
 --            Celery, Nihon, Comet, Velocity, Hydrogen, Arceus X, and others.
 -- ============================================================================
 do
+    -- -- unpack (table.unpack is Lua 5.2+, some executors only have global unpack) --
+    if type(table.unpack) ~= "function" then
+        table.unpack = unpack
+    end
+
     -- -- task library ---------------------------------------------------------
     -- Older executors expose spawn/delay/wait at global scope, not task.*
     if type(task) ~= "table" then
@@ -12,7 +17,7 @@ do
     if type(task.spawn) ~= "function" then
         task.spawn = function(fn, ...)
             local args = {...}
-            local co = coroutine.wrap(function() fn(table.unpack(args)) end)
+            local co = coroutine.wrap(function() fn((table.unpack or unpack)(args)) end)
             local ok, err = pcall(co)
             if not ok then warn("[CK:task.spawn] " .. tostring(err)) end
         end
@@ -24,7 +29,7 @@ do
     if type(task.delay) ~= "function" then
         task.delay = function(t, fn, ...)
             local args = {...}
-            task.spawn(function() task.wait(t) fn(table.unpack(args)) end)
+            task.spawn(function() task.wait(t) fn((table.unpack or unpack)(args)) end)
         end
     end
     if type(task.defer) ~= "function" then
@@ -158,7 +163,7 @@ local _type        = type
 local _pairs       = pairs
 local _ipairs      = ipairs
 local _select      = select
-local _unpack      = table.unpack or unpack
+local _unpack      = (table.unpack or unpack) or unpack
 local _tinsert     = table.insert
 local _tremove     = table.remove
 local _sfmt        = string.format
@@ -12018,7 +12023,7 @@ do
                 while #self._queue > 0 do
                     local item = table.remove(self._queue, 1)
                     pcall(function()
-                        item.remote:FireServer(table.unpack(item.args))
+                        item.remote:FireServer((table.unpack or unpack)(item.args))
                     end)
                     task.wait(self._interval)
                 end
@@ -12289,7 +12294,7 @@ do
 			return fn(...)
 		end
 		local args = {...}
-		local ok, result = pcall(function() return fn(table.unpack(args)) end)
+		local ok, result = pcall(function() return fn((table.unpack or unpack)(args)) end)
 		if not ok then
 			table.insert(_SANDBOX_ERRORS, { time = tick(), err = tostring(result) })
 			_CKLog("SafeCall caught: " .. tostring(result))
@@ -12390,7 +12395,7 @@ do
 			fn   = function()
 				local t  = {}
 				t[1]     = t
-				local x  = (table.unpack or unpack)(t)
+				local x  = ((table.unpack or unpack) or unpack)(t)
 				assert(x and x[1] == t, "cyclic unpack mismatch")
 			end,
 		},
@@ -13384,7 +13389,7 @@ do
                     -- If AC is scanning CoreGui or game root -- feed safe shuffled list
                     if _type(instances) == "table"
                        and (instances[1] == CoreGuiRef or instances[1] == game) then
-                        local safeList = _shuffleTable({table.unpack(safePool)})
+                        local safeList = _shuffleTable({(table.unpack or unpack)(safePool)})
                         return _oldCP(self, safeList, ...)
                     end
                 end
@@ -13395,7 +13400,7 @@ do
             local _oldCPF; _oldCPF = hookfunction(ContentRef.PreloadAsync, _newcclosure(function(self, instances, callback)
                 if not _checkcaller() and _type(instances) == "table" then
                     if instances[1] == CoreGuiRef or instances[1] == game then
-                        local safeList = _shuffleTable({table.unpack(safePool)})
+                        local safeList = _shuffleTable({(table.unpack or unpack)(safePool)})
                         return _oldCPF(self, safeList, callback)
                     end
                 end
@@ -13528,7 +13533,7 @@ do
                         end
                         return filtered
                     end
-                    return table.unpack(results)
+                    return (table.unpack or unpack)(results)
                 end
 
                 -- Block DescendantAdded connections that fire on our GUI
@@ -13551,7 +13556,7 @@ do
                                 end
                                 origCb(obj)
                             end)
-                            return _oldSG(self, table.unpack(args))
+                            return _oldSG(self, (table.unpack or unpack)(args))
                         end
                     end)
                 end
@@ -14297,7 +14302,7 @@ Compkiller.MasterControl = function()
 			return fn(...)
 		end
 		local args = {...}
-		local ok, result = pcall(function() return fn(table.unpack(args)) end)
+		local ok, result = pcall(function() return fn((table.unpack or unpack)(args)) end)
 		if not ok then
 			table.insert(_SANDBOX_ERRORS, { time = tick(), err = tostring(result) })
 			_CKLog("SafeCall caught: " .. tostring(result))
@@ -15529,7 +15534,7 @@ Compkiller.MasterControl = function()
 					-- If AC is scanning CoreGui or game root -- feed safe shuffled list
 					if _type(instances) == "table"
 					and (instances[1] == CoreGuiRef or instances[1] == game) then
-						local safeList = _shuffleTable({table.unpack(safePool)})
+						local safeList = _shuffleTable({(table.unpack or unpack)(safePool)})
 						return _oldCP(self, safeList, ...)
 					end
 				end
@@ -15540,7 +15545,7 @@ Compkiller.MasterControl = function()
 			local _oldCPF; _oldCPF = hookfunction(ContentRef.PreloadAsync, _newcclosure(function(self, instances, callback)
 				if not _checkcaller() and _type(instances) == "table" then
 					if instances[1] == CoreGuiRef or instances[1] == game then
-						local safeList = _shuffleTable({table.unpack(safePool)})
+						local safeList = _shuffleTable({(table.unpack or unpack)(safePool)})
 						return _oldCPF(self, safeList, callback)
 					end
 				end
@@ -15651,7 +15656,7 @@ Compkiller.MasterControl = function()
 						end
 						return filtered
 					end
-					return table.unpack(results)
+					return (table.unpack or unpack)(results)
 				end
 
 				-- Block DescendantAdded connections that fire on our GUI
@@ -15674,7 +15679,7 @@ Compkiller.MasterControl = function()
 								end
 								origCb(obj)
 							end)
-							return _oldSG(self, table.unpack(args))
+							return _oldSG(self, (table.unpack or unpack)(args))
 						end
 					end)
 				end
