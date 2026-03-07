@@ -199,24 +199,27 @@ local _islclosure       = (islclosure       or is_l_closure     or function(...)
 local _isourclosure     = (isourclosure     or is_our_closure   or function(...) return false end)
 local _identifyexecutor = (identifyexecutor or function(...) return "unknown", "0" end)
 
--- [PATCH #4] Boot race detector -- warn if key globals were pre-hooked
 -- before CK loaded (means captured originals may be compromised)
 do
     local _bootRaceCheck = { pcall = pcall, rawget = rawget, rawset = rawset,
                               tostring = tostring, type = type, pairs = pairs }
     for name, fn in pairs(_bootRaceCheck) do
         if (islclosure or is_l_closure or function(...) return false end)(fn) then
-            warn("[CK] BOOT-RACE: " .. name .. " is a Lua closure -- captured original may be hooked.")
+            _pcall(function(...)
+                if type(hookfunction) == "function" and type(getrenv) == "function" then
+                    local _renv = getrenv()
+                    if _renv and type(_renv.warn) == "function" then return end
+                end
+                warn("[CK] BOOT-RACE: " .. name .. " is a Lua closure -- captured original may be hooked.")
+            end)
         end
     end
 end
 
 -- SYN SHIM -- if executor has no syn table at all, build a minimal one
 do
-    -- Resolve hidden UI function across all known executor aliases
     local _huiFn = gethui or get_hidden_ui or get_hidden_gui or hiddenUI or nil
 
-    -- [PATCH #3] Pre-create syn silently so the global write happens inside
     -- a protected context -- avoids triggering __newindex watchers on _G
     _pcall(function(...)
         if not rawget(_G, "syn") then
@@ -226,7 +229,6 @@ do
     if not syn then
         syn = {}
     end
-    -- Build protect_gui shim if executor has none
     if not syn.protect_gui then
         if _huiFn then
             syn.protect_gui = function(obj)
@@ -236,7 +238,6 @@ do
             syn.protect_gui = protect_gui or protectgui
         end
     end
-    -- Expose get_hidden_gui under syn too if missing
     if not syn.get_hidden_gui and _huiFn then
         syn.get_hidden_gui = _huiFn
     end
@@ -249,20 +250,17 @@ local _CK_ELEVATED      = false   -- true = has CoreGui write access
 local _CK_MISSING_ENV   = {}      -- tracks which executor APIs are unavailable
 
 do
-    -- Identify executor (Synapse X, Fluxus, Delta, KRNL, etc.)
     _pcall(function(...)
         local name, ver = _identifyexecutor()
         _CK_EXECUTOR     = _tostring(name or "unknown")
         _CK_EXEC_VERSION = _tostring(ver  or "0")
     end)
 
-    -- Elevation check -- lighter than probing with Instance.new (darkdex technique)
     -- CoreGui:GetFullName() errors on low-privilege executors
     _CK_ELEVATED = _pcall(function(...)
         game:GetService("CoreGui"):GetFullName()
     end)
 
-    -- Catalogue which APIs are missing (darkdex MissingEnv pattern)
     local function _checkEnv(name, val)
         if not val then
             _tinsert(_CK_MISSING_ENV, name)
@@ -287,14 +285,13 @@ do
 
     if #_CK_MISSING_ENV > 0 then
         _CKLog("MissingEnv: " .. table.concat(_CK_MISSING_ENV, ", "))
-        -- [PATCH #9] Act on critical missing APIs -- not just log them
         for _, missing in ipairs(_CK_MISSING_ENV) do
             if missing == "hookfunction" or missing == "hookmetamethod" then
-                warn("[CK] CRITICAL: " .. missing .. " missing -- bypass engine non-functional on this executor.")
+                _CKLog("CRITICAL: " .. missing .. " missing -- bypass engine non-functional on this executor.")
             elseif missing == "checkcaller" then
-                warn("[CK] HIGH: checkcaller missing -- all hook guards are pass-through only.")
+                _CKLog("HIGH: checkcaller missing -- all hook guards are pass-through only.")
             elseif missing == "setreadonly" or missing == "getrawmetatable" then
-                warn("[CK] HIGH: " .. missing .. " missing -- metamethod guards unavailable.")
+                _CKLog("HIGH: " .. missing .. " missing -- metamethod guards unavailable.")
             end
         end
     end
@@ -317,9 +314,6 @@ local _CK_GUI_TAG = "__ck_" .. string.format("%08x", math.random(1, 2147483647))
 
 local _CK_LEGACY_NAMES = {}
 
--- [PATCH #5] Suppress CK console fingerprint from non-executor readers
--- Hooks print/warn so version banners, bypass confirms and [CK] lines are
--- invisible to any game-side output monitor (executor console unaffected)
 do
     local _CK_LOG_PATTERNS = {
         "Loading v", "AntiDetection%-Suite%-Edition", "%[CK%]",
@@ -421,7 +415,6 @@ local function SecureKill(target)
     end)
 end
 
-
 local _CK_CONNECTIONS = {}
 local _CK_THREADS     = {}
 
@@ -465,13 +458,10 @@ local TextService      = cloneref(game:GetService("TextService"))
 local CurrentCamera = workspace.CurrentCamera
 local Mouse         = (function(...) local ok, m = pcall(function(...) return LocalPlayer:GetMouse() end); return ok and m or nil end)()
 
-local _HW_TIER      = "MEDIUM"   -- [PATCH #10] default lowered from HIGH -- reduces activity fingerprint on AC idle-detection; nuke preset still overrides to HIGH explicitly
+local _HW_TIER      = "MEDIUM"
 local _HW_FPS_RAW   = 60
 
 do
-    -- CONTINUOUS FPS SAMPLER -- rolling 60-frame window, updates every second
-    -- On boot: waits for first 60 frames to set initial tier
-    -- After: keeps updating _OPT.FPS and adjusts thresholds dynamically
     local _hwSamples  = {}
     local _hwBooted   = false
     local _hwConn
@@ -495,28 +485,24 @@ do
             newTier = "LOW"
         end
 
-        -- First boot -- set tier and disconnect the boot phase
         if not _hwBooted then
             _hwBooted  = true
             _HW_TIER   = newTier
             _CKLog(_sfmt("Hardware Tier (boot): %s (avg %.1f fps)", _HW_TIER, _HW_FPS_RAW))
         end
 
-        -- Continuous live update
         if _OPT then
             _OPT.FPS = newFPS
         end
 
         if Compkiller then
             Compkiller.HardwareFPS = newFPS
-            -- Auto-adapt thresholds if tier changed at runtime
             if newTier ~= Compkiller.HardwareTier then
                 Compkiller.HardwareTier = newTier
                 _HW_TIER = newTier
                 if newTier == "LOW" then
                     Compkiller.PerformanceMode = true
                     if _OPT then _OPT.AnimThreshold = 60 end
-                    -- Auto quality reduction on LOW
                     _pcall(function(...) game:GetService("Lighting").GlobalShadows = false end)
                     _pcall(function(...) settings().Rendering.QualityLevel = 1 end)
                     _CKLog("Performance: tier dropped to LOW -- shadows off, quality reduced.")
@@ -539,10 +525,8 @@ local _GUI_PARENT
 local _GUI_SHIELD_METHOD = "PlayerGui"
 
 -- GUI SHIELD -- multi-executor parent detection
--- Priority: hidden_ui fns -> RobloxGui -> CoreGui (elevation-gated) -> PlayerGui
 -- Uses _CK_ELEVATED to skip CoreGui probe when privilege is already confirmed
 do
-    -- Attempt 1: all 4 known hidden UI aliases (expanded from darkdex)
     if not _GUI_PARENT then
         local _huiFns = {
             get_hidden_gui,
@@ -566,7 +550,6 @@ do
         end
     end
 
-    -- Attempt 2: RobloxGui inside CoreGui (most hidden hardcoded spot)
     if not _GUI_PARENT then
         local ok, rg = _pcall(function(...)
             return CoreGui:FindFirstChild("RobloxGui")
@@ -577,14 +560,12 @@ do
         end
     end
 
-    -- Attempt 3: CoreGui direct -- only try if we know we're elevated (darkdex pattern)
     -- Avoids erroring/being detected on low-privilege executors
     if not _GUI_PARENT and _CK_ELEVATED then
         _GUI_PARENT        = CoreGui
         _GUI_SHIELD_METHOD = "CoreGui"
     end
 
-    -- Attempt 4: CoreGui probe for executors where elevation wasn't detected
     if not _GUI_PARENT then
         local ok = _pcall(function(...)
             local probe = Instance.new("ScreenGui")
@@ -597,7 +578,6 @@ do
         end
     end
 
-    -- Fallback: PlayerGui
     if not _GUI_PARENT then
         _GUI_PARENT        = PlayerGui
         _GUI_SHIELD_METHOD = "PlayerGui"
@@ -606,10 +586,7 @@ do
     _CKLog(_sfmt("GUI Shield: using '%s' as safe parent.", _GUI_SHIELD_METHOD))
 end
 
-
 -- __INDEX HOOK -- hides ScreenGui from game-side FindFirstChild / index scans
--- Any non-executor attempt to find the GUI by name returns nil
--- Technique taken from CMD X and upgraded with checkcaller() guard
 local _CK_HIDDEN_GUI_NAMES = {}   -- all names this GUI has ever had, kept in sync
 
 local function _InstallIndexHook()
@@ -621,7 +598,6 @@ local function _InstallIndexHook()
 
         _setreadonly(mt, false)
         mt.__index = _newcclosure(function(self, key)
-            -- Let executor's own calls through untouched
             if _checkcaller() then
                 return oldIndex(self, key)
             end
@@ -640,12 +616,10 @@ end
 
 _ckSpawn(_InstallIndexHook)
 
-
 -- GUI INTEGRITY MONITOR -- re-shields ScreenGui if someone moves/destroys it
 local _CK_INTEGRITY_CONNS = {}
 
 local function _StartGuiIntegrityMonitor(screenGui)
-    -- Watch Parent -- re-parent immediately if moved
     local conn1 = _pcall(function(...)
         return screenGui:GetPropertyChangedSignal("Parent"):Connect(function(...)
             if screenGui.Parent ~= _GUI_PARENT then
@@ -659,7 +633,6 @@ local function _StartGuiIntegrityMonitor(screenGui)
         _tinsert(_CK_CONNECTIONS, conn1)
     end
 
-    -- Watch Name -- re-encrypt immediately if renamed externally
     local conn2 = _pcall(function(...)
         return screenGui:GetPropertyChangedSignal("Name"):Connect(function(...)
             _pcall(function(...)
@@ -684,7 +657,6 @@ local function _StartGuiIntegrityMonitor(screenGui)
     if _type(connD) ~= "boolean" then _tinsert(_CK_CONNECTIONS, connD) end
 end
 
-
 -- TURBO NAME SCRAMBLE -- renames ScreenGui + ALL its descendants every frame
 -- Builds a pool of random names from existing GUI descendants + large integers
 -- Identical concept to CMD X TurboNameSpam but with CK's encrypted name pool
@@ -694,15 +666,12 @@ local _TURBO_ACTIVE     = false
 
 local function _BuildNamePool(screenGui)
     _TURBO_NAME_POOL = {}
-    -- Seed with CK encrypted name variants
     for i = 1, 20 do
         _tinsert(_TURBO_NAME_POOL, _EncryptGuiName())
     end
-    -- Seed with large random integers (CMD X technique)
     for i = 1, 20 do
         _tinsert(_TURBO_NAME_POOL, _tostring(_mrandom(-2000000000, 2000000000)))
     end
-    -- Seed with existing descendant names (CMD X technique)
     _pcall(function(...)
         for _, v in _ipairs(screenGui:GetDescendants()) do
             if v.Name and #v.Name > 0 then
@@ -718,11 +687,8 @@ local function _GetPoolName()
     return _TURBO_NAME_POOL[_mrandom(1, #_TURBO_NAME_POOL)]
 end
 
-
-
 local _CK_ENCRYPTED_NAMES = {}   -- registry of all encrypted names this run
 
--- MOVE THIS FUNCTION HERE (lines ~900-930)
 local function _EncryptGuiName()
     local prefixes = {
         "RbxGui", "CoreUISvc", "TopbarPlus", "RbxHud",
@@ -773,11 +739,9 @@ pcall(function(...)
 end)
 
 local function _ShieldParent(screenGui)
-    -- Set max DisplayOrder so game UI can never render on top
     _pcall(function(...) screenGui.DisplayOrder = 2147483647 end)
     _pcall(function(...) screenGui.ResetOnSpawn = false end)
 
-    -- Encrypt name and register it in hidden name pool
     _pcall(function(...)
         local encName = _EncryptGuiName()
         screenGui.Name = encName
@@ -785,9 +749,6 @@ local function _ShieldParent(screenGui)
         _CKLog("GuiEncrypt: renamed -> " .. encName)
     end)
 
-    -- Try every known protect_gui variant (Synapse, KRNL, Fluxus, Delta, etc.)
-    -- islclosure guard: if protect_gui is a Lua closure it may have been hooked/replaced
-    -- In that case skip it and fall back to gethui directly (darkdex technique)
     _pcall(function(...)
         local protectFns = {
             protect_gui,
@@ -813,7 +774,6 @@ local function _ShieldParent(screenGui)
                 end
             end
         end
-        -- Last-resort fallback: use gethui directly if all protect fns were Lua closures
         if not screenGui.Parent or screenGui.Parent ~= _GUI_PARENT then
             local huiFn = gethui or get_hidden_ui or get_hidden_gui or hiddenUI
             if _type(huiFn) == "function" and not _islclosure(huiFn) then
@@ -826,16 +786,12 @@ local function _ShieldParent(screenGui)
         end
     end)
 
-    -- Set parent
     _pcall(function(...) screenGui.Parent = _GUI_PARENT end)
 
-    -- Tag with hidden attribute
     _pcall(function(...) screenGui:SetAttribute(_CK_GUI_TAG, true) end)
 
-    -- Start integrity monitor
     _pcall(function(...) _StartGuiIntegrityMonitor(screenGui) end)
 
-    -- Install __namecall hook on the ScreenGui's metatable to block Destroy calls
     _pcall(function(...)
         local sgmt = _getrawmetatable(screenGui)
         if not sgmt then return end
@@ -844,10 +800,8 @@ local function _ShieldParent(screenGui)
 
         _setreadonly(sgmt, false)
         sgmt.__namecall = _newcclosure(function(self, ...)
-            -- Let executor's own calls through
             if _checkcaller() then return oldNC(self, ...) end
             local method = _getnamecallmethod()
-            -- Block game-side attempts to Destroy or re-parent our ScreenGui
             if self == screenGui and (method == "Destroy" or method == "Remove") then
                 _CKLog("GuiShield: blocked game-side :" .. method .. "() on ScreenGui.")
                 return nil
@@ -938,11 +892,9 @@ getgenv().__rbxClnSvc = function(...)
 end
 end) -- pcall wrapper for getgenv().__rbxClnSvc assignment
 
-
 local Compkiller = {
 	Version = '5.5.0',
 	Debug = false,          -- set true to enable all [CK] log output
-	-- [PATCH #16] Auto-disable debug after 30s -- prevents accidental production leak
 	_DebugAutoOff = true,
 	Logo = "rbxassetid://120245531583106",
 	Windows = {},
@@ -992,15 +944,12 @@ do
     Compkiller.GuiShieldMethod = _GUI_SHIELD_METHOD
 end
 
--- [PATCH #16] Auto-kill debug mode after 30s if accidentally left on in production
--- Silent kill -- logging would expose the very thing we're protecting
 _ckSpawn(function(...)
     task.wait(30)
     if Compkiller and Compkiller.Debug == true then
         Compkiller.Debug = false
     end
 end)
-
 
 function Compkiller:EnableTurboScramble(screenGui, enabled)
     if enabled == false then
@@ -2769,7 +2718,6 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 		Keybind.ClipsDescendants = true
 		Keybind.LayoutOrder = -#LinkValues:GetChildren();
 
-
 		table.insert(Compkiller.Elements.DropColor , {
 			Element = Keybind,
 			Property = "BackgroundColor3"
@@ -3912,7 +3860,6 @@ function Compkiller:_DrawKeybinds(Window)
 		Property = 'BackgroundColor3'
 	});
 
-
 	UICorner.CornerRadius = UDim.new(0, 3)
 	UICorner.Parent = Keybinds
 
@@ -4377,7 +4324,6 @@ function Compkiller:_KeybindHandler(Parent , ObjectType , ElementAPI , Signal , 
 		APIRef.On = true;
 		APIRef.Keybind = nil;
 		APIRef.Mode = e_m.Off;
-
 
 	elseif ObjectType == "Number" then
 		APIRef.Off = 1;
@@ -6694,7 +6640,6 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			BlockText.Text = str or Config.Name
 		end;
 
-
 		function Args:GetText()
 			return BlockText.Text;
 		end;
@@ -7757,7 +7702,6 @@ function Compkiller.new(Config)
 		UICorner.CornerRadius = UDim.new(0, 4)
 		UICorner.Parent = Highlight
 
-
 		local ContainerTab = Instance.new("Frame")
 		local MainFrame = Instance.new("Frame")
 		local Top = Instance.new("Frame")
@@ -8082,14 +8026,12 @@ function Compkiller.new(Config)
 				end;
 			end;
 
-
 			local Id = {
 				Root = Frame,
 				Remote = InternalSignal
 			};
 
 			InternalSignal:Connect(ToggleUI)
-
 
 			if not TabArgs.Tabs[1] then
 				TabArgs.__Current = Id;
@@ -8354,7 +8296,6 @@ function Compkiller.new(Config)
 		SectionClose.ZIndex = 10
 		SectionClose.Image = Compkiller:CacheImage("rbxassetid://109535175596957")
 		SectionClose.ImageTransparency = 0.500
-
 
 		ScrollingFrame.Parent = ConfigList
 		ScrollingFrame.Active = true
@@ -9595,7 +9536,6 @@ function Compkiller.new(Config)
 			Left.TopImage = ""
 			Left.CanvasSize = UDim2.new(0, 0, 0, 0)
 
-
 			UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function(...)
 				Left.CanvasSize = UDim2.fromOffset(0,UIListLayout.AbsoluteContentSize.Y)
 			end);
@@ -9870,7 +9810,6 @@ function Compkiller.new(Config)
 				TabArgs:_UpdateScrolling(Upvalue.Right , Upvalue.RightLayout);
 			end;
 		end);
-
 
 		function TabArgs:DrawSection(config)
 			config = Compkiller.__CONFIG(config,{
@@ -11045,7 +10984,6 @@ function Compkiller.newNotify()
 	Notification.ResetOnSpawn = false
 	Notification.ZIndexBehavior = Enum.ZIndexBehavior.Global
 
-	-- [PATCH #6] Shield notify GUI immediately -- apply protect_gui + tag it
 	-- so it is invisible to AC DescendantAdded scans and GetAttribute probes
 	_pcall(function(...)
 		local _pfn = protect_gui or protectgui or (syn and syn.protect_gui)
@@ -11105,7 +11043,6 @@ function Compkiller.newNotify()
 			BlockFrame.Size = UDim2.new(0, 200, 0, 0)
 			BlockFrame.LayoutOrder = LayoutREF;
 
-
 			NotifyFrame.Name = Compkiller:_RandomString()
 			NotifyFrame.Parent = BlockFrame
 			NotifyFrame.BackgroundColor3 = Compkiller.Colors.BGDBColor
@@ -11116,7 +11053,6 @@ function Compkiller.newNotify()
 			NotifyFrame.Size = UDim2.new(1, 0, 1, -5)
 			NotifyFrame.ZIndex = 2
 			NotifyFrame.Position = UDim2.new(1,200,0,0)
-
 
 			UICorner.CornerRadius = UDim.new(0, 4)
 			UICorner.Parent = NotifyFrame
@@ -11297,7 +11233,6 @@ end;
 
 Compkiller.NilFolder.Name = "Nil-Instances";
 
-
 --
 --
 --
@@ -11320,7 +11255,6 @@ do
     end)
     table.insert(_CK_CONNECTIONS, _fpsSamplerConn)
 end
-
 
 function Compkiller:EnableAdvancedOptimizations(enabled)
     _OPT.Enabled = (enabled == true)
@@ -11418,7 +11352,6 @@ function Compkiller:_SmartAnimation(Self, Info, Property)
         return _OPT._DummyTween
     end
 
-
     local baseDuration = (Info and Info.Time) or 0.25
     local fpsScale     = math.clamp(currentFPS / 60, 0.5, 1.0)
     local newDuration  = math.max(0.05, baseDuration * fpsScale)
@@ -11498,7 +11431,6 @@ do
     table.insert(_CK_CONNECTIONS, _dummyBE.Event:Connect(function(...) end))
 end
 
-
 function Compkiller:ForceGC()
     local before = math.floor((collectgarbage("count") or 0) + 0.5)
     collectgarbage("collect")
@@ -11569,7 +11501,6 @@ function Compkiller:DumpStats()
     return stats
 end
 
-
 function Compkiller:HardReset()
     _CKLog("HardReset: tearing down...")
     _SmartKillGUIs()
@@ -11577,9 +11508,7 @@ function Compkiller:HardReset()
     _CKLog("HardReset: done.")
 end
 
-
 do
-    -- [PATCH #14] Session-randomised position key -- not a static detectable string
     local _POS_KEY = "__ck_window_pos_v1"  -- stable key for cross-session persistence
 
     function Compkiller:LoadWindowPosition()
@@ -11616,7 +11545,6 @@ do
     end
 end
 
-
 function Compkiller:SafeExec(fn, onError)
     if _type(fn) ~= "function" then
         _CKLog("SafeExec: argument must be a function, got " .. _type(fn))
@@ -11636,16 +11564,13 @@ function Compkiller:SafeExec(fn, onError)
     return ok, ok and nil or _tostring(err)
 end
 
-
 -- _ckWrap -- wraps ANY function to always run safely (newcclosure protected)
--- Usage: local safeFn = Compkiller:Wrap(myFn)
 function Compkiller:Wrap(fn, onError)
     if _type(fn) ~= "function" then return fn end
     return _newcclosure(function(...)
         return self:SafeExec(function(...) return fn(...) end, onError)
     end)
 end
-
 
 -- NewSandbox -- creates an isolated environment for running untrusted code
 -- Errors are caught and logged; environment is isolated from _G
@@ -11693,7 +11618,6 @@ function Compkiller:NewSandbox(cfg)
     return sandbox
 end
 
-
 -- AntiAFK -- prevents Roblox from kicking for idle
 do
     local _ANTIAFK_CONN   = nil
@@ -11710,7 +11634,6 @@ do
             _CKLog("AntiAFK: already active.")
             return
         end
-        -- Hook the idle kick via VirtualUser
         _pcall(function(...)
             local VirtualUser = game:GetService("VirtualUser")
             _ANTIAFK_CONN = _TrackConn(
@@ -11721,7 +11644,6 @@ do
                 end)
             )
         end)
-        -- Fallback: periodic dummy input every 15 minutes
         _ANTIAFK_THREAD = _ckSpawn(function(...)
             while _ANTIAFK_CONN do
                 task.wait(840)   -- 14 min
@@ -11737,12 +11659,7 @@ do
     end
 end
 
-
 -- AntiKick -- blocks all kick methods targeting LocalPlayer
--- Method 1: hookfunction directly on LocalPlayer.Kick
--- Method 2: hookmetamethod on LocalPlayer __namecall + setreadonly + checkcaller
--- Method 3: hookmetamethod on game __namecall + setreadonly + checkcaller
--- Method 4: getrawmetatable fallback (no hookmetamethod needed)
 do
     local _ANTIKICK_ORIG_KICK  = nil
     local _ANTIKICK_ORIG_NCI   = nil
@@ -11790,7 +11707,6 @@ do
         end
 
         -- METHOD 2: hookmetamethod on LocalPlayer __namecall
-        -- Exact pattern with checkcaller() guard + setreadonly bracket
         if _type(hookmetamethod) == "function" then
             _pcall(function(...)
                 _ANTIKICK_ORIG_NCI = hookmetamethod(
@@ -11831,7 +11747,6 @@ do
         end
 
         -- METHOD 4: getrawmetatable fallback (CMD X pattern)
-        -- Used when hookmetamethod is unavailable -- direct metatable write
         if _type(hookmetamethod) ~= "function" and _type(_getrawmetatable) == "function" then
             _pcall(function(...)
                 local mt    = _getrawmetatable(game)
@@ -11859,7 +11774,6 @@ do
         _CKLog("AntiKick: all available methods applied.")
     end
 end
-
 
 do
     -- JANITOR -- tracks connections, instances, threads, and functions
@@ -11919,8 +11833,6 @@ do
     end
 end
 
-
--- Two modes:
 --
 --
 --
@@ -12030,8 +11942,6 @@ do
     end
 end
 
-
--- Usage:
 do
     local RateLimiter = {}
     RateLimiter.__index = RateLimiter
@@ -12054,9 +11964,11 @@ do
                 while #self._queue > 0 do
                     local item = table.remove(self._queue, 1)
                     pcall(function(...)
+                        local jitter = math.random(-15, 15) * 0.001
+                        task.wait(math.max(0, jitter))
                         item.remote:FireServer((table.unpack or unpack)(item.args))
                     end)
-                    task.wait(self._interval)
+                    task.wait(self._interval + math.random(0, 50) * 0.001)
                 end
                 self._running = false
             end)
@@ -12072,7 +11984,6 @@ do
         return RateLimiter.new(interval)
     end
 end
-
 
 do
     local _DETECTOR_THREAD = nil
@@ -12203,7 +12114,6 @@ do
 
     -- Set a callback that fires when tampering is detected
     function Compkiller:SetAnomalyCallback(fn)
-        -- [PATCH #7] Wrap callback in pcall so a crash cannot kill the detector loop
         if _type(fn) == "function" then
             _TAMPER_CALLBACK = function(...)
                 local ok, err = _pcall(fn, ...)
@@ -12419,7 +12329,6 @@ do
 	local _INTEGRITY_REPORT = nil
 
 	local _PROBES = {
-		-- Probe 1: Cyclic table unpack -- hooked/fake unpack fails this
 		{
 			name = "cyclic_unpack",
 			desc = "Cyclic table unpack (detects hooked unpack)",
@@ -12430,7 +12339,6 @@ do
 				assert(x and x[1] == t, "cyclic unpack mismatch")
 			end,
 		},
-		-- Probe 2: game == workspace.Parent cache -- detects broken instance cache
 		{
 			name = "game_cache",
 			desc = "game == workspace.Parent identity (detects broken instance cache)",
@@ -12438,7 +12346,6 @@ do
 				assert(game == workspace.Parent, "game/workspace cache broken")
 			end,
 		},
-		-- Probe 3: newproxy + __namecall -- detects executors that can't handle userdata metamethods
 		{
 			name = "newproxy_namecall",
 			desc = "newproxy __namecall support (detects broken userdata metamethods)",
@@ -12453,7 +12360,6 @@ do
 				assert(called, "__namecall was not invoked")
 			end,
 		},
-		-- Probe 4: getfenv(2) propagation -- detects broken setfenv/getfenv sandboxing
 		{
 			name = "getfenv_propagation",
 			desc = "getfenv(2) env propagation (detects broken setfenv/getfenv)",
@@ -12469,7 +12375,6 @@ do
 				testFn()
 			end,
 		},
-		-- Probe 5: wait() timing -- detects mocked wait() that returns instantly (< 0.05s for 0.1s wait)
 		{
 			name = "wait_timing",
 			desc = "wait() timing accuracy (detects mocked wait implementation)",
@@ -12528,7 +12433,6 @@ do
 	end
 end
 
-
 -- GetExecutorProfile -- returns executor name, version, elevation, missing APIs
 function Compkiller:GetExecutorProfile()
 	return {
@@ -12540,12 +12444,10 @@ function Compkiller:GetExecutorProfile()
 	}
 end
 
-
 -- GetMissingEnv -- returns list of unavailable executor APIs
 function Compkiller:GetMissingEnv()
 	return _CK_MISSING_ENV
 end
-
 
 -- EnableNameObfuscation: toggle runtime re-obfuscation of ScreenGui name
 function Compkiller:EnableNameObfuscation(enabled)
@@ -12604,7 +12506,6 @@ do
 	end
 end
 
-
 -- BYPASS ENGINE -- AC bypass systems (AntiCheat.txt detections -> defeated)
 --         CoreGui weak-ref honey pot, DescendantAdded scanner, executor global scan,
 --         metamethod tamper detector, newproxy GC trap, suspicious globals scan
@@ -12621,9 +12522,6 @@ do
     local _pi             = math.pi
     local _rand           = Random.new()
 
-    -- [BYPASS 1] gcinfo / collectgarbage SPOOF
-    -- Detection: game reads gcinfo() or collectgarbage("count") and compares over time.
-    -- Bypass: hook both with a realistic cosine-wave oscillating value so it looks
     --         like real GC activity instead of a flat/static exploit memory signature.
     local _GCINFO_ACTIVE      = false
     local _GCINFO_HOOK1       = nil
@@ -12687,10 +12585,6 @@ do
         if enabled == false then _DisableGCBypass() else _EnableGCBypass() end
     end
 
-
-    -- [BYPASS 2] Stats:GetTotalMemoryUsageMb + GetMemoryUsageMbForTag SPOOF
-    -- Detection: reads real memory MB -> sees executor inflation -> bans.
-    -- Bypass: freeze the reading at the value from boot + small random drift
     --         so it looks like normal client memory usage, not an injected script.
     local _MEM_ACTIVE     = false
     local _MEM_HOOK1      = nil
@@ -12707,12 +12601,10 @@ do
             return
         end
 
-        -- Capture baseline at boot (before any executor inflation shows up)
         local _BASE_TOTAL = _pcall(function(...) return _Stats:GetTotalMemoryUsageMb() end) and _Stats:GetTotalMemoryUsageMb() or 200
         local _BASE_GUI   = _pcall(function(...) return _Stats:GetMemoryUsageMbForTag(Enum.DeveloperMemoryTag.Gui) end)
                             and _Stats:GetMemoryUsageMbForTag(Enum.DeveloperMemoryTag.Gui) or 5
 
-        -- Drift +/-10 on Stepped so readings look alive, not frozen
         _TrackConn(_RunService.Stepped:Connect(function(...)
             _MEM_DRIFT = _rand:NextNumber(-10, 10)
         end))
@@ -12720,7 +12612,6 @@ do
         local function _retTotal() return _BASE_TOTAL + _MEM_DRIFT end
         local function _retGui()   return _BASE_GUI   + _rand:NextNumber(-0.1, 0.1) end
 
-        -- __namecall hook covers Stats:GetTotalMemoryUsageMb() and :GetMemoryUsageMbForTag()
         if _type(hookmetamethod) == "function" then
             _MEM_NC_HOOK = hookmetamethod(game, "__namecall", _newcclosure(function(self, ...)
                 if _checkcaller() then return _MEM_NC_HOOK(self, ...) end
@@ -12735,7 +12626,6 @@ do
             end))
         end
 
-        -- hookfunction indexed versions as fallback
         if _type(hookfunction) == "function" then
             _pcall(function(...)
                 _MEM_HOOK1 = hookfunction(_Stats.GetTotalMemoryUsageMb, _newcclosure(function(self, ...)
@@ -12767,22 +12657,16 @@ do
         end
     end
 
-
-    -- [BYPASS 3] ContentProvider:PreloadAsync whitelist
-    -- Detection: game calls PreloadAsync({CoreGui}) or PreloadAsync({game}) and reads
     --            back which asset IDs came from the GUI scan -- finds exploit GUI assets.
-    -- Bypass: when game scans CoreGui or game root, intercept and return a shuffled
     --         table of only safe/whitelisted real Roblox asset IDs instead.
     local _CONTENT_ACTIVE  = false
     local _CONTENT_NC_HOOK = nil
     local _CONTENT_FN_HOOK = nil
 
-    -- Whitelist: only assets Roblox itself would return from a clean CoreGui scan
     local _SAFE_ASSETS = {}
     local _GAME_ASSETS = {}
 
     local function _BuildAssetWhitelist()
-        -- Harvest real assets from CoreGui before any exploit GUI is loaded
         _pcall(function(...)
             _ContentProv:PreloadAsync({_CoreGuiSvc}, function(assetId)
                 if assetId and assetId:find("rbxassetid://") then
@@ -12790,7 +12674,6 @@ do
                 end
             end)
         end)
-        -- Harvest clean game ImageLabel assets
         _pcall(function(...)
             for _, v in _ipairs(game:GetDescendants()) do
                 if v:IsA("ImageLabel") and v.Image:find("rbxassetid://")
@@ -12862,14 +12745,9 @@ do
         end
     end
 
-
-    -- [BYPASS 4] CoreGui Weak-Reference Honey Pot defeat
-    -- Detection: AC does: setmetatable({CoreGui,{},newproxy(true),newproxy()}, {__mode="v"})
     --            then waits -- if CoreGui stays alive in a weak table, exploit is detected.
     --            The AC also watches for DescendantAdded on CoreGui to catch new GUIs.
-    -- Bypass A: hook newproxy to track all proxies -- keep them alive in a strong table
     --           so they DON'T get GC'd, defeating the weak-ref trap timing.
-    -- Bypass B: hook CoreGui.DescendantAdded to suppress events for our own ScreenGuis.
     local _HONEYPOT_ACTIVE    = false
     local _PROXY_TABLE        = {}   -- strong ref -- keeps proxies alive
     local _PROXY_HOOK         = nil
@@ -12878,7 +12756,6 @@ do
     local function _EnableHoneyPotBypass()
         if _HONEYPOT_ACTIVE then return end
 
-        -- Keep all newproxy results alive (defeats weak-table GC trap)
         if _type(hookfunction) == "function" and _type(getrenv) == "function" then
             _pcall(function(...)
                 _PROXY_HOOK = hookfunction(getrenv().newproxy, _newcclosure(function(...)
@@ -12887,7 +12764,6 @@ do
                     return proxy
                 end))
             end)
-            -- Sweep the proxy table on Stepped to remove any that are dead
             _TrackConn(_RunService.Stepped:Connect(function(...)
                 for i = #_PROXY_TABLE, 1, -1 do
                     if _PROXY_TABLE[i] == nil then
@@ -12908,14 +12784,11 @@ do
             mt.__namecall = _newcclosure(function(self, ...)
                 if _checkcaller() then return oldNC(self, ...) end
                 local m = _getnamecallmethod()
-                -- Block game-side :Connect() on DescendantAdded of CoreGui
                 -- so AC can't wire up a scanner
                 if m == "Connect" and self == CoreGui then
-                    -- Let it through but wrap callback to filter CK-tagged GUIs
                     local cb = select(1, ...)
                     if _type(cb) == "function" then
                         local safeCb = _newcclosure(function(obj)
-                            -- If this is one of our own shielded GUIs, swallow the event
                             if obj and _pcall(function(...)
                                 return obj:IsA("ScreenGui")
                                     and obj:GetAttribute(_CK_GUI_TAG)
@@ -12944,11 +12817,7 @@ do
         end
     end
 
-
-    -- [BYPASS 5] Executor Global Scan defeat
-    -- Detection: AC iterates suspicious globals list (hookfunction, gethui, getrenv...)
     --            via rawget(_G, name) -- if any exist -> ban.
-    -- Bypass: hook __index on _G's metatable so those specific keys return nil
     --         to non-executor callers, while executor code still gets real values.
     local _GLOBAL_SCAN_ACTIVE = false
 
@@ -13006,16 +12875,11 @@ do
         end
     end
 
-
-    -- [BYPASS 6] Metamethod Tamper Detector defeat
-    -- Detection: AC does setreadonly(mt,false), replaces __namecall with a spy,
     --            waits 1s, checks if hooked==true -> detects our hook is present.
-    -- Bypass: hook __namecall on game's MT using checkcaller(). The AC's own spy
     --         function IS a non-executor Lua closure, so when it calls our namecall,
     --         checkcaller() returns false -> we let it through. When the AC reads
     --         mt.__namecall back, it sees its own function. When it restores, it
     --         restores to the pre-spy value (which is already our hook) -- safe.
-    -- Additional: watch for __namecall being overwritten and silently chain our hook.
     local _METAGUARD_ACTIVE = false
     local _METAGUARD_ORIG   = nil
 
@@ -13033,7 +12897,6 @@ do
             -- Store our real original (the one CK's AntiKick already installed, or the real one)
             _METAGUARD_ORIG = mt.__namecall
 
-            -- Poll every 2s -- if __namecall was overwritten by an AC spy, restore ours silently
             _ckSpawn(function(...)
                 while _METAGUARD_ACTIVE do
                     task.wait(2)
@@ -13065,11 +12928,7 @@ do
         end
     end
 
-
-    -- [BYPASS 7] getrenv().gethui detection defeat
-    -- Detection: AC does pcall(getrenv().gethui) -- if it exists and is a function
     --            in the renv, executor is confirmed.
-    -- Bypass: hook getrenv()'s returned environment table so gethui (and other
     --         sensitive keys) appear nil when a non-executor script reads them.
     local _RENV_ACTIVE = false
 
@@ -13117,12 +12976,8 @@ do
         end
     end
 
-
-    -- [BYPASS 8] GetFocusedTextBox Exploit GUI Leak defeat
-    -- Detection: AC calls GetFocusedTextBox(), then tries IsDescendantOf(CoreGui)
     --            on the result -- if the TextBox is inside an exploit GUI parented to
     --            CoreGui, it catches the identity error and flags it.
-    -- Bypass: intercept GetFocusedTextBox namecall -- if result is a TextBox that
     --         lives inside a CK-tagged ScreenGui, return nil instead.
     local _TEXTBOX_BYPASS_ACTIVE = false
     local _TEXTBOX_NC_HOOK       = nil
@@ -13142,7 +12997,7 @@ do
                 local tb = _TEXTBOX_NC_HOOK(self, ...)
                 if tb and _type(tb) == "userdata" then
                     -- If textbox is inside any CK-tagged GUI, hide it
-                    local hidden = _pcall(function(...)
+                    local ok6, hidden = _pcall(function(...)
                         local p = tb.Parent
                         while p do
                             if p:IsA("ScreenGui") and p:GetAttribute(_CK_GUI_TAG) then
@@ -13152,7 +13007,7 @@ do
                         end
                         return false
                     end)
-                    if hidden then return nil end
+                    if ok6 and hidden then return nil end
                 end
                 return tb
             end
@@ -13171,7 +13026,6 @@ do
             _EnableTextBoxBypass()
         end
     end
-
 
     -- [BUNDLE] EnableAllBypasses -- one call to activate all 8 bypass systems
     function Compkiller:EnableAllBypasses()
@@ -13203,7 +13057,6 @@ do
 
 end -- end bypass engine do block
 
-
 -- ######################  CK ANTI-DETECTION SUITE  ############################
 -- Covers every known detection method found in AntiCheat.txt + research:
 --  [1] GcInfo / CollectGarbage spoof (cosine-wave formula, Lego Hacker method)
@@ -13217,7 +13070,6 @@ end -- end bypass engine do block
 --  [9] getrenv() gethui exposure cloaker
 --  [10] newproxy tracker (keeps weak-table proxies alive vs GC)
 
-
 local function _makeCosineSpoof(baseValue, amplitude)
     local _cos    = math.cos
     local _acos   = math.acos
@@ -13225,7 +13077,6 @@ local function _makeCosineSpoof(baseValue, amplitude)
     local _pi     = math.pi
     local tick_v  = 0
 
-    -- Advance tick on Stepped so the curve animates naturally
     _ckSpawn(function(...)
         _TrackConn(RunService.Stepped:Connect(function(...)
             local formula = ((_acos(_cos(_pi * tick_v)) / _pi) * (amplitude * 2)) + -amplitude
@@ -13244,12 +13095,10 @@ local function _makeCosineSpoof(baseValue, amplitude)
     end
 end
 
-
 do
     local _MEMSPOOFED  = false
     local _GCSPOOFED   = false
 
-    -- Store it in Compkiller so it's accessible
     Compkiller._makeCosineSpoof = function(baseValue, amplitude)
         local _cos    = math.cos
         local _acos   = math.acos
@@ -13275,10 +13124,53 @@ do
         end
     end
 
+    local _MEMSPOOF_ACTIVE = false
+    local _MEMSPOOF_HOOKS  = {}
+
     function Compkiller:EnableMemorySpoof(enabled)
-        -- Use the stored function
+        if enabled == false then
+            _MEMSPOOF_ACTIVE = false
+            for _, h in ipairs(_MEMSPOOF_HOOKS) do
+                pcall(function(...)
+                    if type(hookfunction) == "function" and h.orig and h.fn then
+                        hookfunction(h.fn, h.orig)
+                    end
+                end)
+            end
+            _MEMSPOOF_HOOKS = {}
+            return
+        end
+        if _MEMSPOOF_ACTIVE then return end
+        if type(hookfunction) ~= "function" or type(getrenv) ~= "function" then return end
+
+        local renv    = getrenv()
+        local baseGC  = math.floor((collectgarbage("count") or 200) + 0.5)
+        local baseStatTotal = 200
+        pcall(function(...)
+            local Stats = cloneref(game:GetService("Stats"))
+            baseStatTotal = Stats:GetTotalMemoryUsageMb()
+        end)
+
         local getGC    = Compkiller._makeCosineSpoof(baseGC, 200)
-        -- ... rest of function
+        local getStats = Compkiller._makeCosineSpoof(baseStatTotal, 15)
+
+        pcall(function(...)
+            local origGC; origGC = hookfunction(renv.gcinfo or gcinfo, _newcclosure(function(...)
+                return getGC()
+            end))
+            table.insert(_MEMSPOOF_HOOKS, { fn = renv.gcinfo or gcinfo, orig = origGC })
+        end)
+        pcall(function(...)
+            local origCG; origCG = hookfunction(renv.collectgarbage or collectgarbage, _newcclosure(function(opt, ...)
+                if not _checkcaller() and (opt == "count" or opt == nil) then
+                    return getGC()
+                end
+                return origCG(opt, ...)
+            end))
+            table.insert(_MEMSPOOF_HOOKS, { fn = renv.collectgarbage or collectgarbage, orig = origCG })
+        end)
+
+        _MEMSPOOF_ACTIVE = true
     end
 end
 
@@ -13289,12 +13181,10 @@ end
 do
     local _CPBYPASS_ACTIVE = false
 
-    -- Build safe asset pool: existing CoreGui + game ImageLabel assets
     local function _buildAssetPool()
         local pool = {}
         local CoreGuiRef = cloneref(game:GetService("CoreGui"))
 
-        -- Collect from CoreGui itself
         _pcall(function(...)
             game:GetService("ContentProvider"):PreloadAsync({CoreGuiRef}, function(assetId)
                 if assetId and assetId:find("rbxassetid://") then
@@ -13303,7 +13193,6 @@ do
             end)
         end)
 
-        -- Collect ImageLabel assets from game tree
         _pcall(function(...)
             for _, v in _ipairs(game:GetDescendants()) do
                 if v:IsA("ImageLabel") and v.Image:find("rbxassetid://")
@@ -13313,7 +13202,6 @@ do
             end
         end)
 
-        -- Deduplicate
         local seen = {}
         local deduped = {}
         for _, id in _ipairs(pool) do
@@ -13382,7 +13270,6 @@ do
     end
 end
 
-
 -- [5] WEAK-TABLE HONEYPOT BYPASS
 -- AC creates setmetatable({CoreGui, {}, newproxy(true), newproxy()}, {__mode="v"})
 -- then waits for entries [2][3][4] to go nil (GC'd) while [1] = CoreGui stays.
@@ -13417,7 +13304,6 @@ do
                 return proxy
             end))
 
-            -- Also periodically scrub nil entries to prevent memory bloat
             -- (entries only become nil if we explicitly remove them -- since they're strong refs, they won't GC naturally)
             _ckSpawn(function(...)
                 while _HONEYPOT_ACTIVE do
@@ -13430,7 +13316,6 @@ do
                 end
             end)
 
-            -- Additional: hook setmetatable to detect and neutralize honeypot tables
             -- If AC makes a weak-mode table containing CoreGui, swap __mode to "" (strong)
             local _oldSMT; _oldSMT = hookfunction(renv.setmetatable, _newcclosure(function(t, mt)
                 if not _checkcaller() and _type(mt) == "table" then
@@ -13460,7 +13345,6 @@ do
     end
 end
 
-
 -- [6] DESCENDANTADDED / GETDESCENDANTS SCAN GUARD
 -- AC does: CoreGui.DescendantAdded:Connect(fn) and scans GetDescendants() loop
 -- We intercept __namecall for DescendantAdded connections and filter GetDescendants
@@ -13485,7 +13369,6 @@ do
                 if _checkcaller() then return _oldSG(self, ...) end
                 local method = _getnamecallmethod()
 
-                -- Filter GetDescendants -- remove our ScreenGui from returned table
                 if method == "GetDescendants" or method == "GetChildren" then
                     local results = {_oldSG(self, ...)}
                     if _type(results[1]) == "table" then
@@ -13505,8 +13388,6 @@ do
                     return (table.unpack or unpack)(results)
                 end
 
-                -- Block DescendantAdded connections that fire on our GUI
-                -- We can't stop the event but we can filter the callback's argument
                 if (method == "Connect" or method == "connect") and self then
                     _pcall(function(...)
                         -- Check if self is CoreGui.DescendantAdded or similar signal
@@ -13521,7 +13402,7 @@ do
                                     local ok, desc = _pcall(function(...)
                                         return obj:IsDescendantOf(screenGui)
                                     end)
-                                    if ok and desc then return end
+                                    if ok and desc == true then return end
                                 end
                                 origCb(obj)
                             end)
@@ -13539,10 +13420,8 @@ do
     end
 end
 
-
 -- [7] __NAMECALL HOOK-DETECTION BYPASS
 -- AC does: mt.__namecall = spy; task.wait(1); if hooked then warn() end
--- The spy function sets `hooked=true` then calls old(). Our CK hook wraps
 -- the existing __namecall -- so when AC replaces it, AC's spy IS the new __namecall.
 -- When any namecall fires through our hook we call AC's spy -> AC's `hooked`
 -- becomes true -> AC detects itself. We counter this by:
@@ -13569,21 +13448,17 @@ do
             local mt = _getrawmetatable(game)
             if not mt then return end
 
-            -- Snapshot what our current __namecall is
             _NC_OUR_HOOK = mt.__namecall
 
-            -- Poll every 0.5s -- if AC replaced __namecall, reinstall ours on top
             _ckSpawn(function(...)
                 while _NCGUARD_ACTIVE do
                     task.wait(0.5)
                     _pcall(function(...)
                         local current = _rawget(mt, "__namecall")
                         if current ~= _NC_OUR_HOOK and _islclosure(current) then
-                            -- AC replaced it with a Lua spy -- layer ours back on top
                             local acSpy = current
                             _setreadonly(mt, false)
                             mt.__namecall = _newcclosure(function(self, ...)
-                                -- Call AC's spy but make it think it's an executor call
                                 -- (we do NOT call acSpy -- we swallow it and call our original)
                                 _CKLog("NamecallGuard: AC __namecall spy intercepted and neutralized.")
                                 return _NC_OUR_HOOK(self, ...)
@@ -13601,11 +13476,9 @@ do
     end
 end
 
-
 -- [8] EXECUTOR GLOBAL CLOAKER
 -- AC does: rawget(_G, "getgenv") / rawget(_G, "hookfunction") etc. -> detects us
 -- We hook rawget to return nil for known executor globals when called from non-executor
--- Also cloaks getrenv().gethui (darkdex detection method)
 do
     local _CLOAKER_ACTIVE = false
 
@@ -13652,7 +13525,6 @@ do
                     end)
                 )
 
-                -- Also cloak getrenv() gethui check (AntiCheat.txt line: getrenv().gethui)
                 if renv and _type(renv) == "table" then
                     local _oldGetrenv; _oldGetrenv = hookfunction(getrenv, _newcclosure(function(...)
                         if not _checkcaller() then
@@ -13682,10 +13554,8 @@ do
     end
 end
 
-
 -- MASTER ANTI-DETECTION LAUNCHER
 -- Single call to arm every bypass above with one config table
--- [PATCH #11] Re-arm watchdog -- reinstalls metamethod hooks after respawn/teleport
 -- Hooks can be silently wiped when the game environment resets
 do
     _ckSpawn(function(...)
@@ -13726,8 +13596,6 @@ function Compkiller:ArmAntiDetection(cfg)
 
     _CKLog("ArmAntiDetection: all requested bypasses armed.")
 end
-
-
 
 -- ==============================================================================
 
@@ -13828,7 +13696,6 @@ Compkiller.MasterControl = function(...)
 		_InstallIndexHook()
 	end
 
-
 	-- ========================================================================
 	-- DEBUG
 	-- ========================================================================
@@ -13903,7 +13770,6 @@ Compkiller.MasterControl = function(...)
 	local function isStudio()
 		return RunService:IsStudio()	
 	end;
-
 
 	-- ========================================================================
 	-- PERFORMANCE
@@ -14010,7 +13876,6 @@ Compkiller.MasterControl = function(...)
 		return isMobile
 	end
 
-
 	-- ========================================================================
 	-- ANIMATIONS
 	-- ========================================================================
@@ -14091,7 +13956,6 @@ Compkiller.MasterControl = function(...)
 		return cancelled
 	end
 
-
 	-- ========================================================================
 	-- RENDER MANAGER
 	-- ========================================================================
@@ -14159,7 +14023,6 @@ Compkiller.MasterControl = function(...)
 		getgenv()[_CULL_KEY] = nil
 		_CKLog("RenderResume: 3D restored.")
 	end
-
 
 	-- ========================================================================
 	-- GUI SHIELD
@@ -14237,7 +14100,6 @@ Compkiller.MasterControl = function(...)
 		end
 		return false
 	end
-
 
 	-- ========================================================================
 	-- SANDBOX & SAFE EXECUTION
@@ -14342,7 +14204,6 @@ Compkiller.MasterControl = function(...)
 		return _SANDBOX_ERRORS
 	end
 
-
 	-- ========================================================================
 	-- WINDOW POSITION
 	-- ========================================================================
@@ -14361,7 +14222,6 @@ Compkiller.MasterControl = function(...)
 		end
 		return nil
 	end
-
 
 	-- ========================================================================
 	-- CONFIG / THEME / ASSETS
@@ -14997,7 +14857,6 @@ Compkiller.MasterControl = function(...)
 		return Args;
 	end;
 
-
 	-- ========================================================================
 	-- DIAGNOSTICS & ANOMALY
 	-- ========================================================================
@@ -15074,7 +14933,6 @@ Compkiller.MasterControl = function(...)
 	end
 
 	local function setAnomalyCallback(fn)
-		-- [PATCH #7] Wrap callback in pcall so a crash cannot kill the detector loop
 		if _type(fn) == "function" then
 			_TAMPER_CALLBACK = function(...)
 				local ok, err = _pcall(fn, ...)
@@ -15163,7 +15021,6 @@ Compkiller.MasterControl = function(...)
 		return _INTEGRITY_REPORT
 	end
 
-
 	-- ========================================================================
 	-- SECURITY
 	-- ========================================================================
@@ -15208,7 +15065,6 @@ Compkiller.MasterControl = function(...)
 		end
 
 		-- METHOD 2: hookmetamethod on LocalPlayer __namecall
-		-- Exact pattern with checkcaller() guard + setreadonly bracket
 		if _type(hookmetamethod) == "function" then
 			_pcall(function(...)
 				_ANTIKICK_ORIG_NCI = hookmetamethod(
@@ -15248,7 +15104,6 @@ Compkiller.MasterControl = function(...)
 		end
 
 		-- METHOD 4: getrawmetatable fallback (CMD X pattern)
-		-- Used when hookmetamethod is unavailable -- direct metatable write
 		if _type(hookmetamethod) ~= "function" and _type(_getrawmetatable) == "function" then
 			_pcall(function(...)
 				local mt    = _getrawmetatable(game)
@@ -15287,7 +15142,6 @@ Compkiller.MasterControl = function(...)
 			_CKLog("AntiAFK: already active.")
 			return
 		end
-		-- Hook the idle kick via VirtualUser
 		_pcall(function(...)
 			local VirtualUser = game:GetService("VirtualUser")
 			_ANTIAFK_CONN = _TrackConn(
@@ -15298,7 +15152,6 @@ Compkiller.MasterControl = function(...)
 				end)
 			)
 		end)
-		-- Fallback: periodic dummy input every 15 minutes
 		_ANTIAFK_THREAD = _ckSpawn(function(...)
 			while _ANTIAFK_CONN do
 				task.wait(840)   -- 14 min
@@ -15312,7 +15165,6 @@ Compkiller.MasterControl = function(...)
 		_tinsert(_CK_THREADS, _ANTIAFK_THREAD)
 		_CKLog("AntiAFK: enabled.")
 	end
-
 
 	-- ========================================================================
 	-- BYPASS ENGINE -- individual
@@ -15549,7 +15401,6 @@ Compkiller.MasterControl = function(...)
 				return proxy
 			end))
 
-			-- Also periodically scrub nil entries to prevent memory bloat
 			-- (entries only become nil if we explicitly remove them -- since they're strong refs, they won't GC naturally)
 			_ckSpawn(function(...)
 				while _HONEYPOT_ACTIVE do
@@ -15562,7 +15413,6 @@ Compkiller.MasterControl = function(...)
 				end
 			end)
 
-			-- Additional: hook setmetatable to detect and neutralize honeypot tables
 			-- If AC makes a weak-mode table containing CoreGui, swap __mode to "" (strong)
 			local _oldSMT; _oldSMT = hookfunction(renv.setmetatable, _newcclosure(function(t, mt)
 				if not _checkcaller() and _type(mt) == "table" then
@@ -15608,7 +15458,6 @@ Compkiller.MasterControl = function(...)
 				if _checkcaller() then return _oldSG(self, ...) end
 				local method = _getnamecallmethod()
 
-				-- Filter GetDescendants -- remove our ScreenGui from returned table
 				if method == "GetDescendants" or method == "GetChildren" then
 					local results = {_oldSG(self, ...)}
 					if _type(results[1]) == "table" then
@@ -15628,8 +15477,6 @@ Compkiller.MasterControl = function(...)
 					return (table.unpack or unpack)(results)
 				end
 
-				-- Block DescendantAdded connections that fire on our GUI
-				-- We can't stop the event but we can filter the callback's argument
 				if (method == "Connect" or method == "connect") and self then
 					_pcall(function(...)
 						-- Check if self is CoreGui.DescendantAdded or similar signal
@@ -15644,7 +15491,7 @@ Compkiller.MasterControl = function(...)
 									local ok, desc = _pcall(function(...)
 										return obj:IsDescendantOf(screenGui)
 									end)
-									if ok and desc then return end
+									if ok and desc == true then return end
 								end
 								origCb(obj)
 							end)
@@ -15677,21 +15524,17 @@ Compkiller.MasterControl = function(...)
 			local mt = _getrawmetatable(game)
 			if not mt then return end
 
-			-- Snapshot what our current __namecall is
 			_NC_OUR_HOOK = mt.__namecall
 
-			-- Poll every 0.5s -- if AC replaced __namecall, reinstall ours on top
 			_ckSpawn(function(...)
 				while _NCGUARD_ACTIVE do
 					task.wait(0.5)
 					_pcall(function(...)
 						local current = _rawget(mt, "__namecall")
 						if current ~= _NC_OUR_HOOK and _islclosure(current) then
-							-- AC replaced it with a Lua spy -- layer ours back on top
 							local acSpy = current
 							_setreadonly(mt, false)
 							mt.__namecall = _newcclosure(function(self, ...)
-								-- Call AC's spy but make it think it's an executor call
 								-- (we do NOT call acSpy -- we swallow it and call our original)
 								_CKLog("NamecallGuard: AC __namecall spy intercepted and neutralized.")
 								return _NC_OUR_HOOK(self, ...)
@@ -15732,7 +15575,6 @@ Compkiller.MasterControl = function(...)
 					end)
 				)
 
-				-- Also cloak getrenv() gethui check (AntiCheat.txt line: getrenv().gethui)
 				if renv and _type(renv) == "table" then
 					local _oldGetrenv; _oldGetrenv = hookfunction(getrenv, _newcclosure(function(...)
 						if not _checkcaller() then
@@ -15760,7 +15602,6 @@ Compkiller.MasterControl = function(...)
 			_CKLog(_sfmt("ExecutorCloaker: active -- %d globals cloaked.", #_EXEC_GLOBALS))
 		end)
 	end
-
 
 	-- ========================================================================
 	-- BYPASS ENGINE -- bulk
@@ -15805,7 +15646,6 @@ Compkiller.MasterControl = function(...)
 
 		_CKLog("ArmAntiDetection: all requested bypasses armed.")
 	end
-
 
 	-- ========================================================================
 	-- PRESETS
@@ -15876,10 +15716,9 @@ Compkiller.MasterControl = function(...)
 		end
 		local fn = p[tostring(name):lower()]
 		if fn then fn()
-		else warn("[CK] MasterControl.preset: unknown '" .. tostring(name) ..
+		else _CKLog("MasterControl.preset: unknown '" .. tostring(name) ..
 			"' -- valid: stealth  performance  balanced  secure  nuke") end
 	end
-
 
 	-- ========================================================================
 	-- APPLY -- fire everything from one config table
@@ -15982,7 +15821,6 @@ Compkiller.MasterControl = function(...)
 
 		_CKLog("MasterControl.apply: done.")
 	end
-
 
 	-- ========================================================================
 	-- RETURN CONTROLLER
@@ -16101,11 +15939,10 @@ Compkiller.MasterControl = function(...)
 
 	}, {
 		__index = function(_, key)
-			warn("[CK] MasterControl." .. tostring(key) .. " -- unknown key.")
+			_CKLog("MasterControl." .. tostring(key) .. " -- unknown key.")
 			return function(...) end
 		end,
 	})
 end
-
 
 return Compkiller;
