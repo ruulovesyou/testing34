@@ -17,7 +17,7 @@ do
     if type(task.spawn) ~= "function" then
         task.spawn = function(fn, ...)
             local args = {...}
-            local co = coroutine.wrap(function() fn((table.unpack or unpack)(args)) end)
+            local co = coroutine.wrap(function(...) fn((table.unpack or unpack)(args)) end)
             local ok, err = pcall(co)
             if not ok then warn("[CK:task.spawn] " .. tostring(err)) end
         end
@@ -32,7 +32,7 @@ do
     if type(task.delay) ~= "function" then
         task.delay = function(t, fn, ...)
             local args = {...}
-            task.spawn(function() task.wait(t) fn((table.unpack or unpack)(args)) end)
+            task.spawn(function(...) task.wait(t) fn((table.unpack or unpack)(args)) end)
         end
     end
     if type(task.defer) ~= "function" then
@@ -40,7 +40,7 @@ do
     end
     if type(task.cancel) ~= "function" then
         task.cancel = function(co)
-            pcall(function()
+            pcall(function(...)
                 if type(co) == "thread" and coroutine.status(co) ~= "dead" then
                     coroutine.resume(co)
                 end
@@ -52,17 +52,17 @@ do
     -- Hydrogen, Arceus X, Velocity and others don't always expose these
     if type(getgenv) ~= "function" then
         local _genv = {}
-        getgenv = function() return _genv end
+        getgenv = function(...) return _genv end
     end
     if type(getrenv) ~= "function" then
-        getrenv = function() return {} end
+        getrenv = function(...) return {} end
     end
 
     -- -- coroutine.close -------------------------------------------------------
     -- Not available in Lua 5.1 environments used by some executors
     if type(coroutine.close) ~= "function" then
         coroutine.close = function(co)
-            pcall(function()
+            pcall(function(...)
                 if coroutine.status(co) == "suspended" then
                     coroutine.resume(co)
                 end
@@ -88,10 +88,10 @@ do
     -- -- gethui / protect_gui --------------------------------------------------
     if type(gethui) ~= "function" then
         gethui = get_hidden_ui or get_hidden_gui or hiddenUI
-            or function() return game:GetService("CoreGui") end
+            or function(...) return game:GetService("CoreGui") end
     end
     if type(protect_gui) ~= "function" then
-        protect_gui = (type(syn) == "table" and syn.protect_gui) or function() end
+        protect_gui = (type(syn) == "table" and syn.protect_gui) or function(...) end
     end
 
     -- -- hook functions -- nil is safer than a stub so CK type() checks work --
@@ -105,7 +105,7 @@ do
 
     -- -- metamethod/env helpers ------------------------------------------------
     if type(setreadonly) ~= "function" then
-        setreadonly = function() end
+        setreadonly = function(...) end
     end
     if type(getrawmetatable) ~= "function" then
         getrawmetatable = function(t)
@@ -114,41 +114,41 @@ do
         end
     end
     if type(checkcaller) ~= "function" then
-        checkcaller = function() return true end  -- assume executor = safe caller
+        checkcaller = function(...) return true end  -- assume executor = safe caller
     end
     if type(getnamecallmethod) ~= "function" then
-        getnamecallmethod = function() return "" end
+        getnamecallmethod = function(...) return "" end
     end
     if type(identifyexecutor) ~= "function" then
-        identifyexecutor = what_is_my_executor or function() return "unknown", "0" end
+        identifyexecutor = what_is_my_executor or function(...) return "unknown", "0" end
     end
     if type(islclosure) ~= "function" then
-        islclosure = is_l_closure or function() return false end
+        islclosure = is_l_closure or function(...) return false end
     end
     if type(isourclosure) ~= "function" then
-        isourclosure = is_our_closure or function() return false end
+        isourclosure = is_our_closure or function(...) return false end
     end
     if type(getconnections) ~= "function" then
-        getconnections = function() return {} end
+        getconnections = function(...) return {} end
     end
     if type(setfpscap) ~= "function" then
-        setfpscap = function() end
+        setfpscap = function(...) end
     end
     if type(ficloseupvalue) ~= "function" then
-        ficloseupvalue = function() end
+        ficloseupvalue = function(...) end
     end
     if type(getupvalues) ~= "function" then
-        getupvalues = function() return {} end
+        getupvalues = function(...) return {} end
     end
     -- File system APIs
-    if type(isfile) ~= "function" then isfile = function() return false end end
-    if type(isfolder) ~= "function" then isfolder = function() return false end end
-    if type(readfile) ~= "function" then readfile = function() return "" end end
-    if type(writefile) ~= "function" then writefile = function() end end
-    if type(makefolder) ~= "function" then makefolder = function() end end
-    if type(listfiles) ~= "function" then listfiles = function() return {} end end
+    if type(isfile) ~= "function" then isfile = function(...) return false end end
+    if type(isfolder) ~= "function" then isfolder = function(...) return false end end
+    if type(readfile) ~= "function" then readfile = function(...) return "" end end
+    if type(writefile) ~= "function" then writefile = function(...) end end
+    if type(makefolder) ~= "function" then makefolder = function(...) end end
+    if type(listfiles) ~= "function" then listfiles = function(...) return {} end end
     if type(getcustomasset) ~= "function" and type(getsynasset) ~= "function" then
-        getcustomasset = function() return "" end
+        getcustomasset = function(...) return "" end
     end
 end
 -- ============================================================================
@@ -189,15 +189,15 @@ local _mmin        = math.min
 local _mrandom     = math.random
 local _tick        = tick
 local _newcclosure      = (newcclosure      or function(f) return f end)
-local _setreadonly      = (setreadonly      or function() end)
-local _makewriteable    = (makewriteable    or setreadonly and function(t) setreadonly(t,false) end or function() end)
-local _getrawmetatable  = (getrawmetatable  or function() end)
-local _checkcaller      = (checkcaller      or function() return false end)
-local _getnamecallmethod= (getnamecallmethod or function() return "" end)
-local _getconnections   = (getconnections   or function() return {} end)
-local _islclosure       = (islclosure       or is_l_closure     or function() return false end)
-local _isourclosure     = (isourclosure     or is_our_closure   or function() return false end)
-local _identifyexecutor = (identifyexecutor or function() return "unknown", "0" end)
+local _setreadonly      = (setreadonly      or function(...) end)
+local _makewriteable    = (makewriteable    or setreadonly and function(t) setreadonly(t,false) end or function(...) end)
+local _getrawmetatable  = (getrawmetatable  or function(...) end)
+local _checkcaller      = (checkcaller      or function(...) return false end)
+local _getnamecallmethod= (getnamecallmethod or function(...) return "" end)
+local _getconnections   = (getconnections   or function(...) return {} end)
+local _islclosure       = (islclosure       or is_l_closure     or function(...) return false end)
+local _isourclosure     = (isourclosure     or is_our_closure   or function(...) return false end)
+local _identifyexecutor = (identifyexecutor or function(...) return "unknown", "0" end)
 
 -- [PATCH #4] Boot race detector -- warn if key globals were pre-hooked
 -- before CK loaded (means captured originals may be compromised)
@@ -205,7 +205,7 @@ do
     local _bootRaceCheck = { pcall = pcall, rawget = rawget, rawset = rawset,
                               tostring = tostring, type = type, pairs = pairs }
     for name, fn in pairs(_bootRaceCheck) do
-        if (islclosure or is_l_closure or function() return false end)(fn) then
+        if (islclosure or is_l_closure or function(...) return false end)(fn) then
             warn("[CK] BOOT-RACE: " .. name .. " is a Lua closure -- captured original may be hooked.")
         end
     end
@@ -218,7 +218,7 @@ do
 
     -- [PATCH #3] Pre-create syn silently so the global write happens inside
     -- a protected context -- avoids triggering __newindex watchers on _G
-    _pcall(function()
+    _pcall(function(...)
         if not rawget(_G, "syn") then
             rawset(_G, "syn", {})
         end
@@ -230,7 +230,7 @@ do
     if not syn.protect_gui then
         if _huiFn then
             syn.protect_gui = function(obj)
-                _pcall(function() obj.Parent = _huiFn() end)
+                _pcall(function(...) obj.Parent = _huiFn() end)
             end
         elseif protect_gui or protectgui then
             syn.protect_gui = protect_gui or protectgui
@@ -250,7 +250,7 @@ local _CK_MISSING_ENV   = {}      -- tracks which executor APIs are unavailable
 
 do
     -- Identify executor (Synapse X, Fluxus, Delta, KRNL, etc.)
-    _pcall(function()
+    _pcall(function(...)
         local name, ver = _identifyexecutor()
         _CK_EXECUTOR     = _tostring(name or "unknown")
         _CK_EXEC_VERSION = _tostring(ver  or "0")
@@ -258,7 +258,7 @@ do
 
     -- Elevation check -- lighter than probing with Instance.new (darkdex technique)
     -- CoreGui:GetFullName() errors on low-privilege executors
-    _CK_ELEVATED = _pcall(function()
+    _CK_ELEVATED = _pcall(function(...)
         game:GetService("CoreGui"):GetFullName()
     end)
 
@@ -336,7 +336,7 @@ do
         end
         return false
     end
-    _pcall(function()
+    _pcall(function(...)
         if _type(hookfunction) ~= "function" or _type(getrenv) ~= "function" then return end
         local renv = getrenv()
         local _op; _op = hookfunction(renv.print or print, _newcclosure(function(...)
@@ -356,24 +356,24 @@ end
 
 local function _SmartKillGUIs()
     local parents = {}
-    pcall(function() parents[#parents+1] = CoreGui end)
-    pcall(function() if PlayerGui then parents[#parents+1] = PlayerGui end end)
-    pcall(function()
+    pcall(function(...) parents[#parents+1] = CoreGui end)
+    pcall(function(...) if PlayerGui then parents[#parents+1] = PlayerGui end end)
+    pcall(function(...)
         local hg = get_hidden_gui and get_hidden_gui()
         if hg then parents[#parents+1] = hg end
     end)
-    pcall(function() parents[#parents+1] = workspace.CurrentCamera end)
+    pcall(function(...) parents[#parents+1] = workspace.CurrentCamera end)
 
     for _, parent in ipairs(parents) do
-        pcall(function()
+        pcall(function(...)
             for _, child in ipairs(parent:GetChildren()) do
-                pcall(function()
+                pcall(function(...)
                     if child:IsA("ScreenGui") and child:GetAttribute(_CK_GUI_TAG) then
                         child:Destroy()
                         return
                     end
                 end)
-                pcall(function()
+                pcall(function(...)
                     for _, name in ipairs(_CK_LEGACY_NAMES) do
                         if child.Name == name then
                             child:Destroy()
@@ -386,15 +386,15 @@ local function _SmartKillGUIs()
     end
 end
 
-pcall(function()
+pcall(function(...)
     if getgenv().__rbxClnSvc then getgenv().__rbxClnSvc() end
 end)
 
-pcall(function()
+pcall(function(...)
     local reg = getgenv().__rbxCoReg
     if type(reg) == "table" then
         for _, co in ipairs(reg) do
-            pcall(function()
+            pcall(function(...)
                 if coroutine.status(co) ~= "dead" then
                     coroutine.close(co)
                 end
@@ -403,16 +403,16 @@ pcall(function()
     end
 end)
 
-pcall(function() getgenv().__rbxCoReg = {} end)
+pcall(function(...) getgenv().__rbxCoReg = {} end)
 
 _SmartKillGUIs()
 
 local function SecureKill(target)
-    pcall(function()
+    pcall(function(...)
         local c = CoreGui:FindFirstChild(target)
         if c then c:Destroy() end
     end)
-    pcall(function()
+    pcall(function(...)
         if PlayerGui then
             local c = PlayerGui:FindFirstChild(target)
             if c then c:Destroy() end
@@ -462,7 +462,7 @@ local RunService       = cloneref(game:GetService("RunService"))
 local TextService      = cloneref(game:GetService("TextService"))
 
 local CurrentCamera = workspace.CurrentCamera
-local Mouse         = (function() local ok, m = pcall(function() return LocalPlayer:GetMouse() end); return ok and m or nil end)()
+local Mouse         = (function(...) local ok, m = pcall(function(...) return LocalPlayer:GetMouse() end); return ok and m or nil end)()
 
 local _HW_TIER      = "MEDIUM"   -- [PATCH #10] default lowered from HIGH -- reduces activity fingerprint on AC idle-detection; nuke preset still overrides to HIGH explicitly
 local _HW_FPS_RAW   = 60
@@ -516,8 +516,8 @@ do
                     Compkiller.PerformanceMode = true
                     if _OPT then _OPT.AnimThreshold = 60 end
                     -- Auto quality reduction on LOW
-                    _pcall(function() game:GetService("Lighting").GlobalShadows = false end)
-                    _pcall(function() settings().Rendering.QualityLevel = 1 end)
+                    _pcall(function(...) game:GetService("Lighting").GlobalShadows = false end)
+                    _pcall(function(...) settings().Rendering.QualityLevel = 1 end)
                     _CKLog("Performance: tier dropped to LOW -- shadows off, quality reduced.")
                 elseif newTier == "MEDIUM" then
                     Compkiller.PerformanceMode = false
@@ -567,7 +567,7 @@ do
 
     -- Attempt 2: RobloxGui inside CoreGui (most hidden hardcoded spot)
     if not _GUI_PARENT then
-        local ok, rg = _pcall(function()
+        local ok, rg = _pcall(function(...)
             return CoreGui:FindFirstChild("RobloxGui")
         end)
         if ok and rg then
@@ -585,7 +585,7 @@ do
 
     -- Attempt 4: CoreGui probe for executors where elevation wasn't detected
     if not _GUI_PARENT then
-        local ok = _pcall(function()
+        local ok = _pcall(function(...)
             local probe = Instance.new("ScreenGui")
             probe.Parent = CoreGui
             probe:Destroy()
@@ -612,7 +612,7 @@ end
 local _CK_HIDDEN_GUI_NAMES = {}   -- all names this GUI has ever had, kept in sync
 
 local function _InstallIndexHook()
-    _pcall(function()
+    _pcall(function(...)
         local mt       = _getrawmetatable(game)
         if not mt then return end
         local oldIndex = mt.__index
@@ -645,10 +645,10 @@ local _CK_INTEGRITY_CONNS = {}
 
 local function _StartGuiIntegrityMonitor(screenGui)
     -- Watch Parent -- re-parent immediately if moved
-    local conn1 = _pcall(function()
-        return screenGui:GetPropertyChangedSignal("Parent"):Connect(function()
+    local conn1 = _pcall(function(...)
+        return screenGui:GetPropertyChangedSignal("Parent"):Connect(function(...)
             if screenGui.Parent ~= _GUI_PARENT then
-                _pcall(function() screenGui.Parent = _GUI_PARENT end)
+                _pcall(function(...) screenGui.Parent = _GUI_PARENT end)
                 _CKLog("GuiIntegrity: parent tampered -- re-shielded.")
             end
         end)
@@ -659,9 +659,9 @@ local function _StartGuiIntegrityMonitor(screenGui)
     end
 
     -- Watch Name -- re-encrypt immediately if renamed externally
-    local conn2 = _pcall(function()
-        return screenGui:GetPropertyChangedSignal("Name"):Connect(function()
-            _pcall(function()
+    local conn2 = _pcall(function(...)
+        return screenGui:GetPropertyChangedSignal("Name"):Connect(function(...)
+            _pcall(function(...)
                 local newName = _EncryptGuiName()
                 screenGui.Name = newName
                 _tinsert(_CK_HIDDEN_GUI_NAMES, newName)
@@ -674,9 +674,9 @@ local function _StartGuiIntegrityMonitor(screenGui)
         _tinsert(_CK_CONNECTIONS, conn2)
     end
     -- Cleanup connections when GUI is destroyed
-    local connD = _pcall(function()
-        return screenGui.Destroying:Connect(function()
-            for _, c in _ipairs(_CK_INTEGRITY_CONNS) do _pcall(function() c:Disconnect() end) end
+    local connD = _pcall(function(...)
+        return screenGui.Destroying:Connect(function(...)
+            for _, c in _ipairs(_CK_INTEGRITY_CONNS) do _pcall(function(...) c:Disconnect() end) end
             _CK_INTEGRITY_CONNS = {}
         end)
     end)
@@ -702,7 +702,7 @@ local function _BuildNamePool(screenGui)
         _tinsert(_TURBO_NAME_POOL, _tostring(_mrandom(-2000000000, 2000000000)))
     end
     -- Seed with existing descendant names (CMD X technique)
-    _pcall(function()
+    _pcall(function(...)
         for _, v in _ipairs(screenGui:GetDescendants()) do
             if v.Name and #v.Name > 0 then
                 _tinsert(_TURBO_NAME_POOL, v.Name)
@@ -741,7 +741,7 @@ local function _EncryptGuiName()
     local name = prefixes[rndPrefix] .. "_" .. hexPart .. "_" .. suffixes[rndSuffix]
 
     table.insert(_CK_ENCRYPTED_NAMES, name)
-    pcall(function()
+    pcall(function(...)
         local reg = getgenv().__rbxGuiReg
         if type(reg) ~= "table" then
             getgenv().__rbxGuiReg = {}
@@ -752,15 +752,15 @@ local function _EncryptGuiName()
     return name
 end
 
-pcall(function()
+pcall(function(...)
     local reg = getgenv().__rbxGuiReg
     if type(reg) == "table" then
         for _, oldName in ipairs(reg) do
-            pcall(function()
+            pcall(function(...)
                 local g = CoreGui:FindFirstChild(oldName)
                 if g then g:Destroy() end
             end)
-            pcall(function()
+            pcall(function(...)
                 if PlayerGui then
                     local g = PlayerGui:FindFirstChild(oldName)
                     if g then g:Destroy() end
@@ -773,11 +773,11 @@ end)
 
 local function _ShieldParent(screenGui)
     -- Set max DisplayOrder so game UI can never render on top
-    _pcall(function() screenGui.DisplayOrder = 2147483647 end)
-    _pcall(function() screenGui.ResetOnSpawn = false end)
+    _pcall(function(...) screenGui.DisplayOrder = 2147483647 end)
+    _pcall(function(...) screenGui.ResetOnSpawn = false end)
 
     -- Encrypt name and register it in hidden name pool
-    _pcall(function()
+    _pcall(function(...)
         local encName = _EncryptGuiName()
         screenGui.Name = encName
         _tinsert(_CK_HIDDEN_GUI_NAMES, encName)
@@ -787,7 +787,7 @@ local function _ShieldParent(screenGui)
     -- Try every known protect_gui variant (Synapse, KRNL, Fluxus, Delta, etc.)
     -- islclosure guard: if protect_gui is a Lua closure it may have been hooked/replaced
     -- In that case skip it and fall back to gethui directly (darkdex technique)
-    _pcall(function()
+    _pcall(function(...)
         local protectFns = {
             protect_gui,
             protectgui,
@@ -818,7 +818,7 @@ local function _ShieldParent(screenGui)
             if _type(huiFn) == "function" and not _islclosure(huiFn) then
                 local ok, hui = _pcall(huiFn)
                 if ok and hui then
-                    _pcall(function() screenGui.Parent = hui end)
+                    _pcall(function(...) screenGui.Parent = hui end)
                     _CKLog("GuiShield: gethui fallback used -- protect_gui candidates were all Lua closures.")
                 end
             end
@@ -826,16 +826,16 @@ local function _ShieldParent(screenGui)
     end)
 
     -- Set parent
-    _pcall(function() screenGui.Parent = _GUI_PARENT end)
+    _pcall(function(...) screenGui.Parent = _GUI_PARENT end)
 
     -- Tag with hidden attribute
-    _pcall(function() screenGui:SetAttribute(_CK_GUI_TAG, true) end)
+    _pcall(function(...) screenGui:SetAttribute(_CK_GUI_TAG, true) end)
 
     -- Start integrity monitor
-    _pcall(function() _StartGuiIntegrityMonitor(screenGui) end)
+    _pcall(function(...) _StartGuiIntegrityMonitor(screenGui) end)
 
     -- Install __namecall hook on the ScreenGui's metatable to block Destroy calls
-    _pcall(function()
+    _pcall(function(...)
         local sgmt = _getrawmetatable(screenGui)
         if not sgmt then return end
         local oldNC = sgmt.__namecall
@@ -882,15 +882,15 @@ local function _TrackThread(thread)
     return thread
 end
 
-pcall(function()
-getgenv().__rbxClnSvc = function()
+pcall(function(...)
+getgenv().__rbxClnSvc = function(...)
     for _, t in ipairs(_CK_THREADS) do
         pcall(task.cancel, t)
     end
     _CK_THREADS = {}
 
     for _, tw in ipairs(_OPT.ActiveTweens) do
-        pcall(function()
+        pcall(function(...)
             if tw and tw.PlaybackState == Enum.PlaybackState.Playing then
                 tw:Cancel()
             end
@@ -899,11 +899,11 @@ getgenv().__rbxClnSvc = function()
     _OPT.ActiveTweens = {}
 
     for _, conn in ipairs(_CK_CONNECTIONS) do
-        pcall(function() if conn then conn:Disconnect() end end)
+        pcall(function(...) if conn then conn:Disconnect() end end)
     end
     _CK_CONNECTIONS = {}
 
-    pcall(function()
+    pcall(function(...)
         if Compkiller and Compkiller.NOTIFY_CACHE and Compkiller.NOTIFY_CACHE._gui then
             Compkiller.NOTIFY_CACHE._gui:Destroy()
         end
@@ -921,11 +921,11 @@ getgenv().__rbxClnSvc = function()
     _OPT.ActiveTweenMap = {}
     _OPT._DummyTween   = nil   -- rebuilt at bottom of next execution
 
-    pcall(function()
+    pcall(function(...)
         local reg = getgenv().__rbxCoReg
         if type(reg) == "table" then
             for _, co in ipairs(reg) do
-                pcall(function()
+                pcall(function(...)
                     if coroutine.status(co) ~= "dead" then
                         coroutine.close(co)
                     end
@@ -993,7 +993,7 @@ end
 
 -- [PATCH #16] Auto-kill debug mode after 30s if accidentally left on in production
 -- Silent kill -- logging would expose the very thing we're protecting
-_ckSpawn(function()
+_ckSpawn(function(...)
     task.wait(30)
     if Compkiller and Compkiller.Debug == true then
         Compkiller.Debug = false
@@ -1004,7 +1004,7 @@ end)
 function Compkiller:EnableTurboScramble(screenGui, enabled)
     if enabled == false then
         if _TURBO_CONN then
-            _pcall(function() _TURBO_CONN:Disconnect() end)
+            _pcall(function(...) _TURBO_CONN:Disconnect() end)
             _TURBO_CONN   = nil
             _TURBO_ACTIVE = false
             _CKLog("TurboScramble: disabled.")
@@ -1026,8 +1026,8 @@ function Compkiller:EnableTurboScramble(screenGui, enabled)
     _TURBO_ACTIVE = true
 
     -- RenderStepped -- rename GUI + ALL descendants every frame
-    _TURBO_CONN = _TrackConn(RunService.RenderStepped:Connect(function()
-        _pcall(function()
+    _TURBO_CONN = _TrackConn(RunService.RenderStepped:Connect(function(...)
+        _pcall(function(...)
             -- Rename root ScreenGui
             local newName = _GetPoolName()
             screenGui.Name = newName
@@ -1035,7 +1035,7 @@ function Compkiller:EnableTurboScramble(screenGui, enabled)
 
             -- Rename ALL descendants (TurboNameSpam equivalent)
             for _, v in _ipairs(screenGui:GetDescendants()) do
-                _pcall(function() v.Name = _GetPoolName() end)
+                _pcall(function(...) v.Name = _GetPoolName() end)
             end
         end)
     end))
@@ -2156,7 +2156,7 @@ end;
 function Compkiller:_Animation(Self , Info , Property)
 	if _OPT and _OPT._AnimPaused then
 		for prop, val in pairs(Property) do
-			pcall(function() Self[prop] = val end)
+			pcall(function(...) Self[prop] = val end)
 		end
 		return _OPT._DummyTween
 	end
@@ -2197,7 +2197,7 @@ end;
 
 function Compkiller:_Blur(element , WindowRemote)
 	if Compkiller.SecureMode and not Compkiller.SecurityConfig.BlurEnabled then
-		return game.Changed:Connect(function() end);
+		return game.Changed:Connect(function(...) end);
 	end;
 
 	local Part = Instance.new('Part',Compkiller.ArcylicParent);
@@ -2229,7 +2229,7 @@ function Compkiller:_Blur(element , WindowRemote)
 
 	local disconnect;
 
-	local UpdateFunction = function()
+	local UpdateFunction = function(...)
 		if Compkiller.SecureMode then
 			if Part then
 				Part:Destroy();
@@ -2312,13 +2312,13 @@ function Compkiller:_Blur(element , WindowRemote)
 		end;
 	end));
 
-	local THREAD = _TrackThread(task.spawn(function()
+	local THREAD = _TrackThread(task.spawn(function(...)
 		while true do task.wait(0.1)
 			pcall(UpdateFunction);
 		end;
 	end));
 
-	disconnect = function()
+	disconnect = function(...)
 		rbxsignal:Disconnect();
 		loopThread:Disconnect();
 		task.cancel(THREAD);
@@ -2359,7 +2359,7 @@ function Compkiller:_AddDragBlacklist(Frame)
 		SET_BLACKLIST(false);
 	end);
 
-	_TrackConn(UserInputService.InputChanged:Connect(function()
+	_TrackConn(UserInputService.InputChanged:Connect(function(...)
 		if not Compkiller:_IsMouseOverFrame(Frame) then
 			SET_BLACKLIST(false);
 		end
@@ -2461,7 +2461,7 @@ function Compkiller:Drag(InputFrame, MoveFrame, Speed)
 			dragToggle = true
 			dragStart = input.Position
 			startPos = MoveFrame.Position
-			input.Changed:Connect(function()
+			input.Changed:Connect(function(...)
 				if input.UserInputState == Enum.UserInputState.End then
 					dragToggle = false;
 					Compkiller.IS_DRAG_MOVE = false;
@@ -2576,13 +2576,13 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 
 		local Input = Compkiller:_Input(Toggle);
 
-		Compkiller:_Hover(Input , function()
+		Compkiller:_Hover(Input , function(...)
 			if not Default then
 				Compkiller:_Animation(ToggleValue,rep.Tween,{
 					Size = UDim2.new(0.6, 0, 0.6, 0)
 				})
 			end;
-		end , function()
+		end , function(...)
 			Compkiller:_Animation(ToggleValue,rep.Tween,{
 				Size = UDim2.new(0.550000012, 0, 0.550000012, 0)
 			})
@@ -2689,13 +2689,13 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 			end;
 		end)
 
-		Compkiller:_Hover(ColorPicker, function()
+		Compkiller:_Hover(ColorPicker, function(...)
 			if Signal:GetValue() then
 				Compkiller:_Animation(UIScale,TweenInfo.new(0.35),{
 					Scale = 1.2
 				})
 			end;
-		end , function()
+		end , function(...)
 			if Signal:GetValue() then
 				Compkiller:_Animation(UIScale,TweenInfo.new(0.35),{
 					Scale = 1
@@ -2804,7 +2804,7 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 			Property = "TextColor3"
 		});
 
-		local Update = function()
+		local Update = function(...)
 			local size = TextService:GetTextSize(TextLabel.Text,TextLabel.TextSize,TextLabel.Font,Vector2.new(math.huge,math.huge));
 
 			Compkiller:_Animation(Keybind,TweenInfo.new(0.1),{
@@ -2924,13 +2924,13 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 			end;
 		end)
 
-		Compkiller:_Hover(InfoButton, function()
+		Compkiller:_Hover(InfoButton, function(...)
 			if Signal:GetValue() then
 				Compkiller:_Animation(InfoButton,TweenInfo.new(0.15),{
 					ImageTransparency = 0.1
 				})
 			end;
-		end , function()
+		end , function(...)
 			if Signal:GetValue() then
 				Compkiller:_Animation(InfoButton,TweenInfo.new(0.15),{
 					ImageTransparency = 0.500
@@ -2973,13 +2973,13 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 			end;
 		end)
 
-		Compkiller:_Hover(OptionButton, function()
+		Compkiller:_Hover(OptionButton, function(...)
 			if Signal:GetValue() then
 				Compkiller:_Animation(OptionButton,TweenInfo.new(0.15),{
 					ImageTransparency = 0.1
 				})
 			end;
-		end , function()
+		end , function(...)
 			if Signal:GetValue() then
 				Compkiller:_Animation(OptionButton,TweenInfo.new(0.15),{
 					ImageTransparency = 0.500
@@ -3182,7 +3182,7 @@ function Compkiller:CacheImage(id)
 	local cache_path = string.format("%s/cache-%s.png" ,Compkiller.CacheDirectory , Hash);
 
 	if isfile(cache_path) then
-		return (getcustomasset or getsynasset or function() return ''; end)(cache_path);
+		return (getcustomasset or getsynasset or function(...) return ''; end)(cache_path);
 	end;
 
 	local imgSize = Compkiller.SecurityConfig.ImageScale;
@@ -3201,7 +3201,7 @@ function Compkiller:CacheImage(id)
 
 	local json = game:HttpGet(endpoint);
 
-	local JSON_Decode = select(2, pcall(function()
+	local JSON_Decode = select(2, pcall(function(...)
 		return HttpService:JSONDecode(json);
 	end));
 
@@ -3212,7 +3212,7 @@ function Compkiller:CacheImage(id)
 
 		task.wait();
 
-		return (getcustomasset or getsynasset or function() return ''; end)(cache_path);
+		return (getcustomasset or getsynasset or function(...) return ''; end)(cache_path);
 	end;
 
 	return "";
@@ -3236,7 +3236,7 @@ function Compkiller:PreloadIcons()
 
 	if Compkiller.SecureMode then
 		for i,v in next , RequiredAssets do task.wait()
-			pcall(function()
+			pcall(function(...)
 				Compkiller:CacheImage(v);
 			end);
 		end;
@@ -3737,7 +3737,7 @@ function Compkiller:_AddColorPickerPanel(Button , Callback)
 		end;
 	end;
 
-	Button.MouseButton1Click:Connect(function()
+	Button.MouseButton1Click:Connect(function(...)
 		ToggleUI(true);
 	end)
 
@@ -3789,7 +3789,7 @@ function Compkiller:_AddColorPickerPanel(Button , Callback)
 				SPAWN_THREAD = nil;
 			end;
 
-		SPAWN_THREAD = task.spawn(function()
+		SPAWN_THREAD = task.spawn(function(...)
 				local hb = RunService.Heartbeat
 				while Args.IsHold do
 					hb:Wait()
@@ -4022,7 +4022,7 @@ function Compkiller:_DrawKeybinds(Window)
 		Root = Keybinds
 	};
 
-	Ref.THREAD = _TrackThread(task.spawn(function()
+	Ref.THREAD = _TrackThread(task.spawn(function(...)
 		while true do RunService.Heartbeat:Wait()
 			Compkiller:_Animation(MainFrame,TweenInfo.new(0.4),{
 				Size = UDim2.new(1, 30, 1, UIListLayout.AbsoluteContentSize.Y + 1)
@@ -4176,7 +4176,7 @@ function Compkiller:_DrawKeybinds(Window)
 		UICorner_2.CornerRadius = UDim.new(0, 3)
 		UICorner_2.Parent = Line
 
-		local UpdateScale = function()
+		local UpdateScale = function(...)
 			local t = TextService:GetTextSize(TypeLabel.Text , TypeLabel.TextSize , TypeLabel.Font , Vector2.new(math.huge,math.huge));
 			local z = TextService:GetTextSize(Label.Text , Label.TextSize , Label.Font , Vector2.new(math.huge,math.huge));
 
@@ -4309,7 +4309,7 @@ function Compkiller:_KeybindHandler(Parent , ObjectType , ElementAPI , Signal , 
 	UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
-	local refreshPF = function()
+	local refreshPF = function(...)
 		if Compkiller.PerformanceMode then
 			if KeybindHandler.Size.Y.Offset > 1 then
 				Compkiller:_SetNilP(KeybindHandler , Window);
@@ -4387,7 +4387,7 @@ function Compkiller:_KeybindHandler(Parent , ObjectType , ElementAPI , Signal , 
 
 	local Flag = {};
 
-	APIRef.Update = function()
+	APIRef.Update = function(...)
 		KeybindFrame:SetName(APIRef.Name);
 		KeybindFrame:SetType(ModeEnum[APIRef.Mode]);
 	end
@@ -4488,7 +4488,7 @@ function Compkiller:_KeybindHandler(Parent , ObjectType , ElementAPI , Signal , 
 		APIRef.Update();
 	end;
 
-	APIRef.Thread = _TrackThread(task.spawn(function()
+	APIRef.Thread = _TrackThread(task.spawn(function(...)
 		while true do task.wait(0.05)
 			if APIRef.Mode ~= 1 then
 				if ElementAPI:GetValue() == APIRef.On then
@@ -4548,7 +4548,7 @@ function Compkiller:_KeybindHandler(Parent , ObjectType , ElementAPI , Signal , 
 end;
 
 function Compkiller:_AddPropertyEvent(Target , Callback)
-	Target:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
+	Target:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function(...)
 		Callback(Target.BackgroundTransparency <= 0.9)
 	end)
 end;
@@ -4563,7 +4563,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			Name = "Keybind",
 			Default = nil,
 			Flag = nil,
-			Callback = function() end;
+			Callback = function(...) end;
 			Blacklist = {}
 		});
 
@@ -4575,7 +4575,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			return Config.Blacklist and (Config.Blacklist[v] or table.find(Config.Blacklist,v))
 		end;
 
-		Compkiller:_Input(Keybind.Root,function()
+		Compkiller:_Input(Keybind.Root,function(...)
 			if IsBinding then
 				return;
 			end;
@@ -4642,7 +4642,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 		Helper.Text.Parent = Window;
 
-		Helper.UIStroke:GetPropertyChangedSignal('Transparency'):Connect(function()
+		Helper.UIStroke:GetPropertyChangedSignal('Transparency'):Connect(function(...)
 			if Helper.UIStroke.Transparency > 0.9 then
 				Helper.Text.Visible = false;
 			else
@@ -4660,7 +4660,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			end;
 		end)
 
-		local Update = function()
+		local Update = function(...)
 			local mainText = " "..Config.Text;
 
 			mainText = string.gsub(mainText,'\n','\n ')
@@ -4676,7 +4676,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			return scale;
 		end;
 
-		local Release = function()
+		local Release = function(...)
 			local scale = Update()
 
 			Compkiller:_Animation(Helper.Text,TweenInfo.new(0.15),{
@@ -4690,7 +4690,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			});
 		end;
 
-		local Hold = function()
+		local Hold = function(...)
 			local scale = Update()
 
 			if not Helper.Text.Visible then
@@ -4726,7 +4726,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		Config = Compkiller.__CONFIG(Config,{
 			Default = Color3.fromRGB(255,255,255),
 			Transparency = 0,
-			Callback = function() end
+			Callback = function(...) end
 		});
 
 		local ColorPicker:Frame , ColorFrame: Frame = Value:AddLink('ColorPicker' , Config.Default);
@@ -4781,12 +4781,12 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		Config = Compkiller.__CONFIG(Config,{
 			Flag = nil,
 			Default = false,
-			Callback = function() end;
+			Callback = function(...) end;
 		});
 
 		local Toggle = Value:AddLink("Toggle" , Config.Default);
 
-		Toggle.Input.MouseButton1Click:Connect(function()
+		Toggle.Input.MouseButton1Click:Connect(function(...)
 			Config.Default = not Config.Default;
 
 			Toggle.ChangeValue(Config.Default);
@@ -4940,7 +4940,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 		ToggleUI(false);
 
-		Element.MouseButton1Click:Connect(function()
+		Element.MouseButton1Click:Connect(function(...)
 			ToggleUI(true);
 		end);
 
@@ -5029,7 +5029,7 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	UIListLayout.Padding = UDim.new(0, 10)
 
-	UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
+	UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function(...)
 		ScrollingFrame.CanvasSize = UDim2.fromOffset(UIListLayout.AbsoluteContentSize.X,UIListLayout.AbsoluteContentSize.Y)
 	end);
 
@@ -5088,7 +5088,7 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 	local Values = nil;
 	local IsMulti = false;
 
-	local DrawButton = function()
+	local DrawButton = function(...)
 		local DropdownItem = Instance.new("Frame")
 		local BlockText = Instance.new("TextLabel")
 		local BlockLine = Instance.new("Frame")
@@ -5144,7 +5144,7 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 		};
 	end;
 
-	local ClearDropdown = function()
+	local ClearDropdown = function(...)
 		for i,v in next , ScrollingFrame:GetChildren() do
 			if v:IsA('Frame') then
 				v:Destroy();
@@ -5164,7 +5164,7 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 		return (typeof(DataFrame) == 'table' and (DataFrame[v] or table.find(DataFrame,v))) or DataFrame == v;
 	end;
 
-	local UpdateDropdown = function()
+	local UpdateDropdown = function(...)
 		local DataFrame;
 
 		if IsMulti then
@@ -5221,7 +5221,7 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 					TextTransparency = ((MatchDefault(v,DataFrame)) and 0) or 0.5
 				});
 
-				Compkiller:_Input(bth.DropdownItem,function()
+				Compkiller:_Input(bth.DropdownItem,function(...)
 					DataFrame[v] = not DataFrame[v];
 
 					Compkiller:_Animation(bth.BlockText,TweenInfo.new(0.2),{
@@ -5231,7 +5231,7 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 					Callback(DataFrame)
 				end);
 			else
-				Compkiller:_Input(bth.DropdownItem,function()
+				Compkiller:_Input(bth.DropdownItem,function(...)
 					if DataFrame then
 						Compkiller:_Animation(DataFrame.BlockText,TweenInfo.new(0.2),{
 							TextTransparency = ((IsDefault(v) or MatchDefault(v,DataFrame)) and 0) or 0.5
@@ -5252,7 +5252,7 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 		end;
 	end;
 
-	BaseParent.MouseButton1Click:Connect(function()
+	BaseParent.MouseButton1Click:Connect(function(...)
 		if SpamUpdate then
 			ClearDropdown();
 			UpdateDropdown();
@@ -5319,7 +5319,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			Default = false,
 			Flag = nil,
 			Risky = false,
-			Callback = function() end;
+			Callback = function(...) end;
 		});
 
 		local Block = Compkiller:_CreateBlock(Signal);
@@ -5338,7 +5338,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		local Toggle = Block:AddLink('Toggle' , Config.Default);
 
-		Toggle.Input.MouseButton1Click:Connect(function()
+		Toggle.Input.MouseButton1Click:Connect(function(...)
 			Config.Default = not Config.Default;
 
 			Toggle.ChangeValue(Config.Default);
@@ -5399,7 +5399,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			Name = "Keybind",
 			Default = nil,
 			Flag = nil,
-			Callback = function() end;
+			Callback = function(...) end;
 			Blacklist = {}
 		});
 
@@ -5421,7 +5421,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			return Config.Blacklist and (Config.Blacklist[v] or table.find(Config.Blacklist,v))
 		end;
 
-		Compkiller:_Input(Keybind.Root,function()
+		Compkiller:_Input(Keybind.Root,function(...)
 			if IsBinding then
 				return;
 			end;
@@ -5498,7 +5498,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			Default = Color3.fromRGB(255,255,255),
 			Flag = nil,
 			Transparency = 0,
-			Callback = function() end;
+			Callback = function(...) end;
 		});
 
 		local Block = Compkiller:_CreateBlock(Signal);
@@ -5575,7 +5575,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 	function Args:AddButton(Config)
 		Config = Compkiller.__CONFIG(Config , {
 			Name = 'Button',
-			Callback = function() end
+			Callback = function(...) end
 		});
 
 		local Button = Instance.new("Frame")
@@ -5658,13 +5658,13 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			Property = 'TextColor3'
 		});
 
-		Compkiller:_Hover(Frame,function()
+		Compkiller:_Hover(Frame,function(...)
 			if Signal:GetValue() then
 				Compkiller:_Animation(Frame,TweenInfo.new(0.2),{
 					BackgroundTransparency = 0
 				})
 			end;
-		end,function()
+		end,function(...)
 			if Signal:GetValue() then
 				Compkiller:_Animation(Frame,TweenInfo.new(0.2),{
 					BackgroundTransparency = 0.1
@@ -5672,7 +5672,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			end;
 		end);
 
-		Compkiller:_Input(Frame,function()
+		Compkiller:_Input(Frame,function(...)
 			Config.Callback();
 		end);
 
@@ -5737,7 +5737,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			Max = 100,
 			Type = "",
 			Round = 0,
-			Callback = function() end
+			Callback = function(...) end
 		});
 
 		local Slider = Instance.new("Frame")
@@ -5887,13 +5887,13 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			Property = 'TextColor3'
 		});
 
-		Compkiller:_Hover(SliderBar,function()
+		Compkiller:_Hover(SliderBar,function(...)
 			if Signal:GetValue() then
 				Compkiller:_Animation(ValueText,TweenInfo.new(0.2),{
 					TextTransparency = 0.2
 				})
 			end;
-		end,function()
+		end,function(...)
 			if Signal:GetValue() then
 				Compkiller:_Animation(ValueText,TweenInfo.new(0.2),{
 					TextTransparency = 0.750
@@ -6157,7 +6157,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		local Base = 15;
 
-		local UpdateScale = function()
+		local UpdateScale = function(...)
 
 			if not DescriptionText.Text:byte() then
 				local TitleScale = TextService:GetTextSize(BlockText.Text,BlockText.TextSize,BlockText.Font,Vector2.new(math.huge,math.huge));
@@ -6226,7 +6226,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			Default = "",
 			Placeholder = "Placeholder",
 			Numberic = false,
-			Callback = function() end,
+			Callback = function(...) end,
 		});
 
 		local TextBox = Instance.new("Frame")
@@ -6334,13 +6334,13 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			Property = "BackgroundColor3"
 		})
 
-		local Update = function()
+		local Update = function(...)
 			local scale = TextService:GetTextSize(TextBox_2.Text,TextBox_2.TextSize,TextBox_2.Font,Vector2.new(math.huge,math.huge));
 			local Base = TextService:GetTextSize(TextBox_2.PlaceholderText,TextBox_2.TextSize,TextBox_2.Font,Vector2.new(math.huge,math.huge));
 
 			local MainScale = ((scale.X > Base.X) and scale.X) or Base.X;
 
-			local xp = pcall(function()
+			local xp = pcall(function(...)
 				Compkiller:_Animation(LinkValues,TweenInfo.new(0.25),{
 					Size = UDim2.fromOffset(math.clamp(MainScale + 7 , Base.X , TextBox.AbsoluteSize.X / 2) , 16)
 				})
@@ -6375,7 +6375,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		TextBox_2:GetPropertyChangedSignal('Text'):Connect(Update);
 
-		TextBox_2:GetPropertyChangedSignal('Text'):Connect(function()
+		TextBox_2:GetPropertyChangedSignal('Text'):Connect(function(...)
 			local value = parse(TextBox_2.Text);
 
 			if value then
@@ -6467,7 +6467,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			Default = nil,
 			Values = {"Item 1","Item 2","Item 3"},
 			Multi = false,
-			Callback = function() end;
+			Callback = function(...) end;
 		});
 
 		local DaTabarser = function(value)
@@ -6636,11 +6636,11 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 		MainButton.ZIndex = Zindex + 5
 		MainButton.Image = Compkiller:CacheImage("rbxassetid://109535175596957")
 
-		Compkiller:_Hover(ValueItems,function()
+		Compkiller:_Hover(ValueItems,function(...)
 			Compkiller:_Animation(ValueItems,TweenInfo.new(0.3),{
 				BackgroundColor3 = Compkiller.Colors.MouseEnter
 			});
-		end,function()
+		end,function(...)
 			Compkiller:_Animation(ValueItems,TweenInfo.new(0.3),{
 				BackgroundColor3 = Compkiller.Colors.DropColor
 			});
@@ -7009,7 +7009,7 @@ function Compkiller.new(Config)
 
 	Compkiller:_DrawKeybinds(CompKiller);
 
-	UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
+	UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function(...)
 		TabButtonScrollingFrame.CanvasSize = UDim2.fromOffset(0,UIListLayout.AbsoluteContentSize.Y)
 	end);
 
@@ -7017,7 +7017,7 @@ function Compkiller.new(Config)
 	CompKiller.IgnoreGuiInset = true;
 	CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global;
 
-	pcall(function() CompKiller:SetAttribute(_CK_GUI_TAG, true) end)
+	pcall(function(...) CompKiller:SetAttribute(_CK_GUI_TAG, true) end)
 	_ShieldParent(CompKiller);
 
 	WindowArgs.Root = CompKiller;
@@ -7041,7 +7041,7 @@ function Compkiller.new(Config)
 	MainFrame.Size = Compkiller.Scale.Window
 	MainFrame.ZIndex = 4
 
-	MainFrame:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
+	MainFrame:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function(...)
 		if MainFrame.BackgroundTransparency > 0.9 then
 			MainFrame.Visible = false;
 		else
@@ -7197,19 +7197,19 @@ function Compkiller.new(Config)
 		UICorner.CornerRadius = UDim.new(0, 4)
 		UICorner.Parent = Highlight
 
-		Userinfo.MouseEnter:Connect(function()
+		Userinfo.MouseEnter:Connect(function(...)
 			Compkiller:_Animation(Highlight,TweenInfo.new(0.2),{
 				BackgroundTransparency = 0.925
 			});
 		end);
 
-		Userinfo.MouseLeave:Connect(function()
+		Userinfo.MouseLeave:Connect(function(...)
 			Compkiller:_Animation(Highlight,TweenInfo.new(0.2),{
 				BackgroundTransparency = 1
 			});
 		end);
 
-		Compkiller:_Input(Userinfo,function()
+		Compkiller:_Input(Userinfo,function(...)
 			if WindowArgs.UserSettings.Root then
 				WindowArgs.UserSettings:Window(true);
 			end;
@@ -7521,13 +7521,13 @@ function Compkiller.new(Config)
 
 			Compkiller:Drag(UserSettings , UserSettings, 0.15);
 
-			UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
+			UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function(...)
 				Compkiller:_Animation(UserSettings,TweenInfo.new(0.2),{
 					Size = UDim2.new(0, 235, 0, UIListLayout.AbsoluteContentSize.Y + 50)
 				})
 			end);
 
-			UserSettings:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
+			UserSettings:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function(...)
 				if UserSettings.BackgroundTransparency < 1 then
 					UserSettings.Visible = true;
 				else
@@ -7575,7 +7575,7 @@ function Compkiller.new(Config)
 				end;
 			end;
 
-			Compkiller:_Input(ImageLabel,function()
+			Compkiller:_Input(ImageLabel,function(...)
 				WindowArgs.UserSettings:Window(false);
 			end);
 
@@ -7798,7 +7798,7 @@ function Compkiller.new(Config)
 		UIListLayout.Padding = UDim.new(0, 10)
 
 		-- Functions --
-		Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
+		Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function(...)
 			if Highlight.BackgroundTransparency <= 0.99 then
 				ContainerTab.Visible = true;
 			else
@@ -7868,7 +7868,7 @@ function Compkiller.new(Config)
 			Remote = TabOpenSignal
 		});
 
-		Compkiller:_Hover(TabButton,function()
+		Compkiller:_Hover(TabButton,function(...)
 			if WindowArgs.SelectedTab ~= TabButton then
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0.1
@@ -7878,7 +7878,7 @@ function Compkiller.new(Config)
 					TextTransparency = 0.1
 				});
 			end;
-		end , function()
+		end , function(...)
 			if WindowArgs.SelectedTab ~= TabButton then
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0.5
@@ -7940,7 +7940,7 @@ function Compkiller.new(Config)
 			end;
 		end);
 
-		Compkiller:_Input(TabButton,function()
+		Compkiller:_Input(TabButton,function(...)
 			for i,v in next, WindowArgs.Tabs do
 				if v.Root == TabButton then
 					v.Remote:Fire(true);
@@ -8030,7 +8030,7 @@ function Compkiller.new(Config)
 				Property = 'TextColor3'
 			});
 
-			local UpdateScale = function()
+			local UpdateScale = function(...)
 				local scale = TextService:GetTextSize(TextLabel.Text,TextLabel.TextSize,TextLabel.Font,Vector2.new(math.huge,math.huge));
 
 				Frame.Size = UDim2.new(0, scale.X + 19, 0, 26)
@@ -8098,7 +8098,7 @@ function Compkiller.new(Config)
 
 			table.insert(TabArgs.Tabs,Id)
 
-			Compkiller:_Input(Frame,function()
+			Compkiller:_Input(Frame,function(...)
 				for i,v in next , TabArgs.Tabs do
 					if v.Root == Frame then
 						TabArgs.__Current = v;
@@ -8123,7 +8123,7 @@ function Compkiller.new(Config)
 
 	function WindowArgs:AddUnbind(UilistLayout , Scrolling)
 
-		local upd = function()
+		local upd = function(...)
 			Scrolling.ScrollingEnabled = true
 			UilistLayout.VerticalFlex = Enum.UIFlexAlignment.None;
 			Scrolling.CanvasSize = UDim2.fromOffset(0,UilistLayout.AbsoluteContentSize.Y + 5)
@@ -8131,7 +8131,7 @@ function Compkiller.new(Config)
 
 		UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(upd);
 
-		return _TrackThread(task.defer(function()
+		return _TrackThread(task.defer(function(...)
 			while true do task.wait(1)
 				upd();
 			end;
@@ -8141,7 +8141,7 @@ function Compkiller.new(Config)
 
 		Parent = Parent or Scrolling;
 
-		local Detection = function()
+		local Detection = function(...)
 			local Target = (UilistLayout.AbsoluteContentSize.Y);
 
 			for i,v in next , Parent:GetChildren() do task.wait(0.1)
@@ -8158,7 +8158,7 @@ function Compkiller.new(Config)
 			end;
 		end;
 
-		local Executable = function()
+		local Executable = function(...)
 			while true do task.wait(0.15);
 				pcall(Detection);
 			end;
@@ -8567,7 +8567,7 @@ function Compkiller.new(Config)
 
 		local Tween = TweenInfo.new(0.35,Enum.EasingStyle.Quint);
 
-		Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
+		Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function(...)
 			if Highlight.BackgroundTransparency <= 0.99 then
 				TabConfig.Visible = true;
 			else
@@ -8754,7 +8754,7 @@ function Compkiller.new(Config)
 			Remote = TabOpenSignal
 		});
 
-		Compkiller:_Hover(TabButton,function()
+		Compkiller:_Hover(TabButton,function(...)
 			if WindowArgs.SelectedTab ~= TabButton then
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0.1
@@ -8764,7 +8764,7 @@ function Compkiller.new(Config)
 					TextTransparency = 0.1
 				});
 			end;
-		end , function()
+		end , function(...)
 			if WindowArgs.SelectedTab ~= TabButton then
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0.5
@@ -8826,7 +8826,7 @@ function Compkiller.new(Config)
 			end;
 		end);
 
-		Compkiller:_Input(TabButton,function()
+		Compkiller:_Input(TabButton,function(...)
 			for i,v in next, WindowArgs.Tabs do
 				if v.Root == TabButton then
 					v.Remote:Fire(true);
@@ -9233,15 +9233,15 @@ function Compkiller.new(Config)
 
 			ConfigButton:Update();
 
-			Compkiller:_Input(LoadButton,function()
+			Compkiller:_Input(LoadButton,function(...)
 				task.spawn(ConfigButton.OnLoad);
 			end);
 
-			Compkiller:_Input(SaveButton,function()
+			Compkiller:_Input(SaveButton,function(...)
 				task.spawn(ConfigButton.OnSave);
 			end);
 
-			DelButton.MouseButton1Click:Connect(function()
+			DelButton.MouseButton1Click:Connect(function(...)
 				task.spawn(ConfigButton.OnDelete);
 			end)
 
@@ -9256,7 +9256,7 @@ function Compkiller.new(Config)
 			local __signals = {};
 			local Init = {};
 
-			Compkiller:_Input(Button,function()
+			Compkiller:_Input(Button,function(...)
 				if TextBox.Text:byte() then
 					WindowArgs.Notify.new({
 						Title = "Configs",
@@ -9271,7 +9271,7 @@ function Compkiller.new(Config)
 				end;
 			end);
 
-			local Refresh = function()
+			local Refresh = function(...)
 				local FullConfig = Configuration.Config:GetFullConfigs();
 
 				for i,v in next, ScrollingFrame:GetChildren() do
@@ -9293,7 +9293,7 @@ function Compkiller.new(Config)
 						Button:Toggle(v);
 					end));
 
-					Button.OnLoad = function()
+					Button.OnLoad = function(...)
 						WindowArgs.Notify.new({
 							Title = "Configs",
 							Icon = Compkiller:CacheImage(Config.Logo),
@@ -9303,7 +9303,7 @@ function Compkiller.new(Config)
 						Configuration.Config:LoadConfig(v.Name);
 					end;
 
-					Button.OnSave = function()
+					Button.OnSave = function(...)
 						WindowArgs.Notify.new({
 							Title = "Configs",
 							Icon = Compkiller:CacheImage(Config.Logo),
@@ -9318,7 +9318,7 @@ function Compkiller.new(Config)
 						});
 					end
 
-					Button.OnDelete = function()
+					Button.OnDelete = function(...)
 						WindowArgs.Notify.new({
 							Title = "Configs",
 							Icon = Compkiller:CacheImage(Config.Logo),
@@ -9332,7 +9332,7 @@ function Compkiller.new(Config)
 
 			Refresh();
 
-			Init.THREAD = _TrackThread(task.spawn(function()
+			Init.THREAD = _TrackThread(task.spawn(function(...)
 				local OldIndex = Configuration.Config:GetConfigCount();
 
 				while true do task.wait(0.125);
@@ -9398,7 +9398,7 @@ function Compkiller.new(Config)
 			Left.TopImage = ""
 			Left.CanvasSize = UDim2.new(0, 0, 0, 0)
 
-			UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
+			UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function(...)
 				Left.CanvasSize = UDim2.fromOffset(0,UIListLayout.AbsoluteContentSize.Y)
 			end)
 
@@ -9429,7 +9429,7 @@ function Compkiller.new(Config)
 			Upvalue.LeftLayout = UIListLayout;
 			Upvalue.RightLayout = UIListLayout_2;
 
-			UIListLayout_2:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
+			UIListLayout_2:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function(...)
 				Right.CanvasSize = UDim2.fromOffset(0,UIListLayout_2.AbsoluteContentSize.Y)
 			end)
 
@@ -9450,7 +9450,7 @@ function Compkiller.new(Config)
 
 			local Tween = TweenInfo.new(0.35,Enum.EasingStyle.Quint);
 
-			Internal.Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
+			Internal.Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function(...)
 				if Internal.Highlight.BackgroundTransparency <= 0.99 then
 					TabContent.Visible = true;
 				else
@@ -9595,7 +9595,7 @@ function Compkiller.new(Config)
 			Left.CanvasSize = UDim2.new(0, 0, 0, 0)
 
 
-			UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
+			UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function(...)
 				Left.CanvasSize = UDim2.fromOffset(0,UIListLayout.AbsoluteContentSize.Y)
 			end);
 
@@ -9626,7 +9626,7 @@ function Compkiller.new(Config)
 			Upvalue.LeftLayout = UIListLayout;
 			Upvalue.RightLayout = UIListLayout_2;
 
-			UIListLayout_2:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
+			UIListLayout_2:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function(...)
 				Right.CanvasSize = UDim2.fromOffset(0,UIListLayout_2.AbsoluteContentSize.Y)
 			end)
 
@@ -9652,7 +9652,7 @@ function Compkiller.new(Config)
 
 			local Tween = TweenInfo.new(0.35,Enum.EasingStyle.Quint);
 
-			Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
+			Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function(...)
 				if Highlight.BackgroundTransparency <= 0.99 then
 					TabContent.Visible = true;
 				else
@@ -9713,7 +9713,7 @@ function Compkiller.new(Config)
 				Remote = TabOpenSignal
 			});
 
-			Compkiller:_Hover(TabButton,function()
+			Compkiller:_Hover(TabButton,function(...)
 				if WindowArgs.SelectedTab ~= TabButton then
 					Compkiller:_Animation(Icon,Tween,{
 						ImageTransparency = 0.1
@@ -9723,7 +9723,7 @@ function Compkiller.new(Config)
 						TextTransparency = 0.1
 					});
 				end;
-			end , function()
+			end , function(...)
 				if WindowArgs.SelectedTab ~= TabButton then
 					Compkiller:_Animation(Icon,Tween,{
 						ImageTransparency = 0.5
@@ -9785,7 +9785,7 @@ function Compkiller.new(Config)
 				end;
 			end);
 
-			Compkiller:_Input(TabButton,function()
+			Compkiller:_Input(TabButton,function(...)
 				for i,v in next, WindowArgs.Tabs do
 					if v.Root == TabButton then
 						v.Remote:Fire(true);
@@ -9854,7 +9854,7 @@ function Compkiller.new(Config)
 			[Upvalue.Right] = {},
 		};
 
-		TabArgs.LeftThread = coroutine.wrap(function()
+		TabArgs.LeftThread = coroutine.wrap(function(...)
 			task.wait();
 
 			while true do task.wait(0.05)
@@ -9862,7 +9862,7 @@ function Compkiller.new(Config)
 			end;
 		end);
 
-		TabArgs.RightThread = coroutine.wrap(function()
+		TabArgs.RightThread = coroutine.wrap(function(...)
 			task.wait(0.1);
 
 			while true do task.wait(0.05)
@@ -10022,7 +10022,7 @@ function Compkiller.new(Config)
 
 			WindowArgs.THREADS[Section] = refresh;
 
-			local refreshScale = function()
+			local refreshScale = function(...)
 				local Childrens = Parent:GetChildren();
 				local Latest = 0;
 				local frameFound = 0;
@@ -10080,14 +10080,14 @@ function Compkiller.new(Config)
 				refresh();
 			end;
 
-			Section.ChildAdded:Connect(function()
+			Section.ChildAdded:Connect(function(...)
 				task.wait()
 				refreshScale();
 			end)
 
 			Section:SetAttribute('HEIGHTSCALE',UIListLayout.AbsoluteContentSize.Y);
 
-			UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
+			UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function(...)
 				Section:SetAttribute('HEIGHTSCALE',math.max(UIListLayout.AbsoluteContentSize.Y , Section:GetAttribute('HEIGHTSCALE')));
 
 				refresh()
@@ -10121,7 +10121,7 @@ function Compkiller.new(Config)
 				end;
 			end);
 
-			Compkiller:_Input(Header,function()
+			Compkiller:_Input(Header,function(...)
 				IsOpen = not IsOpen;
 
 				if IsOpen then
@@ -10138,7 +10138,7 @@ function Compkiller.new(Config)
 				refreshScale();
 			end);
 
-			task.delay(2.5,function()
+			task.delay(2.5,function(...)
 				refresh();
 				refreshScale();
 			end);
@@ -10146,19 +10146,19 @@ function Compkiller.new(Config)
 			if config.Closed then
 				IsOpen = false
 				SectionClose.Rotation = -180  -- chevron already points "up" when open; point down when closed
-				task.delay(0.05, function()
+				task.delay(0.05, function(...)
 					refresh()
 					refreshScale()
 				end)
 			end
 
-			Header.MouseEnter:Connect(function()
+			Header.MouseEnter:Connect(function(...)
 				Compkiller:_Animation(SectionText,TweenInfo.new(0.2),{
 					TextTransparency = 0.25
 				})
 			end)	
 
-			Header.MouseLeave:Connect(function()
+			Header.MouseLeave:Connect(function(...)
 				Compkiller:_Animation(SectionText,TweenInfo.new(0.2),{
 					TextTransparency = 0.500
 				})
@@ -10357,7 +10357,7 @@ function Compkiller.new(Config)
 
 			Compkiller:_Blur(BackFrame,Signal);
 
-			UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
+			UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function(...)
 				Compkiller:_Animation(Watermark,TweenInfo.new(0.4),{
 					Size = UDim2.new(0, UIListLayout.AbsoluteContentSize.X + 8, 0, 23)
 				});
@@ -10401,7 +10401,7 @@ function Compkiller.new(Config)
 					Property = 'TextColor3'
 				});
 
-				local Update = function()
+				local Update = function(...)
 					local scale = TextService:GetTextSize(TextLabel.Text,TextLabel.TextSize,TextLabel.Font,Vector2.new(math.huge,math.huge));
 
 					TextLabel.Size = UDim2.new(0, scale.X + 2, 0.7, 0)
@@ -10466,20 +10466,20 @@ function Compkiller.new(Config)
 			WindowArgs:Toggle(WindowArgs.IsOpen)
 		end;
 
-		local Button = Compkiller:_Input(CloseWindow,function()
+		local Button = Compkiller:_Input(CloseWindow,function(...)
 			WindowArgs:_ToggleUI()
 		end)
 
 		if not Compkiller:_IsMobile() then
 
-			Compkiller:_Hover(Button,function()
+			Compkiller:_Hover(Button,function(...)
 				ImageLabel:SetAttribute("Hover",true);
-			end , function()
+			end , function(...)
 				ImageLabel:SetAttribute("Hover",false);
 			end);
 		end;
 
-		table.insert(WindowArgs.THREADS,_TrackThread(task.spawn(function()
+		table.insert(WindowArgs.THREADS,_TrackThread(task.spawn(function(...)
 			while true do task.wait(0.15)
 				if Compkiller:_IsMobile() then
 					ToggleCloseUI(true);
@@ -10544,7 +10544,7 @@ function Compkiller.new(Config)
 		WindowArgs.Profile = config.UserProfile or WindowArgs.Profile;
 	end;
 
-	WindowArgs.LOOP_THREAD = _TrackThread(task.spawn(function()
+	WindowArgs.LOOP_THREAD = _TrackThread(task.spawn(function(...)
 		local TimeTic = tick();
 
 		local BlurElement = Instance.new("Frame")
@@ -10630,7 +10630,7 @@ function Compkiller.new(Config)
 	local OldDelayThread;
 	local DurationTime = tick();
 
-	Compkiller:_Hover(TabFrame , function()
+	Compkiller:_Hover(TabFrame , function(...)
 		if OldDelayThread then
 			task.cancel(OldDelayThread);
 			OldDelayThread = nil;
@@ -10643,7 +10643,7 @@ function Compkiller.new(Config)
 		DurationTime = tick();
 
 		TabHover:Fire(true);
-	end , function()
+	end , function(...)
 		if OldDelayThread then
 			task.cancel(OldDelayThread);
 			OldDelayThread = nil;
@@ -10653,7 +10653,7 @@ function Compkiller.new(Config)
 			return;
 		end;
 
-		OldDelayThread = task.delay(math.clamp((tick() - DurationTime) , 0.01,5),function()
+		OldDelayThread = task.delay(math.clamp((tick() - DurationTime) , 0.01,5),function(...)
 			if TabHover:GetValue() then
 				TabHover:Fire(false);
 			end
@@ -10978,13 +10978,13 @@ function Compkiller:Loader(IconId,Duration)
 
 	local Event = Instance.new('BindableEvent');
 
-	task.delay(0.5,function()
+	task.delay(0.5,function(...)
 		Compkiller:_Animation(Icon,TweenInfo.new(0.75,Enum.EasingStyle.Quint),{
 			ImageTransparency = 0.01,
 			Size = UDim2.new(0, 200, 0, 200)
 		});
 
-		task.delay(0.25,function()
+		task.delay(0.25,function(...)
 			Compkiller:_Animation(Vignette,TweenInfo.new(5),{
 				ImageTransparency = 0.2
 			});
@@ -11003,26 +11003,26 @@ function Compkiller:Loader(IconId,Duration)
 				BackgroundTransparency = 1
 			});
 
-			task.delay(0.1,function()
+			task.delay(0.1,function(...)
 				Compkiller:_Animation(Vignette,TweenInfo.new(1,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
 					ImageTransparency = 1
 				});
 
 				task.wait(0.2)
 
-				task.delay(3,function()
+				task.delay(3,function(...)
 					CompKiller:Destroy();
 				end)
 			end)
 
-			task.delay(0.6,function()
+			task.delay(0.6,function(...)
 				Event:Fire();
 			end)
 		end)
 	end);
 
 	return {
-		yield = function()
+		yield = function(...)
 			return Event.Event:Wait();
 		end	
 	};
@@ -11046,12 +11046,12 @@ function Compkiller.newNotify()
 
 	-- [PATCH #6] Shield notify GUI immediately -- apply protect_gui + tag it
 	-- so it is invisible to AC DescendantAdded scans and GetAttribute probes
-	_pcall(function()
+	_pcall(function(...)
 		local _pfn = protect_gui or protectgui or (syn and syn.protect_gui)
 		if _pfn and not _islclosure(_pfn) then _pfn(Notification) end
 	end)
-	_pcall(function() Notification:SetAttribute(_CK_GUI_TAG, true) end)
-	_pcall(function() Notification.DisplayOrder = 2147483647 end)
+	_pcall(function(...) Notification:SetAttribute(_CK_GUI_TAG, true) end)
+	_pcall(function(...) Notification.DisplayOrder = 2147483647 end)
 
 	NotifyContainer.Name = Compkiller:_RandomString()
 	NotifyContainer.Parent = Notification
@@ -11197,7 +11197,7 @@ function Compkiller.newNotify()
 			UICorner_3.CornerRadius = UDim.new(0, 1)
 			UICorner_3.Parent = TimeLeft
 
-			local UpdateText = function()
+			local UpdateText = function(...)
 				local TitleScale = TextService:GetTextSize(Header.Text,Header.TextSize,Header.Font,Vector2.new(math.huge,math.huge));
 				local BodyScale = TextService:GetTextSize(Body.Text,Body.TextSize,Body.Font,Vector2.new(math.huge,math.huge));
 
@@ -11220,7 +11220,7 @@ function Compkiller.newNotify()
 
 			UpdateText();
 
-			local Close = function()
+			local Close = function(...)
 				Compkiller:_Animation(NotifyFrame,TweenInfo.new(0.65,Enum.EasingStyle.Quint),{
 					Position = UDim2.new(1,200,0,0)
 				});
@@ -11236,7 +11236,7 @@ function Compkiller.newNotify()
 
 			end;
 
-			local Show = function()
+			local Show = function(...)
 				Compkiller:_Animation(NotifyFrame,TweenInfo.new(0.5,Enum.EasingStyle.Quint),{
 					Position = UDim2.new(0,0,0,0)
 				});
@@ -11247,7 +11247,7 @@ function Compkiller.newNotify()
 					Size = UDim2.new(1, 0, 1, 0)
 				});
 
-				return task.delay(0.25,function()
+				return task.delay(0.25,function(...)
 					Show();
 
 					task.delay(Notify.Duration + 0.2,Close)
@@ -11326,7 +11326,7 @@ function Compkiller:EnableAdvancedOptimizations(enabled)
     if _OPT.Enabled then
         if not _OPT.MonitorThread then
             local thread
-            thread = task.spawn(function()
+            thread = task.spawn(function(...)
                 while _OPT.Enabled and _OPT.MonitorThread == thread do
                     task.wait(_OPT.MemInterval)
                     if _OPT.Enabled and _OPT.MonitorThread == thread then
@@ -11350,17 +11350,17 @@ end
 function Compkiller:CleanupAll()
     local cancelled = 0
     for key, tw in pairs(_OPT.ActiveTweenMap) do
-        local ok, playing = pcall(function() return tw.PlaybackState end)
+        local ok, playing = pcall(function(...) return tw.PlaybackState end)
         if ok and playing == Enum.PlaybackState.Playing then
-            pcall(function() tw:Cancel() end)
+            pcall(function(...) tw:Cancel() end)
             cancelled = cancelled + 1
         end
         _OPT.ActiveTweenMap[key] = nil
     end
     for _, tw in ipairs(_OPT.ActiveTweens) do
-        local ok, playing = pcall(function() return tw.PlaybackState end)
+        local ok, playing = pcall(function(...) return tw.PlaybackState end)
         if ok and playing == Enum.PlaybackState.Playing then
-            pcall(function() tw:Cancel() end)
+            pcall(function(...) tw:Cancel() end)
             cancelled = cancelled + 1
         end
     end
@@ -11411,7 +11411,7 @@ function Compkiller:_SmartAnimation(Self, Info, Property)
 
     if currentFPS < threshold then
         for prop, val in pairs(Property) do
-            pcall(function() Self[prop] = val end)
+            pcall(function(...) Self[prop] = val end)
         end
         _OPT.Stats.InstantSets = _OPT.Stats.InstantSets + 1
         return _OPT._DummyTween
@@ -11440,9 +11440,9 @@ function Compkiller:_SmartAnimation(Self, Info, Property)
         local dedupKey = tostring(Self) .. "|" .. prop
         local existing = _OPT.ActiveTweenMap[dedupKey]
         if existing then
-            local ok, playing = pcall(function() return existing.PlaybackState end)
+            local ok, playing = pcall(function(...) return existing.PlaybackState end)
             if ok and playing == Enum.PlaybackState.Playing then
-                pcall(function() existing:Cancel() end)
+                pcall(function(...) existing:Cancel() end)
                 _OPT.Stats.DedupCancels = _OPT.Stats.DedupCancels + 1
             end
             _OPT.ActiveTweenMap[dedupKey] = nil
@@ -11456,7 +11456,7 @@ function Compkiller:_SmartAnimation(Self, Info, Property)
     end
     tween:Play()
 
-    tween.Completed:Connect(function()
+    tween.Completed:Connect(function(...)
         local idx = table.find(_OPT.ActiveTweens, tween)
         if idx then table.remove(_OPT.ActiveTweens, idx) end
         for prop in pairs(Property) do
@@ -11473,7 +11473,7 @@ end
 function Compkiller:_SweepMemory()
     local kept = {}
     for _, tw in ipairs(_OPT.ActiveTweens) do
-        local ok, state = pcall(function() return tw.PlaybackState end)
+        local ok, state = pcall(function(...) return tw.PlaybackState end)
         if ok and state == Enum.PlaybackState.Playing then
             table.insert(kept, tw)
         end
@@ -11490,11 +11490,11 @@ do
     _OPT._DummyTween = {
         Completed     = _dummyBE.Event,
         PlaybackState = Enum.PlaybackState.Completed,
-        Cancel        = function() end,
-        Play          = function() end,
-        Pause         = function() end,
+        Cancel        = function(...) end,
+        Play          = function(...) end,
+        Pause         = function(...) end,
     }
-    table.insert(_CK_CONNECTIONS, _dummyBE.Event:Connect(function() end))
+    table.insert(_CK_CONNECTIONS, _dummyBE.Event:Connect(function(...) end))
 end
 
 
@@ -11623,7 +11623,7 @@ function Compkiller:SafeExec(fn, onError)
     end
     local ok, err = _xpcall(fn, function(e)
         local tb = ""
-        _pcall(function() tb = debug and debug.traceback and debug.traceback(_tostring(e), 2) or "" end)
+        _pcall(function(...) tb = debug and debug.traceback and debug.traceback(_tostring(e), 2) or "" end)
         return _tostring(e) .. (tb ~= "" and ("\n" .. tb) or "")
     end)
     if not ok then
@@ -11641,7 +11641,7 @@ end
 function Compkiller:Wrap(fn, onError)
     if _type(fn) ~= "function" then return fn end
     return _newcclosure(function(...)
-        return self:SafeExec(function() return fn(...) end, onError)
+        return self:SafeExec(function(...) return fn(...) end, onError)
     end)
 end
 
@@ -11664,7 +11664,7 @@ function Compkiller:NewSandbox(cfg)
         end
         if _type(fn) ~= "function" then return false, "not a function" end
         local args = {...}
-        local ok, err = _xpcall(function() return fn(_unpack(args)) end, function(e)
+        local ok, err = _xpcall(function(...) return fn(_unpack(args)) end, function(e)
             return _tostring(e)
         end)
         if not ok then
@@ -11700,8 +11700,8 @@ do
 
     function Compkiller:EnableAntiAFK(enabled)
         if enabled == false then
-            if _ANTIAFK_CONN   then _pcall(function() _ANTIAFK_CONN:Disconnect()    end) _ANTIAFK_CONN   = nil end
-            if _ANTIAFK_THREAD then _pcall(function() task.cancel(_ANTIAFK_THREAD)  end) _ANTIAFK_THREAD = nil end
+            if _ANTIAFK_CONN   then _pcall(function(...) _ANTIAFK_CONN:Disconnect()    end) _ANTIAFK_CONN   = nil end
+            if _ANTIAFK_THREAD then _pcall(function(...) task.cancel(_ANTIAFK_THREAD)  end) _ANTIAFK_THREAD = nil end
             _CKLog("AntiAFK: disabled.")
             return
         end
@@ -11710,10 +11710,10 @@ do
             return
         end
         -- Hook the idle kick via VirtualUser
-        _pcall(function()
+        _pcall(function(...)
             local VirtualUser = game:GetService("VirtualUser")
             _ANTIAFK_CONN = _TrackConn(
-                Players.LocalPlayer.Idled:Connect(function()
+                Players.LocalPlayer.Idled:Connect(function(...)
                     VirtualUser:CaptureController()
                     VirtualUser:ClickButton2(Vector2.new())
                     _CKLog("AntiAFK: idle ping sent.")
@@ -11721,10 +11721,10 @@ do
             )
         end)
         -- Fallback: periodic dummy input every 15 minutes
-        _ANTIAFK_THREAD = _ckSpawn(function()
+        _ANTIAFK_THREAD = _ckSpawn(function(...)
             while _ANTIAFK_CONN do
                 task.wait(840)   -- 14 min
-                _pcall(function()
+                _pcall(function(...)
                     local VU = game:GetService("VirtualUser")
                     VU:CaptureController()
                     VU:ClickButton2(Vector2.new())
@@ -11755,13 +11755,13 @@ do
             if not _ANTIKICK_ACTIVE then return end
 
             if _ANTIKICK_ORIG_KICK and _type(hookfunction) == "function" then
-                _pcall(function() hookfunction(LocalPlayer.Kick, _ANTIKICK_ORIG_KICK) end)
+                _pcall(function(...) hookfunction(LocalPlayer.Kick, _ANTIKICK_ORIG_KICK) end)
             end
             if _ANTIKICK_ORIG_NCI and _type(hookmetamethod) == "function" then
-                _pcall(function() hookmetamethod(LocalPlayer, "__namecall", _ANTIKICK_ORIG_NCI) end)
+                _pcall(function(...) hookmetamethod(LocalPlayer, "__namecall", _ANTIKICK_ORIG_NCI) end)
             end
             if _ANTIKICK_ORIG_NCG and _type(hookmetamethod) == "function" then
-                _pcall(function() hookmetamethod(game, "__namecall", _ANTIKICK_ORIG_NCG) end)
+                _pcall(function(...) hookmetamethod(game, "__namecall", _ANTIKICK_ORIG_NCG) end)
             end
 
             _ANTIKICK_ORIG_KICK = nil
@@ -11779,10 +11779,10 @@ do
 
         -- METHOD 1: hookfunction on LocalPlayer.Kick
         if _type(hookfunction) == "function" then
-            _pcall(function()
+            _pcall(function(...)
                 _ANTIKICK_ORIG_KICK = hookfunction(
                     LocalPlayer.Kick,
-                    _newcclosure(function() end)
+                    _newcclosure(function(...) end)
                 )
                 _CKLog("AntiKick [M1]: hookfunction on LocalPlayer.Kick.")
             end)
@@ -11791,7 +11791,7 @@ do
         -- METHOD 2: hookmetamethod on LocalPlayer __namecall
         -- Exact pattern with checkcaller() guard + setreadonly bracket
         if _type(hookmetamethod) == "function" then
-            _pcall(function()
+            _pcall(function(...)
                 _ANTIKICK_ORIG_NCI = hookmetamethod(
                     LocalPlayer,
                     "__namecall",
@@ -11811,7 +11811,7 @@ do
 
         -- METHOD 3: hookmetamethod on game __namecall
         if _type(hookmetamethod) == "function" then
-            _pcall(function()
+            _pcall(function(...)
                 _ANTIKICK_ORIG_NCG = hookmetamethod(
                     game,
                     "__namecall",
@@ -11832,7 +11832,7 @@ do
         -- METHOD 4: getrawmetatable fallback (CMD X pattern)
         -- Used when hookmetamethod is unavailable -- direct metatable write
         if _type(hookmetamethod) ~= "function" and _type(_getrawmetatable) == "function" then
-            _pcall(function()
+            _pcall(function(...)
                 local mt    = _getrawmetatable(game)
                 if not mt then return end
                 local oldNC = mt.__namecall
@@ -11898,7 +11898,7 @@ do
 
     function Janitor:Destroy()
         for _, item in _ipairs(self._items) do
-            _pcall(function()
+            _pcall(function(...)
                 if item.type == "conn" then
                     item.ref:Disconnect()
                 elseif item.type == "inst" then
@@ -11930,7 +11930,7 @@ do
     local function _SaveCameraState()
         local cam = workspace.CurrentCamera
         local origFOV, origType, origCFrame
-        pcall(function()
+        pcall(function(...)
             origFOV    = cam.FieldOfView
             origType   = cam.CameraType
             origCFrame = cam.CFrame
@@ -11943,24 +11943,24 @@ do
     end
 
     local function _SuppressRender()
-        pcall(function()
+        pcall(function(...)
             local cam       = workspace.CurrentCamera
             cam.CameraType  = Enum.CameraType.Scriptable
             cam.FieldOfView = 1
             cam.CFrame      = CFrame.new(0, -1e6, 0)
         end)
-        pcall(function() setfpscap(10) end)
+        pcall(function(...) setfpscap(10) end)
     end
 
     local function _RestoreRender(state)
-        pcall(function()
+        pcall(function(...)
             local cam       = workspace.CurrentCamera
             cam.CameraType  = state.ctype
             cam.FieldOfView = state.fov
             if state.cf then cam.CFrame = state.cf end
         end)
         -- Restore full FPS
-        pcall(function() setfpscap(360) end)
+        pcall(function(...) setfpscap(360) end)
     end
 
     function Compkiller:RenderCull()
@@ -11989,7 +11989,7 @@ do
 
         local conns = {}
 
-        local c1 = _TrackConn(UserInputService.WindowFocusReleased:Connect(function()
+        local c1 = _TrackConn(UserInputService.WindowFocusReleased:Connect(function(...)
             if not getgenv()[_CULL_KEY] then
                 getgenv()[_CULL_KEY] = _SaveCameraState()
             end
@@ -11998,7 +11998,7 @@ do
         end))
         table.insert(conns, c1)
 
-        local c2 = _TrackConn(UserInputService.WindowFocused:Connect(function()
+        local c2 = _TrackConn(UserInputService.WindowFocused:Connect(function(...)
             local state = getgenv()[_CULL_KEY]
             if state then
                 _RestoreRender(state)
@@ -12021,7 +12021,7 @@ do
         local conns = getgenv()[_RENDER_CONN]
         if type(conns) == "table" then
             for _, c in ipairs(conns) do
-                pcall(function() c:Disconnect() end)
+                pcall(function(...) c:Disconnect() end)
             end
         end
         getgenv()[_RENDER_CONN] = nil
@@ -12049,10 +12049,10 @@ do
         table.insert(self._queue, { remote = remote, args = args })
         if not self._running then
             self._running = true
-            _ckSpawn(function()
+            _ckSpawn(function(...)
                 while #self._queue > 0 do
                     local item = table.remove(self._queue, 1)
-                    pcall(function()
+                    pcall(function(...)
                         item.remote:FireServer((table.unpack or unpack)(item.args))
                     end)
                     task.wait(self._interval)
@@ -12160,7 +12160,7 @@ do
         _CKLog(_sfmt("Anomaly: baseline captured (%d targets), scanning every %ds.",
             #_WATCH, interval))
 
-        _DETECTOR_THREAD = _ckSpawn(function()
+        _DETECTOR_THREAD = _ckSpawn(function(...)
             while _DETECTOR_THREAD do
                 task.wait(interval)
                 if not _DETECTOR_THREAD then break end
@@ -12258,15 +12258,15 @@ do
 	local _DIAG_CACHE = nil
 
 	local _DIAG_CHECKS = {
-		{ "cloneref",        function() assert(type(cloneref) == "function") end },
-		{ "getgenv",         function() assert(type(getgenv) == "function") end },
-		{ "get_hidden_gui",  function() assert(type(get_hidden_gui) == "function") end },
-		{ "task.cancel",     function() assert(type(task.cancel) == "function") end },
-		{ "TweenService",    function() assert(game:GetService("TweenService") ~= nil) end },
-		{ "RunService",      function() assert(game:GetService("RunService") ~= nil) end },
-		{ "Instance.new",    function() local f = Instance.new("Folder"); f:Destroy() end },
-		{ "HttpService",     function() assert(game:GetService("HttpService") ~= nil) end },
-		{ "CoreGui",         function() assert(game:GetService("CoreGui") ~= nil) end },
+		{ "cloneref",        function(...) assert(type(cloneref) == "function") end },
+		{ "getgenv",         function(...) assert(type(getgenv) == "function") end },
+		{ "get_hidden_gui",  function(...) assert(type(get_hidden_gui) == "function") end },
+		{ "task.cancel",     function(...) assert(type(task.cancel) == "function") end },
+		{ "TweenService",    function(...) assert(game:GetService("TweenService") ~= nil) end },
+		{ "RunService",      function(...) assert(game:GetService("RunService") ~= nil) end },
+		{ "Instance.new",    function(...) local f = Instance.new("Folder"); f:Destroy() end },
+		{ "HttpService",     function(...) assert(game:GetService("HttpService") ~= nil) end },
+		{ "CoreGui",         function(...) assert(game:GetService("CoreGui") ~= nil) end },
 	}
 
 	function Compkiller:RunDiagnostics()
@@ -12324,7 +12324,7 @@ do
 			return fn(...)
 		end
 		local args = {...}
-		local ok, result = pcall(function() return fn((table.unpack or unpack)(args)) end)
+		local ok, result = pcall(function(...) return fn((table.unpack or unpack)(args)) end)
 		if not ok then
 			table.insert(_SANDBOX_ERRORS, { time = tick(), err = tostring(result) })
 			_CKLog("SafeCall caught: " .. tostring(result))
@@ -12422,7 +12422,7 @@ do
 		{
 			name = "cyclic_unpack",
 			desc = "Cyclic table unpack (detects hooked unpack)",
-			fn   = function()
+			fn   = function(...)
 				local t  = {}
 				t[1]     = t
 				local x  = ((table.unpack or unpack) or unpack)(t)
@@ -12433,7 +12433,7 @@ do
 		{
 			name = "game_cache",
 			desc = "game == workspace.Parent identity (detects broken instance cache)",
-			fn   = function()
+			fn   = function(...)
 				assert(game == workspace.Parent, "game/workspace cache broken")
 			end,
 		},
@@ -12441,14 +12441,14 @@ do
 		{
 			name = "newproxy_namecall",
 			desc = "newproxy __namecall support (detects broken userdata metamethods)",
-			fn   = function()
+			fn   = function(...)
 				assert(_type(newproxy) == "function", "newproxy missing")
 				local obj    = newproxy(true)
 				local mt     = getmetatable(obj)
 				local called = false
-				mt.__namecall = function() called = true end
-				mt.__index    = function() end
-				_pcall(function() obj:TestCall() end)
+				mt.__namecall = function(...) called = true end
+				mt.__index    = function(...) end
+				_pcall(function(...) obj:TestCall() end)
 				assert(called, "__namecall was not invoked")
 			end,
 		},
@@ -12456,12 +12456,12 @@ do
 		{
 			name = "getfenv_propagation",
 			desc = "getfenv(2) env propagation (detects broken setfenv/getfenv)",
-			fn   = function()
+			fn   = function(...)
 				assert(_type(getfenv) == "function", "getfenv missing")
 				assert(_type(setfenv) == "function", "setfenv missing")
 				local sentinel = { __ck_probe = true }
 				local env      = setmetatable({ __ck_probe = true }, { __index = getfenv() })
-				local testFn   = function()
+				local testFn   = function(...)
 					assert(getfenv(2).__ck_probe == true, "getfenv(2) propagation broken")
 				end
 				setfenv(testFn, env)
@@ -12472,10 +12472,10 @@ do
 		{
 			name = "wait_timing",
 			desc = "wait() timing accuracy (detects mocked wait implementation)",
-			fn   = function()
+			fn   = function(...)
 				local start = _tick()
-				local ok, _ = _pcall(function() task.wait(0.1) end)
-				if not ok then _pcall(function() wait(0.1) end) end
+				local ok, _ = _pcall(function(...) task.wait(0.1) end)
+				if not ok then _pcall(function(...) wait(0.1) end) end
 				local elapsed = _tick() - start
 				assert(elapsed >= 0.05, _sfmt("wait() returned in %.4fs -- likely mocked", elapsed))
 			end,
@@ -12552,7 +12552,7 @@ function Compkiller:EnableNameObfuscation(enabled)
 		_CKLog("EnableNameObfuscation: OFF (static name retained).")
 		return
 	end
-	pcall(function()
+	pcall(function(...)
 		for _, win in ipairs(self.Windows) do
 			local sg = win and win._ScreenGui
 			if sg and sg.Parent then
@@ -12591,13 +12591,13 @@ do
 			_SLEEP_PREV_THRESHOLD   = _OPT.AnimThreshold
 			_OPT.AnimThreshold      = 999
 			_OPT.Enabled            = false
-			pcall(function() setfpscap(10) end)
+			pcall(function(...) setfpscap(10) end)
 			_CKLog("SetSleepMode: ON -- animations paused, FPS capped to 10.")
 		elseif not enabled and _SLEEP_ACTIVE then
 			_SLEEP_ACTIVE      = false
 			_OPT.AnimThreshold = _SLEEP_PREV_THRESHOLD or 30
 			_OPT.Enabled       = true
-			pcall(function() setfpscap(360) end)
+			pcall(function(...) setfpscap(360) end)
 			_CKLog("SetSleepMode: OFF -- restored.")
 		end
 	end
@@ -12645,18 +12645,18 @@ do
             return _mfloor(OldGcInfo + f)
         end
 
-        _GCINFO_TICK_CONN = _TrackConn(_RunService.Stepped:Connect(function()
+        _GCINFO_TICK_CONN = _TrackConn(_RunService.Stepped:Connect(function(...)
             _wave_tick = _wave_tick + 0.03
             if _wave_tick > 1 then _wave_tick = _wave_tick - 1 end
         end))
 
-        _pcall(function()
-            _GCINFO_HOOK1 = hookfunction(getrenv().gcinfo, _newcclosure(function()
+        _pcall(function(...)
+            _GCINFO_HOOK1 = hookfunction(getrenv().gcinfo, _newcclosure(function(...)
                 return _wave()
             end))
         end)
 
-        _pcall(function()
+        _pcall(function(...)
             _GCINFO_HOOK2 = hookfunction(getrenv().collectgarbage, _newcclosure(function(arg, ...)
                 local ok, val = _pcall(_GCINFO_HOOK2, arg, ...)
                 if ok and arg == "count" then return _wave() end
@@ -12670,13 +12670,13 @@ do
 
     local function _DisableGCBypass()
         if not _GCINFO_ACTIVE then return end
-        if _GCINFO_TICK_CONN then _pcall(function() _GCINFO_TICK_CONN:Disconnect() end) _GCINFO_TICK_CONN = nil end
+        if _GCINFO_TICK_CONN then _pcall(function(...) _GCINFO_TICK_CONN:Disconnect() end) _GCINFO_TICK_CONN = nil end
         -- Restore originals if hookfunction supports restoring
         if _GCINFO_HOOK1 and _type(hookfunction) == "function" then
-            _pcall(function() hookfunction(getrenv().gcinfo,         _GCINFO_HOOK1) end)
+            _pcall(function(...) hookfunction(getrenv().gcinfo,         _GCINFO_HOOK1) end)
         end
         if _GCINFO_HOOK2 and _type(hookfunction) == "function" then
-            _pcall(function() hookfunction(getrenv().collectgarbage, _GCINFO_HOOK2) end)
+            _pcall(function(...) hookfunction(getrenv().collectgarbage, _GCINFO_HOOK2) end)
         end
         _GCINFO_ACTIVE = false
         _CKLog("GCBypass: disabled.")
@@ -12707,12 +12707,12 @@ do
         end
 
         -- Capture baseline at boot (before any executor inflation shows up)
-        local _BASE_TOTAL = _pcall(function() return _Stats:GetTotalMemoryUsageMb() end) and _Stats:GetTotalMemoryUsageMb() or 200
-        local _BASE_GUI   = _pcall(function() return _Stats:GetMemoryUsageMbForTag(Enum.DeveloperMemoryTag.Gui) end)
+        local _BASE_TOTAL = _pcall(function(...) return _Stats:GetTotalMemoryUsageMb() end) and _Stats:GetTotalMemoryUsageMb() or 200
+        local _BASE_GUI   = _pcall(function(...) return _Stats:GetMemoryUsageMbForTag(Enum.DeveloperMemoryTag.Gui) end)
                             and _Stats:GetMemoryUsageMbForTag(Enum.DeveloperMemoryTag.Gui) or 5
 
         -- Drift +/-10 on Stepped so readings look alive, not frozen
-        _TrackConn(_RunService.Stepped:Connect(function()
+        _TrackConn(_RunService.Stepped:Connect(function(...)
             _MEM_DRIFT = _rand:NextNumber(-10, 10)
         end))
 
@@ -12736,13 +12736,13 @@ do
 
         -- hookfunction indexed versions as fallback
         if _type(hookfunction) == "function" then
-            _pcall(function()
+            _pcall(function(...)
                 _MEM_HOOK1 = hookfunction(_Stats.GetTotalMemoryUsageMb, _newcclosure(function(self, ...)
                     if _checkcaller() then return _MEM_HOOK1(self, ...) end
                     return _retTotal()
                 end))
             end)
-            _pcall(function()
+            _pcall(function(...)
                 _MEM_HOOK2 = hookfunction(_Stats.GetMemoryUsageMbForTag, _newcclosure(function(self, ...)
                     if _checkcaller() then return _MEM_HOOK2(self, ...) end
                     return _retGui()
@@ -12757,8 +12757,8 @@ do
     function Compkiller:EnableMemoryBypass(enabled)
         if enabled == false then
             -- Restore all hooks
-            if _MEM_HOOK1 and _type(hookfunction) == "function" then _pcall(function() hookfunction(_Stats.GetTotalMemoryUsageMb,   _MEM_HOOK1) end) end
-            if _MEM_HOOK2 and _type(hookfunction) == "function" then _pcall(function() hookfunction(_Stats.GetMemoryUsageMbForTag, _MEM_HOOK2) end) end
+            if _MEM_HOOK1 and _type(hookfunction) == "function" then _pcall(function(...) hookfunction(_Stats.GetTotalMemoryUsageMb,   _MEM_HOOK1) end) end
+            if _MEM_HOOK2 and _type(hookfunction) == "function" then _pcall(function(...) hookfunction(_Stats.GetMemoryUsageMbForTag, _MEM_HOOK2) end) end
             _MEM_ACTIVE = false
             _CKLog("MemBypass: disabled.")
         else
@@ -12782,7 +12782,7 @@ do
 
     local function _BuildAssetWhitelist()
         -- Harvest real assets from CoreGui before any exploit GUI is loaded
-        _pcall(function()
+        _pcall(function(...)
             _ContentProv:PreloadAsync({_CoreGuiSvc}, function(assetId)
                 if assetId and assetId:find("rbxassetid://") then
                     _tinsert(_SAFE_ASSETS, assetId)
@@ -12790,7 +12790,7 @@ do
             end)
         end)
         -- Harvest clean game ImageLabel assets
-        _pcall(function()
+        _pcall(function(...)
             for _, v in _ipairs(game:GetDescendants()) do
                 if v:IsA("ImageLabel") and v.Image:find("rbxassetid://")
                    and not v:IsDescendantOf(_CoreGuiSvc) then
@@ -12879,7 +12879,7 @@ do
 
         -- Keep all newproxy results alive (defeats weak-table GC trap)
         if _type(hookfunction) == "function" and _type(getrenv) == "function" then
-            _pcall(function()
+            _pcall(function(...)
                 _PROXY_HOOK = hookfunction(getrenv().newproxy, _newcclosure(function(...)
                     local proxy = _PROXY_HOOK(...)
                     _tinsert(_PROXY_TABLE, proxy)   -- strong ref -> won't GC
@@ -12887,7 +12887,7 @@ do
                 end))
             end)
             -- Sweep the proxy table on Stepped to remove any that are dead
-            _TrackConn(_RunService.Stepped:Connect(function()
+            _TrackConn(_RunService.Stepped:Connect(function(...)
                 for i = #_PROXY_TABLE, 1, -1 do
                     if _PROXY_TABLE[i] == nil then
                         _tremove(_PROXY_TABLE, i)
@@ -12898,7 +12898,7 @@ do
 
         -- Suppress DescendantAdded events for our own CK ScreenGuis so AC scanners
         -- that do CoreGui.DescendantAdded:Connect(...) never see our GUI appear
-        _pcall(function()
+        _pcall(function(...)
             local mt     = _getrawmetatable(_CoreGuiSvc)
             if not mt then return end
             local oldNC  = mt.__namecall
@@ -12915,7 +12915,7 @@ do
                     if _type(cb) == "function" then
                         local safeCb = _newcclosure(function(obj)
                             -- If this is one of our own shielded GUIs, swallow the event
-                            if obj and _pcall(function()
+                            if obj and _pcall(function(...)
                                 return obj:IsA("ScreenGui")
                                     and obj:GetAttribute(_CK_GUI_TAG)
                             end) then return end
@@ -12969,7 +12969,7 @@ do
         local _suspSet = {}
         for _, k in _ipairs(_SUSPICIOUS_GLOBALS) do _suspSet[k] = true end
 
-        _pcall(function()
+        _pcall(function(...)
             local gmt = _getrawmetatable(_G)
             if not gmt then
                 -- _G may not have a metatable -- set one
@@ -12979,7 +12979,7 @@ do
                     if not _checkcaller() and _suspSet[key] then return nil end
                     return _realG(self, key)
                 end)
-                _pcall(function() setmetatable(_G, fakemt) end)
+                _pcall(function(...) setmetatable(_G, fakemt) end)
             else
                 local oldIdx = _rawget(gmt, "__index")
                 _setreadonly(gmt, false)
@@ -13025,7 +13025,7 @@ do
             return
         end
 
-        _pcall(function()
+        _pcall(function(...)
             local mt = _getrawmetatable(game)
             if not mt then return end
 
@@ -13033,10 +13033,10 @@ do
             _METAGUARD_ORIG = mt.__namecall
 
             -- Poll every 2s -- if __namecall was overwritten by an AC spy, restore ours silently
-            _ckSpawn(function()
+            _ckSpawn(function(...)
                 while _METAGUARD_ACTIVE do
                     task.wait(2)
-                    _pcall(function()
+                    _pcall(function(...)
                         local mt2    = _getrawmetatable(game)
                         local curr   = mt2 and _rawget(mt2, "__namecall")
                         -- If current __namecall is a non-executor Lua closure -> AC spy
@@ -13079,7 +13079,7 @@ do
             return
         end
 
-        _pcall(function()
+        _pcall(function(...)
             local renv    = getrenv()
             local renvMt  = _getrawmetatable(renv) or {}
             local renvOld = renvMt.__index
@@ -13100,7 +13100,7 @@ do
                 return _rawget(self, key)
             end)
             _setreadonly(renvMt, true)
-            _pcall(function() setmetatable(renv, renvMt) end)
+            _pcall(function(...) setmetatable(renv, renvMt) end)
         end)
 
         _RENV_ACTIVE = true
@@ -13125,7 +13125,7 @@ do
     --         lives inside a CK-tagged ScreenGui, return nil instead.
     local _TEXTBOX_BYPASS_ACTIVE = false
     local _TEXTBOX_NC_HOOK       = nil
-    local _IsDescOf              = _pcall(function() return game.IsDescendantOf end) and game.IsDescendantOf or nil
+    local _IsDescOf              = _pcall(function(...) return game.IsDescendantOf end) and game.IsDescendantOf or nil
 
     local function _EnableTextBoxBypass()
         if _TEXTBOX_BYPASS_ACTIVE then return end
@@ -13141,7 +13141,7 @@ do
                 local tb = _TEXTBOX_NC_HOOK(self, ...)
                 if tb and _type(tb) == "userdata" then
                     -- If textbox is inside any CK-tagged GUI, hide it
-                    local hidden = _pcall(function()
+                    local hidden = _pcall(function(...)
                         local p = tb.Parent
                         while p do
                             if p:IsA("ScreenGui") and p:GetAttribute(_CK_GUI_TAG) then
@@ -13174,7 +13174,7 @@ do
 
     -- [BUNDLE] EnableAllBypasses -- one call to activate all 8 bypass systems
     function Compkiller:EnableAllBypasses()
-        _ckSpawn(function()
+        _ckSpawn(function(...)
             task.wait(1)  -- wait for game to fully load so baselines are accurate
             self:EnableGCBypass(true)
             self:EnableMemoryBypass(true)
@@ -13225,8 +13225,8 @@ local function _makeCosineSpoof(baseValue, amplitude)
     local tick_v  = 0
 
     -- Advance tick on Stepped so the curve animates naturally
-    _ckSpawn(function()
-        _TrackConn(RunService.Stepped:Connect(function()
+    _ckSpawn(function(...)
+        _TrackConn(RunService.Stepped:Connect(function(...)
             local formula = ((_acos(_cos(_pi * tick_v)) / _pi) * (amplitude * 2)) + -amplitude
             local nextF   = ((_acos(_cos(_pi * tick_v + 0.01)) / _pi) * (amplitude * 2)) + -amplitude
             if formula > nextF then
@@ -13237,7 +13237,7 @@ local function _makeCosineSpoof(baseValue, amplitude)
         end))
     end)
 
-    return function()
+    return function(...)
         local formula = ((_acos(_cos(_pi * tick_v)) / _pi) * (amplitude * 2)) + -amplitude
         return _floor(baseValue + formula)
     end
@@ -13256,8 +13256,8 @@ do
         local _pi     = math.pi
         local tick_v  = 0
 
-        _ckSpawn(function()
-            _TrackConn(RunService.Stepped:Connect(function()
+        _ckSpawn(function(...)
+            _TrackConn(RunService.Stepped:Connect(function(...)
                 local formula = ((_acos(_cos(_pi * tick_v)) / _pi) * (amplitude * 2)) + -amplitude
                 local nextF   = ((_acos(_cos(_pi * tick_v + 0.01)) / _pi) * (amplitude * 2)) + -amplitude
                 if formula > nextF then
@@ -13268,7 +13268,7 @@ do
             end))
         end)
 
-        return function()
+        return function(...)
             local formula = ((_acos(_cos(_pi * tick_v)) / _pi) * (amplitude * 2)) + -amplitude
             return _floor(baseValue + formula)
         end
@@ -13294,7 +13294,7 @@ do
         local CoreGuiRef = cloneref(game:GetService("CoreGui"))
 
         -- Collect from CoreGui itself
-        _pcall(function()
+        _pcall(function(...)
             game:GetService("ContentProvider"):PreloadAsync({CoreGuiRef}, function(assetId)
                 if assetId and assetId:find("rbxassetid://") then
                     _tinsert(pool, assetId)
@@ -13303,7 +13303,7 @@ do
         end)
 
         -- Collect ImageLabel assets from game tree
-        _pcall(function()
+        _pcall(function(...)
             for _, v in _ipairs(game:GetDescendants()) do
                 if v:IsA("ImageLabel") and v.Image:find("rbxassetid://")
                    and not v:IsDescendantOf(CoreGuiRef) then
@@ -13343,7 +13343,7 @@ do
             return
         end
 
-        _pcall(function()
+        _pcall(function(...)
             local ContentRef = cloneref(game:GetService("ContentProvider"))
             local CoreGuiRef = cloneref(game:GetService("CoreGui"))
             local safePool   = _buildAssetPool()
@@ -13406,7 +13406,7 @@ do
             return
         end
 
-        _pcall(function()
+        _pcall(function(...)
             local renv = getrenv()
 
             -- Hook newproxy -- every proxy created by any script goes into our stronghold
@@ -13418,7 +13418,7 @@ do
 
             -- Also periodically scrub nil entries to prevent memory bloat
             -- (entries only become nil if we explicitly remove them -- since they're strong refs, they won't GC naturally)
-            _ckSpawn(function()
+            _ckSpawn(function(...)
                 while _HONEYPOT_ACTIVE do
                     task.wait(30)
                     local clean = {}
@@ -13479,7 +13479,7 @@ do
             return
         end
 
-        _pcall(function()
+        _pcall(function(...)
             local _oldSG; _oldSG = hookmetamethod(game, "__namecall", _newcclosure(function(self, ...)
                 if _checkcaller() then return _oldSG(self, ...) end
                 local method = _getnamecallmethod()
@@ -13492,7 +13492,7 @@ do
                         for _, v in _ipairs(results[1]) do
                             -- Hide our GUI and anything inside it
                             local isOurs = false
-                            if screenGui and (v == screenGui or _pcall(function()
+                            if screenGui and (v == screenGui or _pcall(function(...)
                                 return v:IsDescendantOf(screenGui)
                             end) == true) then
                                 isOurs = true
@@ -13507,7 +13507,7 @@ do
                 -- Block DescendantAdded connections that fire on our GUI
                 -- We can't stop the event but we can filter the callback's argument
                 if (method == "Connect" or method == "connect") and self then
-                    _pcall(function()
+                    _pcall(function(...)
                         -- Check if self is CoreGui.DescendantAdded or similar signal
                         -- We wrap the passed callback to filter out our GUI
                         local args = {...}
@@ -13517,7 +13517,7 @@ do
                                 -- If the added obj IS or IS INSIDE our screengui, swallow it
                                 if screenGui and obj then
                                     if obj == screenGui then return end
-                                    local ok, desc = _pcall(function()
+                                    local ok, desc = _pcall(function(...)
                                         return obj:IsDescendantOf(screenGui)
                                     end)
                                     if ok and desc then return end
@@ -13564,7 +13564,7 @@ do
             return
         end
 
-        _pcall(function()
+        _pcall(function(...)
             local mt = _getrawmetatable(game)
             if not mt then return end
 
@@ -13572,10 +13572,10 @@ do
             _NC_OUR_HOOK = mt.__namecall
 
             -- Poll every 0.5s -- if AC replaced __namecall, reinstall ours on top
-            _ckSpawn(function()
+            _ckSpawn(function(...)
                 while _NCGUARD_ACTIVE do
                     task.wait(0.5)
-                    _pcall(function()
+                    _pcall(function(...)
                         local current = _rawget(mt, "__namecall")
                         if current ~= _NC_OUR_HOOK and _islclosure(current) then
                             -- AC replaced it with a Lua spy -- layer ours back on top
@@ -13635,7 +13635,7 @@ do
         end
         if _CLOAKER_ACTIVE then return end
 
-        _pcall(function()
+        _pcall(function(...)
             local renv = getrenv and getrenv() or nil
 
             -- Hook rawget -- intercept _G lookups for executor globals
@@ -13687,12 +13687,12 @@ end
 -- [PATCH #11] Re-arm watchdog -- reinstalls metamethod hooks after respawn/teleport
 -- Hooks can be silently wiped when the game environment resets
 do
-    _ckSpawn(function()
+    _ckSpawn(function(...)
         local _lp = game:GetService("Players").LocalPlayer
         if not _lp then return end
-        _TrackConn(_lp.CharacterAdded:Connect(function()
+        _TrackConn(_lp.CharacterAdded:Connect(function(...)
             task.wait(2)  -- let environment settle
-            _pcall(function()
+            _pcall(function(...)
                 -- Re-arm every hook-based bypass that can be wiped on respawn
                 if Compkiller then
                     Compkiller:EnableNamecallGuard(true)
@@ -13810,7 +13810,7 @@ end
 --  MC.preset("nuke")
 --  MC.apply({ antiKick=true, performance="HIGH", allBypasses=true })
 -- ============================================================================
-Compkiller.MasterControl = function()
+Compkiller.MasterControl = function(...)
 
 	-- value coercion helpers
 	local function _bv(v, d) if v == nil then return d ~= false end return v ~= false and v ~= "false" end
@@ -13819,7 +13819,7 @@ Compkiller.MasterControl = function()
 
 	-- fpsCap (executor native, not a Compkiller method)
 	local function fpsCap(v)
-		_pcall(function() setfpscap(_nv(v, 60)) end)
+		_pcall(function(...) setfpscap(_nv(v, 60)) end)
 	end
 
 	-- indexHook (uses local _InstallIndexHook)
@@ -13968,13 +13968,13 @@ Compkiller.MasterControl = function()
 			_SLEEP_PREV_THRESHOLD   = _OPT.AnimThreshold
 			_OPT.AnimThreshold      = 999
 			_OPT.Enabled            = false
-			pcall(function() setfpscap(10) end)
+			pcall(function(...) setfpscap(10) end)
 			_CKLog("SetSleepMode: ON -- animations paused, FPS capped to 10.")
 		elseif not enabled and _SLEEP_ACTIVE then
 			_SLEEP_ACTIVE      = false
 			_OPT.AnimThreshold = _SLEEP_PREV_THRESHOLD or 30
 			_OPT.Enabled       = true
-			pcall(function() setfpscap(360) end)
+			pcall(function(...) setfpscap(360) end)
 			_CKLog("SetSleepMode: OFF -- restored.")
 		end
 	end
@@ -14024,7 +14024,7 @@ Compkiller.MasterControl = function()
 		if _OPT.Enabled then
 			if not _OPT.MonitorThread then
 				local thread
-				thread = task.spawn(function()
+				thread = task.spawn(function(...)
 					while _OPT.Enabled and _OPT.MonitorThread == thread do
 						task.wait(_OPT.MemInterval)
 						if _OPT.Enabled and _OPT.MonitorThread == thread then
@@ -14069,17 +14069,17 @@ Compkiller.MasterControl = function()
 	local function cleanupAll()
 		local cancelled = 0
 		for key, tw in pairs(_OPT.ActiveTweenMap) do
-			local ok, playing = pcall(function() return tw.PlaybackState end)
+			local ok, playing = pcall(function(...) return tw.PlaybackState end)
 			if ok and playing == Enum.PlaybackState.Playing then
-				pcall(function() tw:Cancel() end)
+				pcall(function(...) tw:Cancel() end)
 				cancelled = cancelled + 1
 			end
 			_OPT.ActiveTweenMap[key] = nil
 		end
 		for _, tw in ipairs(_OPT.ActiveTweens) do
-			local ok, playing = pcall(function() return tw.PlaybackState end)
+			local ok, playing = pcall(function(...) return tw.PlaybackState end)
 			if ok and playing == Enum.PlaybackState.Playing then
-				pcall(function() tw:Cancel() end)
+				pcall(function(...) tw:Cancel() end)
 				cancelled = cancelled + 1
 			end
 		end
@@ -14099,7 +14099,7 @@ Compkiller.MasterControl = function()
 
 		local conns = {}
 
-		local c1 = _TrackConn(UserInputService.WindowFocusReleased:Connect(function()
+		local c1 = _TrackConn(UserInputService.WindowFocusReleased:Connect(function(...)
 			if not getgenv()[_CULL_KEY] then
 				getgenv()[_CULL_KEY] = _SaveCameraState()
 			end
@@ -14108,7 +14108,7 @@ Compkiller.MasterControl = function()
 		end))
 		table.insert(conns, c1)
 
-		local c2 = _TrackConn(UserInputService.WindowFocused:Connect(function()
+		local c2 = _TrackConn(UserInputService.WindowFocused:Connect(function(...)
 			local state = getgenv()[_CULL_KEY]
 			if state then
 				_RestoreRender(state)
@@ -14131,7 +14131,7 @@ Compkiller.MasterControl = function()
 		local conns = getgenv()[_RENDER_CONN]
 		if type(conns) == "table" then
 			for _, c in ipairs(conns) do
-				pcall(function() c:Disconnect() end)
+				pcall(function(...) c:Disconnect() end)
 			end
 		end
 		getgenv()[_RENDER_CONN] = nil
@@ -14168,7 +14168,7 @@ Compkiller.MasterControl = function()
 			_CKLog("EnableNameObfuscation: OFF (static name retained).")
 			return
 		end
-		pcall(function()
+		pcall(function(...)
 			for _, win in ipairs(Compkiller.Windows) do
 				local sg = win and win._ScreenGui
 				if sg and sg.Parent then
@@ -14183,7 +14183,7 @@ Compkiller.MasterControl = function()
 	local function enableTurboScramble(screenGui, enabled)
 		if enabled == false then
 			if _TURBO_CONN then
-				_pcall(function() _TURBO_CONN:Disconnect() end)
+				_pcall(function(...) _TURBO_CONN:Disconnect() end)
 				_TURBO_CONN   = nil
 				_TURBO_ACTIVE = false
 				_CKLog("TurboScramble: disabled.")
@@ -14205,8 +14205,8 @@ Compkiller.MasterControl = function()
 		_TURBO_ACTIVE = true
 
 		-- RenderStepped -- rename GUI + ALL descendants every frame
-		_TURBO_CONN = _TrackConn(RunService.RenderStepped:Connect(function()
-			_pcall(function()
+		_TURBO_CONN = _TrackConn(RunService.RenderStepped:Connect(function(...)
+			_pcall(function(...)
 				-- Rename root ScreenGui
 				local newName = _GetPoolName()
 				screenGui.Name = newName
@@ -14214,7 +14214,7 @@ Compkiller.MasterControl = function()
 
 				-- Rename ALL descendants (TurboNameSpam equivalent)
 				for _, v in _ipairs(screenGui:GetDescendants()) do
-					_pcall(function() v.Name = _GetPoolName() end)
+					_pcall(function(...) v.Name = _GetPoolName() end)
 				end
 			end)
 		end))
@@ -14253,7 +14253,7 @@ Compkiller.MasterControl = function()
 		end
 		local ok, err = _xpcall(fn, function(e)
 			local tb = ""
-			_pcall(function() tb = debug and debug.traceback and debug.traceback(_tostring(e), 2) or "" end)
+			_pcall(function(...) tb = debug and debug.traceback and debug.traceback(_tostring(e), 2) or "" end)
 			return _tostring(e) .. (tb ~= "" and ("\n" .. tb) or "")
 		end)
 		if not ok then
@@ -14270,7 +14270,7 @@ Compkiller.MasterControl = function()
 			return fn(...)
 		end
 		local args = {...}
-		local ok, result = pcall(function() return fn((table.unpack or unpack)(args)) end)
+		local ok, result = pcall(function(...) return fn((table.unpack or unpack)(args)) end)
 		if not ok then
 			table.insert(_SANDBOX_ERRORS, { time = tick(), err = tostring(result) })
 			_CKLog("SafeCall caught: " .. tostring(result))
@@ -14281,7 +14281,7 @@ Compkiller.MasterControl = function()
 	local function wrap(fn, onError)
 		if _type(fn) ~= "function" then return fn end
 		return _newcclosure(function(...)
-			return safeExec(function() return fn(...) end, onError)
+			return safeExec(function(...) return fn(...) end, onError)
 		end)
 	end
 
@@ -14301,7 +14301,7 @@ Compkiller.MasterControl = function()
 			end
 			if _type(fn) ~= "function" then return false, "not a function" end
 			local args = {...}
-			local ok, err = _xpcall(function() return fn(_unpack(args)) end, function(e)
+			local ok, err = _xpcall(function(...) return fn(_unpack(args)) end, function(e)
 				return _tostring(e)
 			end)
 			if not ok then
@@ -14638,13 +14638,13 @@ Compkiller.MasterControl = function()
 
 		local Event = Instance.new('BindableEvent');
 
-		task.delay(0.5,function()
+		task.delay(0.5,function(...)
 			Compkiller:_Animation(Icon,TweenInfo.new(0.75,Enum.EasingStyle.Quint),{
 				ImageTransparency = 0.01,
 				Size = UDim2.new(0, 200, 0, 200)
 			});
 
-			task.delay(0.25,function()
+			task.delay(0.25,function(...)
 				Compkiller:_Animation(Vignette,TweenInfo.new(5),{
 					ImageTransparency = 0.2
 				});
@@ -14663,26 +14663,26 @@ Compkiller.MasterControl = function()
 					BackgroundTransparency = 1
 				});
 
-				task.delay(0.1,function()
+				task.delay(0.1,function(...)
 					Compkiller:_Animation(Vignette,TweenInfo.new(1,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
 						ImageTransparency = 1
 					});
 
 					task.wait(0.2)
 
-					task.delay(3,function()
+					task.delay(3,function(...)
 						CompKiller:Destroy();
 					end)
 				end)
 
-				task.delay(0.6,function()
+				task.delay(0.6,function(...)
 					Event:Fire();
 				end)
 			end)
 		end);
 
 		return {
-			yield = function()
+			yield = function(...)
 				return Event.Event:Wait();
 			end	
 		};
@@ -14706,7 +14706,7 @@ Compkiller.MasterControl = function()
 
 		if Compkiller.SecureMode then
 			for i,v in next , RequiredAssets do task.wait()
-				pcall(function()
+				pcall(function(...)
 					cacheImage(v);
 				end);
 			end;
@@ -14738,7 +14738,7 @@ Compkiller.MasterControl = function()
 		local cache_path = string.format("%s/cache-%s.png" ,Compkiller.CacheDirectory , Hash);
 
 		if isfile(cache_path) then
-			return (getcustomasset or getsynasset or function() return ''; end)(cache_path);
+			return (getcustomasset or getsynasset or function(...) return ''; end)(cache_path);
 		end;
 
 		local imgSize = Compkiller.SecurityConfig.ImageScale;
@@ -14757,7 +14757,7 @@ Compkiller.MasterControl = function()
 
 		local json = game:HttpGet(endpoint);
 
-		local JSON_Decode = select(2, pcall(function()
+		local JSON_Decode = select(2, pcall(function(...)
 			return HttpService:JSONDecode(json);
 		end));
 
@@ -14768,7 +14768,7 @@ Compkiller.MasterControl = function()
 
 			task.wait();
 
-			return (getcustomasset or getsynasset or function() return ''; end)(cache_path);
+			return (getcustomasset or getsynasset or function(...) return ''; end)(cache_path);
 		end;
 
 		return "";
@@ -15032,7 +15032,7 @@ Compkiller.MasterControl = function()
 		_CKLog(_sfmt("Anomaly: baseline captured (%d targets), scanning every %ds.",
 			#_WATCH, interval))
 
-		_DETECTOR_THREAD = _ckSpawn(function()
+		_DETECTOR_THREAD = _ckSpawn(function(...)
 			while _DETECTOR_THREAD do
 				task.wait(interval)
 				if not _DETECTOR_THREAD then break end
@@ -15173,13 +15173,13 @@ Compkiller.MasterControl = function()
 			if not _ANTIKICK_ACTIVE then return end
 
 			if _ANTIKICK_ORIG_KICK and _type(hookfunction) == "function" then
-				_pcall(function() hookfunction(LocalPlayer.Kick, _ANTIKICK_ORIG_KICK) end)
+				_pcall(function(...) hookfunction(LocalPlayer.Kick, _ANTIKICK_ORIG_KICK) end)
 			end
 			if _ANTIKICK_ORIG_NCI and _type(hookmetamethod) == "function" then
-				_pcall(function() hookmetamethod(LocalPlayer, "__namecall", _ANTIKICK_ORIG_NCI) end)
+				_pcall(function(...) hookmetamethod(LocalPlayer, "__namecall", _ANTIKICK_ORIG_NCI) end)
 			end
 			if _ANTIKICK_ORIG_NCG and _type(hookmetamethod) == "function" then
-				_pcall(function() hookmetamethod(game, "__namecall", _ANTIKICK_ORIG_NCG) end)
+				_pcall(function(...) hookmetamethod(game, "__namecall", _ANTIKICK_ORIG_NCG) end)
 			end
 
 			_ANTIKICK_ORIG_KICK = nil
@@ -15197,10 +15197,10 @@ Compkiller.MasterControl = function()
 
 		-- METHOD 1: hookfunction on LocalPlayer.Kick
 		if _type(hookfunction) == "function" then
-			_pcall(function()
+			_pcall(function(...)
 				_ANTIKICK_ORIG_KICK = hookfunction(
 					LocalPlayer.Kick,
-					_newcclosure(function() end)
+					_newcclosure(function(...) end)
 				)
 				_CKLog("AntiKick [M1]: hookfunction on LocalPlayer.Kick.")
 			end)
@@ -15209,7 +15209,7 @@ Compkiller.MasterControl = function()
 		-- METHOD 2: hookmetamethod on LocalPlayer __namecall
 		-- Exact pattern with checkcaller() guard + setreadonly bracket
 		if _type(hookmetamethod) == "function" then
-			_pcall(function()
+			_pcall(function(...)
 				_ANTIKICK_ORIG_NCI = hookmetamethod(
 					LocalPlayer,
 					"__namecall",
@@ -15228,7 +15228,7 @@ Compkiller.MasterControl = function()
 
 		-- METHOD 3: hookmetamethod on game __namecall
 		if _type(hookmetamethod) == "function" then
-			_pcall(function()
+			_pcall(function(...)
 				_ANTIKICK_ORIG_NCG = hookmetamethod(
 					game,
 					"__namecall",
@@ -15249,7 +15249,7 @@ Compkiller.MasterControl = function()
 		-- METHOD 4: getrawmetatable fallback (CMD X pattern)
 		-- Used when hookmetamethod is unavailable -- direct metatable write
 		if _type(hookmetamethod) ~= "function" and _type(_getrawmetatable) == "function" then
-			_pcall(function()
+			_pcall(function(...)
 				local mt    = _getrawmetatable(game)
 				if not mt then return end
 				local oldNC = mt.__namecall
@@ -15277,8 +15277,8 @@ Compkiller.MasterControl = function()
 
 	local function enableAntiAFK(enabled)
 		if enabled == false then
-			if _ANTIAFK_CONN   then _pcall(function() _ANTIAFK_CONN:Disconnect()    end) _ANTIAFK_CONN   = nil end
-			if _ANTIAFK_THREAD then _pcall(function() task.cancel(_ANTIAFK_THREAD)  end) _ANTIAFK_THREAD = nil end
+			if _ANTIAFK_CONN   then _pcall(function(...) _ANTIAFK_CONN:Disconnect()    end) _ANTIAFK_CONN   = nil end
+			if _ANTIAFK_THREAD then _pcall(function(...) task.cancel(_ANTIAFK_THREAD)  end) _ANTIAFK_THREAD = nil end
 			_CKLog("AntiAFK: disabled.")
 			return
 		end
@@ -15287,10 +15287,10 @@ Compkiller.MasterControl = function()
 			return
 		end
 		-- Hook the idle kick via VirtualUser
-		_pcall(function()
+		_pcall(function(...)
 			local VirtualUser = game:GetService("VirtualUser")
 			_ANTIAFK_CONN = _TrackConn(
-				Players.LocalPlayer.Idled:Connect(function()
+				Players.LocalPlayer.Idled:Connect(function(...)
 					VirtualUser:CaptureController()
 					VirtualUser:ClickButton2(Vector2.new())
 					_CKLog("AntiAFK: idle ping sent.")
@@ -15298,10 +15298,10 @@ Compkiller.MasterControl = function()
 			)
 		end)
 		-- Fallback: periodic dummy input every 15 minutes
-		_ANTIAFK_THREAD = _ckSpawn(function()
+		_ANTIAFK_THREAD = _ckSpawn(function(...)
 			while _ANTIAFK_CONN do
 				task.wait(840)   -- 14 min
-				_pcall(function()
+				_pcall(function(...)
 					local VU = game:GetService("VirtualUser")
 					VU:CaptureController()
 					VU:ClickButton2(Vector2.new())
@@ -15323,8 +15323,8 @@ Compkiller.MasterControl = function()
 	local function enableMemoryBypass(enabled)
 		if enabled == false then
 			-- Restore all hooks
-			if _MEM_HOOK1 and _type(hookfunction) == "function" then _pcall(function() hookfunction(_Stats.GetTotalMemoryUsageMb,   _MEM_HOOK1) end) end
-			if _MEM_HOOK2 and _type(hookfunction) == "function" then _pcall(function() hookfunction(_Stats.GetMemoryUsageMbForTag, _MEM_HOOK2) end) end
+			if _MEM_HOOK1 and _type(hookfunction) == "function" then _pcall(function(...) hookfunction(_Stats.GetTotalMemoryUsageMb,   _MEM_HOOK1) end) end
+			if _MEM_HOOK2 and _type(hookfunction) == "function" then _pcall(function(...) hookfunction(_Stats.GetMemoryUsageMbForTag, _MEM_HOOK2) end) end
 			_MEM_ACTIVE = false
 			_CKLog("MemBypass: disabled.")
 		else
@@ -15399,12 +15399,12 @@ Compkiller.MasterControl = function()
 			return
 		end
 
-		local Stats = _pcall(function() return cloneref(game:GetService("Stats")) end)
+		local Stats = _pcall(function(...) return cloneref(game:GetService("Stats")) end)
 		if not Stats then Stats = game:GetService("Stats") end
 
 		-- GcInfo cosine spoof
 		if not _GCSPOOFED and _type(hookfunction) == "function" and _type(getrenv) == "function" then
-			_pcall(function()
+			_pcall(function(...)
 				-- Wait for gcinfo to peak so our baseline is accurate
 				local maxima = 0
 				local waited = 0
@@ -15438,10 +15438,10 @@ Compkiller.MasterControl = function()
 
 		-- Stats:GetTotalMemoryUsageMb spoof
 		if not _MEMSPOOFED and _type(hookmetamethod) == "function" then
-			_pcall(function()
+			_pcall(function(...)
 				local baseMem = Stats:GetTotalMemoryUsageMb()
 				local rand    = 0
-				_TrackConn(RunService.Stepped:Connect(function()
+				_TrackConn(RunService.Stepped:Connect(function(...)
 					rand = Random.new():NextNumber(-10, 10)
 				end))
 				local function getMem() return baseMem + rand end
@@ -15457,7 +15457,7 @@ Compkiller.MasterControl = function()
 						if _type(self) == "userdata" and
 						(m == "GetMemoryUsageMbForTag" or m == "getMemoryUsageMbForTag") then
 							local tagRand = Random.new():NextNumber(-0.1, 0.1)
-							local baseTag = _pcall(function() return Stats:GetMemoryUsageMbForTag(Enum.DeveloperMemoryTag.Gui) end) or 0
+							local baseTag = _pcall(function(...) return Stats:GetMemoryUsageMbForTag(Enum.DeveloperMemoryTag.Gui) end) or 0
 							return (type(baseTag) == "number" and baseTag or 0) + tagRand
 						end
 					end
@@ -15488,7 +15488,7 @@ Compkiller.MasterControl = function()
 			return
 		end
 
-		_pcall(function()
+		_pcall(function(...)
 			local ContentRef = cloneref(game:GetService("ContentProvider"))
 			local CoreGuiRef = cloneref(game:GetService("CoreGui"))
 			local safePool   = _buildAssetPool()
@@ -15538,7 +15538,7 @@ Compkiller.MasterControl = function()
 			return
 		end
 
-		_pcall(function()
+		_pcall(function(...)
 			local renv = getrenv()
 
 			-- Hook newproxy -- every proxy created by any script goes into our stronghold
@@ -15550,7 +15550,7 @@ Compkiller.MasterControl = function()
 
 			-- Also periodically scrub nil entries to prevent memory bloat
 			-- (entries only become nil if we explicitly remove them -- since they're strong refs, they won't GC naturally)
-			_ckSpawn(function()
+			_ckSpawn(function(...)
 				while _HONEYPOT_ACTIVE do
 					task.wait(30)
 					local clean = {}
@@ -15602,7 +15602,7 @@ Compkiller.MasterControl = function()
 			return
 		end
 
-		_pcall(function()
+		_pcall(function(...)
 			local _oldSG; _oldSG = hookmetamethod(game, "__namecall", _newcclosure(function(self, ...)
 				if _checkcaller() then return _oldSG(self, ...) end
 				local method = _getnamecallmethod()
@@ -15615,7 +15615,7 @@ Compkiller.MasterControl = function()
 						for _, v in _ipairs(results[1]) do
 							-- Hide our GUI and anything inside it
 							local isOurs = false
-							if screenGui and (v == screenGui or _pcall(function()
+							if screenGui and (v == screenGui or _pcall(function(...)
 								return v:IsDescendantOf(screenGui)
 							end) == true) then
 								isOurs = true
@@ -15630,7 +15630,7 @@ Compkiller.MasterControl = function()
 				-- Block DescendantAdded connections that fire on our GUI
 				-- We can't stop the event but we can filter the callback's argument
 				if (method == "Connect" or method == "connect") and self then
-					_pcall(function()
+					_pcall(function(...)
 						-- Check if self is CoreGui.DescendantAdded or similar signal
 						-- We wrap the passed callback to filter out our GUI
 						local args = {...}
@@ -15640,7 +15640,7 @@ Compkiller.MasterControl = function()
 								-- If the added obj IS or IS INSIDE our screengui, swallow it
 								if screenGui and obj then
 									if obj == screenGui then return end
-									local ok, desc = _pcall(function()
+									local ok, desc = _pcall(function(...)
 										return obj:IsDescendantOf(screenGui)
 									end)
 									if ok and desc then return end
@@ -15672,7 +15672,7 @@ Compkiller.MasterControl = function()
 			return
 		end
 
-		_pcall(function()
+		_pcall(function(...)
 			local mt = _getrawmetatable(game)
 			if not mt then return end
 
@@ -15680,10 +15680,10 @@ Compkiller.MasterControl = function()
 			_NC_OUR_HOOK = mt.__namecall
 
 			-- Poll every 0.5s -- if AC replaced __namecall, reinstall ours on top
-			_ckSpawn(function()
+			_ckSpawn(function(...)
 				while _NCGUARD_ACTIVE do
 					task.wait(0.5)
-					_pcall(function()
+					_pcall(function(...)
 						local current = _rawget(mt, "__namecall")
 						if current ~= _NC_OUR_HOOK and _islclosure(current) then
 							-- AC replaced it with a Lua spy -- layer ours back on top
@@ -15715,7 +15715,7 @@ Compkiller.MasterControl = function()
 		end
 		if _CLOAKER_ACTIVE then return end
 
-		_pcall(function()
+		_pcall(function(...)
 			local renv = getrenv and getrenv() or nil
 
 			-- Hook rawget -- intercept _G lookups for executor globals
@@ -15765,7 +15765,7 @@ Compkiller.MasterControl = function()
 	-- BYPASS ENGINE -- bulk
 	-- ========================================================================
 	local function enableAllBypasses()
-		_ckSpawn(function()
+		_ckSpawn(function(...)
 			task.wait(1)  -- wait for game to fully load so baselines are accurate
 			enableGCBypass(true)
 			enableMemoryBypass(true)
@@ -15813,7 +15813,7 @@ Compkiller.MasterControl = function()
 	-- MC.preset("nuke", { gcBypass=false }) -> nuke with selective overrides
 	local function preset(name, overrides)
 		local p = {}
-		p.stealth = function()
+		p.stealth = function(...)
 			setPerformanceProfile("LOW")
 			setSmartAnimations(false)
 			enableAdvancedOptimizations(false)
@@ -15821,7 +15821,7 @@ Compkiller.MasterControl = function()
 			enableNameObfuscation(true)
 			_CKLog("Preset.stealth: active")
 		end
-		p.performance = function()
+		p.performance = function(...)
 			setPerformanceProfile("HIGH")
 			setSmartAnimations(true)
 			enableAdvancedOptimizations(true)
@@ -15829,14 +15829,14 @@ Compkiller.MasterControl = function()
 			startRenderManager()
 			_CKLog("Preset.performance: active")
 		end
-		p.balanced = function()
+		p.balanced = function(...)
 			setPerformanceProfile("MEDIUM")
 			setSmartAnimations(true)
 			enableAdvancedOptimizations(true)
 			setSleepMode(false)
 			_CKLog("Preset.balanced: active")
 		end
-		p.secure = function()
+		p.secure = function(...)
 			enableNameObfuscation(true)
 			startAnomalyDetector(5)
 			enableAntiAFK(true)
@@ -15844,7 +15844,7 @@ Compkiller.MasterControl = function()
 			setSafeCall(true)
 			_CKLog("Preset.secure: active")
 		end
-		p.nuke = function()
+		p.nuke = function(...)
 			setPerformanceProfile("HIGH")
 			setSmartAnimations(true)
 			enableAdvancedOptimizations(true)
@@ -15855,7 +15855,7 @@ Compkiller.MasterControl = function()
 			setSafeCall(true)
 			enableAllBypasses()
 			if type(overrides) == "table" then
-				task.defer(function()
+				task.defer(function(...)
 					local map = {
 						gcBypass         = function(v) enableGCBypass(v)          end,
 						memBypass        = function(v) enableMemoryBypass(v)       end,
@@ -15968,7 +15968,7 @@ Compkiller.MasterControl = function()
 
 		-- DELAYED DIAGNOSTICS (after game settles)
 		if cfg.runDiagnostics == true or cfg.integrityTest == true or cfg.anomalyCheck == true then
-			_ckSpawn(function()
+			_ckSpawn(function(...)
 				task.wait(cfg.diagnosticsDelay or 8)
 				if cfg.runDiagnostics == true then runDiagnostics()           end
 				if cfg.anomalyCheck   == true then runAnomalyCheck()          end
@@ -15988,7 +15988,7 @@ Compkiller.MasterControl = function()
 	-- Unknown keys -> no-op + warn via __index
 	-- ========================================================================
 	return setmetatable({
-		-- WINDOW CREATION (CRITICAL)
+		-- WINDOW CREATION
 		new = Compkiller.new,
 
 		-- DEBUG
@@ -16101,7 +16101,7 @@ Compkiller.MasterControl = function()
 	}, {
 		__index = function(_, key)
 			warn("[CK] MasterControl." .. tostring(key) .. " -- unknown key.")
-			return function() end
+			return function(...) end
 		end,
 	})
 end
