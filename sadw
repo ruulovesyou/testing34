@@ -10514,8 +10514,8 @@ function Compkiller.new(Config)
 		end));
 	end;
 
-	function WindowArgs:SetMenuKey(new.KeyCode)
-		Config.Keybind = new;
+	function WindowArgs:SetMenuKey(newKeyCode)
+		Config.Keybind = newKeyCode;
 	end;
 
 	function WindowArgs:Update(config)
