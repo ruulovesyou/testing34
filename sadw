@@ -297,7 +297,54 @@ _CKLog(string.format("* Loading v%s (%s) -- %s",
     _CK_VERSION, _CK_BUILD,
     os.date and os.date("%Y-%m-%d %H:%M:%S") or "unknown time"))
 
-if not game:IsLoaded() then game.Loaded:Wait() end
+-- [FIX-LOAD] Wait for DataModel to be fully ready before any service access
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+-- ============================================================================
+-- SMART DEBUG / ERROR HANDLER
+-- Compkiller.SmartCheck = true  →  wraps every module load in a safe xpcall
+--                                  and prints line-level crash reports to output.
+-- Compkiller.SmartCheck = false →  zero overhead, no output, runs code directly.
+-- Usage:
+--   Compkiller:CheckMyUI("WindowName", function()
+--       -- your UI init code here
+--   end)
+-- ============================================================================
+local function _SmartErrorHandler(rawError)
+    local trace       = debug.traceback(tostring(rawError), 2)
+    local extractLine = string.match(tostring(rawError), ":(%d+):")
+    if not extractLine then
+        extractLine = string.match(trace, ":(%d+)")
+    end
+    local theLine = extractLine or "Unknown"
+
+    warn("🚨 [CK CRASH GUARD] 🚨")
+    warn("🛑 ERROR ON LINE: " .. theLine .. " — please fix!")
+    warn(string.rep("-", 50))
+    warn("📝 WHAT HAPPENED: " .. tostring(rawError))
+    warn("🔍 FULL TRACEBACK:\n" .. trace)
+    warn(string.rep("-", 50))
+    return rawError
+end
+
+local function _CheckMyUI(self, moduleName, codeBlock)
+    if self.SmartCheck then
+        -- [DEBUG ON] safe xpcall with full crash report
+        local ok, result = xpcall(codeBlock, _SmartErrorHandler)
+        if ok then
+            return result
+        else
+            warn("❌ [CK SmartCheck] Halted '" .. tostring(moduleName) .. "' — see error above.")
+            return nil
+        end
+    else
+        -- [DEBUG OFF] direct call, zero overhead
+        return codeBlock()
+    end
+end
+
+
 
 local CoreGui       = game:GetService("CoreGui")
 local Players       = game:GetService("Players")
@@ -336,6 +383,71 @@ local _CK_GUI_TAG = (function()
     return table.concat(parts)
     end)()
 -- [STEALTH-12] _CK_LEGACY_NAMES removed — cleanup uses _CK_GUI_TAG attribute only
+
+-- [FIX-LOAD] _CK_ENCRYPTED_NAMES and _EncryptGuiName declared HERE — before
+-- _SmartKillGUIs, _StartGuiIntegrityMonitor, and _ShieldParent all need them.
+-- Previous position (~line 780) caused forward-reference load crashes.
+local _CK_ENCRYPTED_NAMES = {}  -- single name registry
+
+-- [IRONCLAD-7] _EncryptGuiName v2 — 7-pattern generator, no getgenv() writes
+-- Pattern 1: Prefix_HEX8_Suffix (matches Roblox service names)
+-- Pattern 2: Prefix_Middle_HEX4_Suffix
+-- Pattern 3: UI_<uuid-like>
+-- Pattern 4: rbx_<4digits>_<6digits>     (looks Roblox-internal)
+-- Pattern 5: <Svc1><Svc2>Service_<hex6>  (looks like Roblox compositor)
+-- Pattern 6: full random alphanum         (max entropy)
+-- Pattern 7: Rbx<Word>_<hex4>            (executor-style, blends with internals)
+local function _EncryptGuiName()
+    local prefixes = {
+        "RbxGui","CoreUISvc","TopbarPlus","RbxHud","SystemUI",
+        "RenderSvc","InputSvc","GuiSvc","ScreenSvc","UISvc",
+        "RbxCoreSvc","RbxTopbar","NotifSvc","GuiOverlay",
+        "RbxRenderSvc","InputHandler","UXManager","SurfaceUISvc",
+        "CoreRenderer","UXRuntime",
+    }
+    local suffixes = {
+        "Handler","Manager","Controller","Service","Module",
+        "System","Runtime","Instance","Provider","Dispatcher",
+        "Observer","Scheduler","Broker","Registry","Resolver",
+    }
+    local middles = { "Core","Base","Root","Node","Leaf","Hub","Svc","Net" }
+    local words   = { "Audio","Video","Chat","Avatar","Voice","Social","Game" }
+    local alpha   = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+    local p = math.random(1, 7)
+    local name
+    if p == 1 then
+        name = prefixes[math.random(#prefixes)] .."_"..
+               string.format("%08X", math.random(0,0x7FFFFFFF)) .."_"..
+               suffixes[math.random(#suffixes)]
+    elseif p == 2 then
+        name = prefixes[math.random(#prefixes)] .."_"..
+               middles[math.random(#middles)] .."_"..
+               string.format("%04X", math.random(0,0xFFFF)) .."_"..
+               suffixes[math.random(#suffixes)]
+    elseif p == 3 then
+        name = string.format("UI_%04x%04x-%04x-%04x",
+            math.random(0,0xFFFF), math.random(0,0xFFFF),
+            math.random(0,0xFFFF), math.random(0,0xFFFF))
+    elseif p == 4 then
+        name = string.format("rbx_%04d_%06d", math.random(1000,9999), math.random(100000,999999))
+    elseif p == 5 then
+        name = prefixes[math.random(#prefixes)]..
+               suffixes[math.random(#suffixes)] .."Service_"..
+               string.format("%06x", math.random(0,0xFFFFFF))
+    elseif p == 6 then
+        local t, len = {}, math.random(12, 22)
+        for i=1,len do t[i] = alpha:sub(math.random(#alpha), math.random(#alpha)) end
+        name = table.concat(t)
+    else
+        -- Pattern 7: executor-style name blends with Synapse/KRNL internals
+        name = "Rbx"..words[math.random(#words)].."_"..
+               string.format("%04X",math.random(0,0xFFFF))
+    end
+
+    table.insert(_CK_ENCRYPTED_NAMES, name)
+    return name
+end
 
 
 local function _SmartKillGUIs()
@@ -611,10 +723,6 @@ _ckSpawn(function()
 end)
 
 
-local _CK_ENCRYPTED_NAMES = {}   -- all names this GUI has ever had, kept in sync
-
-
-
 -- [IRONCLAD-9] GUI INTEGRITY MONITOR v2
 -- PropertyChanged: immediate response (zero latency), debounced to 1/s max.
 -- Heartbeat poll: fires every 4–8 s (randomised) for anything missed by events.
@@ -765,68 +873,6 @@ local function _GetPoolName()
     return _TURBO_NAME_POOL[_mrandom(1, #_TURBO_NAME_POOL)]
 end
 
-
-local _CK_ENCRYPTED_NAMES = {}   -- [STEALTH-3b] single name registry (was: _CK_HIDDEN_GUI_NAMES + _CK_ENCRYPTED_NAMES)
-
--- [IRONCLAD-7] _EncryptGuiName v2 — 7-pattern generator, no getgenv() writes
--- Pattern 1: Prefix_HEX8_Suffix (matches Roblox service names)
--- Pattern 2: Prefix_Middle_HEX4_Suffix
--- Pattern 3: UI_<uuid-like>
--- Pattern 4: rbx_<4digits>_<6digits>     (looks Roblox-internal)
--- Pattern 5: <Svc1><Svc2>Service_<hex6>  (looks like Roblox compositor)
--- Pattern 6: full random alphanum         (max entropy)
--- Pattern 7: Rbx<Word>_<hex4>            (executor-style, blends with internals)
-local function _EncryptGuiName()
-    local prefixes = {
-        "RbxGui","CoreUISvc","TopbarPlus","RbxHud","SystemUI",
-        "RenderSvc","InputSvc","GuiSvc","ScreenSvc","UISvc",
-        "RbxCoreSvc","RbxTopbar","NotifSvc","GuiOverlay",
-        "RbxRenderSvc","InputHandler","UXManager","SurfaceUISvc",
-        "CoreRenderer","UXRuntime",
-    }
-    local suffixes = {
-        "Handler","Manager","Controller","Service","Module",
-        "System","Runtime","Instance","Provider","Dispatcher",
-        "Observer","Scheduler","Broker","Registry","Resolver",
-    }
-    local middles = { "Core","Base","Root","Node","Leaf","Hub","Svc","Net" }
-    local words   = { "Audio","Video","Chat","Avatar","Voice","Social","Game" }
-    local alpha   = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-
-    local p = math.random(1, 7)
-    local name
-    if p == 1 then
-        name = prefixes[math.random(#prefixes)] .."_"..
-               string.format("%08X", math.random(0,0x7FFFFFFF)) .."_"..
-               suffixes[math.random(#suffixes)]
-    elseif p == 2 then
-        name = prefixes[math.random(#prefixes)] .."_"..
-               middles[math.random(#middles)] .."_"..
-               string.format("%04X", math.random(0,0xFFFF)) .."_"..
-               suffixes[math.random(#suffixes)]
-    elseif p == 3 then
-        name = string.format("UI_%04x%04x-%04x-%04x",
-            math.random(0,0xFFFF), math.random(0,0xFFFF),
-            math.random(0,0xFFFF), math.random(0,0xFFFF))
-    elseif p == 4 then
-        name = string.format("rbx_%04d_%06d", math.random(1000,9999), math.random(100000,999999))
-    elseif p == 5 then
-        name = prefixes[math.random(#prefixes)]..
-               suffixes[math.random(#suffixes)] .."Service_"..
-               string.format("%06x", math.random(0,0xFFFFFF))
-    elseif p == 6 then
-        local t, len = {}, math.random(12, 22)
-        for i=1,len do t[i] = alpha:sub(math.random(#alpha), math.random(#alpha)) end
-        name = table.concat(t)
-    else
-        -- Pattern 7: executor-style name blends with Synapse/KRNL internals
-        name = "Rbx"..words[math.random(#words)].."_"..
-               string.format("%04X",math.random(0,0xFFFF))
-    end
-
-    table.insert(_CK_ENCRYPTED_NAMES, name)
-    return name
-end
 
 -- [IRONCLAD-7] Boot cleanup for legacy GUI names now uses _CK_ENCRYPTED_NAMES only
 -- No getgenv() scan needed since _EncryptGuiName v2 never writes to getgenv()
@@ -1039,10 +1085,11 @@ end) -- pcall wrapper for getgenv()[_CK_ENV_KEY_CLEAN] assignment
 
 
 local Compkiller = {
-	Version = '5.5.0',
-	Debug = false,          -- set true to enable all [CK] log output
-	-- [PATCH #16] Auto-disable debug after 30s -- prevents accidental production leak
+	Version = '5.5.6',
+	Debug = false,          -- set true to enable [CK] log output
+	-- [PATCH #16] Auto-disable debug after 30s
 	_DebugAutoOff = true,
+	SmartCheck = false,     -- set true to wrap UI loads in SmartErrorHandler
 	Logo = "rbxassetid://120245531583106",
 	Windows = {},
 	Scale = {
@@ -1057,6 +1104,13 @@ local Compkiller = {
 	ArcylicParent = CurrentCamera,
 	ProtectGui = protect_gui or protectgui or (syn and syn.protect_gui) or function(s) return s; end,
 };
+
+-- Public SmartCheck API
+-- Compkiller.SmartCheck = true  to enable crash-guarded loading
+-- Compkiller:CheckMyUI("name", function() ... end)
+function Compkiller:CheckMyUI(moduleName, codeBlock)
+    return _CheckMyUI(self, moduleName, codeBlock)
+end
 
 Compkiller.Colors = {
 	Highlight = Color3.fromRGB(17, 238, 253),
