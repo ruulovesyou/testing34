@@ -783,6 +783,9 @@ local function _RegisterForHealing(screenGui)
 end
 
 local function _StartGuiIntegrityMonitor(screenGui)
+    -- Per-call connection list so Destroying only disconnects THIS gui's conns
+    local _localConns = {}
+
     -- Parent watch (debounced: ignore re-fires within 1 s)
     local _lastParentFix = 0
     local conn1 = _pcall(function()
