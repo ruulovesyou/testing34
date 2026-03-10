@@ -2,6 +2,21 @@ if not game:IsLoaded() then
     game.Loaded:Wait()
 end
 
+-- ============================================================================
+-- SINGLE-EXECUTION GUARD  (Shield Layer 0)
+-- Purpose : Ensures only ONE instance of this library is running at any time.
+--           On re-execute the previous instance is torn down completely —
+--           all threads, tweens, connections, and GUIs — with no trace left.
+--
+-- Design  : Uses three opaque getgenv() keys (random integers at boot, never
+--           static strings).  The keys themselves are stored under a fourth
+--           opaque meta-pointer so even scanning getgenv() reveals no labels.
+--
+-- Shield  : The lock is re-written on every Heartbeat so a game AC that wipes
+--           getgenv() cannot suppress the guard on a future re-execute.
+--           The kill-fn is wrapped in newcclosure so islclosure() sees a
+--           C-closure — indistinguishable from a native executor function.
+-- ============================================================================
 do
     -- ── [SE-1] Four opaque keys — random integers, never static strings ───────
     local _CK_LOCK_KEY  = "\0\0__cklk_" .. tostring(math.random(100000000, 999999999))
@@ -477,18 +492,15 @@ local _CK_THREADS     = {}
 
 -- [SE-4 bridge] The lock-watcher connection was spawned before _CK_CONNECTIONS
 -- existed. Pull it in now so it gets disconnected on teardown.
+-- [SE-4 bridge] Pull lock-watcher connection into _CK_CONNECTIONS
 pcall(function()
-    -- Pull SE-4 lock-watcher conn using opaque bridge key from meta
-    pcall(function()
-        local _env  = getgenv()
-        local _meta = _env["\0\0__ckmp"]
-        if type(_meta) ~= "table" or not _meta.blc then return end
-        local conn2 = rawget(_G, _meta.blc)
-        if conn2 then
-            table.insert(_CK_CONNECTIONS, conn2)
-            rawset(_G, _meta.blc, nil)
-        end
-    end)
+    local _env  = getgenv()
+    local _meta = _env["\0\0__ckmp"]
+    if type(_meta) ~= "table" or not _meta.blc then return end
+    local conn2 = rawget(_G, _meta.blc)
+    if conn2 then
+        table.insert(_CK_CONNECTIONS, conn2)
+        rawset(_G, _meta.blc, nil)
     end
 end)
 
