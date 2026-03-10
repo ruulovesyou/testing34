@@ -7783,7 +7783,10 @@ function Compkiller.new(Config)
 		Notify = Compkiller.newNotify()
 	};
 
-	WindowArgs.Username = LocalPlayer.Name;
+	WindowArgs.Username    = LocalPlayer.Name;
+	WindowArgs._HideUser   = false   -- privacy: hide real username
+	WindowArgs._HideAvatar = false   -- privacy: hide real avatar
+	WindowArgs._IsPremium  = false   -- set by Update() / ShowPremiumStatus()
 
 	if Compkiller:_IsMobile() then
 		WindowArgs.AlwayShowTab = true;
@@ -11000,7 +11003,7 @@ function Compkiller.new(Config)
 
 		CloseWindow.Name = Compkiller:_RandomString()
 		CloseWindow.Parent = CompKiller
-		CloseWindow.AnchorPoint = Vector2.new(0.5, 0.5)
+		CloseWindow.AnchorPoint = Vector2.new(1, 1)   -- bottom-right anchor
 		CloseWindow.BackgroundColor3 = Compkiller.Colors.BGDBColor
 
 		table.insert(Compkiller.Elements.BGDBColor,{
@@ -11011,7 +11014,7 @@ function Compkiller.new(Config)
 		CloseWindow.BackgroundTransparency = 1
 		CloseWindow.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		CloseWindow.BorderSizePixel = 0
-		CloseWindow.Position = UDim2.new(0.5, 0, 0.5, 0)  -- centered like Dex v4
+		CloseWindow.Position = UDim2.new(1, -10, 1, -10)  -- bottom-right, below Roblox topbar
 		CloseWindow.Size = UDim2.new(0, 0, 0, 23)
 		CloseWindow.ZIndex = 150
 		CloseWindow.ClipsDescendants = true;
@@ -11032,8 +11035,6 @@ function Compkiller.new(Config)
 		ImageLabel.ImageTransparency = 1
 		ImageLabel.ClipsDescendants = false;
 
-		-- [CENTER-BTN] Make the centered toggle button draggable so user can reposition
-		Compkiller:Drag(CloseWindow, CloseWindow, 0.12)
 
 		local ToggleCloseUI = function(v)
 			ImageLabel.Image = Config.Logo;
@@ -11346,13 +11347,15 @@ function Compkiller.new(Config)
 
 	function WindowArgs:Update(config)
 		config = config or {};
-		config.Logo = config.Logo or Config.Logo;
-		config.Username = config.Username or LocalPlayer.DisplayName;
-		config.ExpireDate = config.ExpireDate or "NEVER";
-		config.WindowName = config.WindowName or Config.Name;
-		config.UserProfile = config.UserProfile or WindowArgs.Profile or string.format("rbxthumb://type=AvatarHeadShot&id=%s&w=150&h=150",tostring(LocalPlayer.UserId));
+		-- Pull from saved WindowArgs state when no config provided
+		config.Logo        = config.Logo        or Config.Logo;
+		config.Username    = config.Username    or WindowArgs.Username or LocalPlayer.DisplayName;
+		config.ExpireDate  = config.ExpireDate  or WindowArgs.ExipreDate or "NEVER";
+		config.WindowName  = config.WindowName  or Config.Name;
+		config.UserProfile = config.UserProfile or WindowArgs.Profile
+			or string.format("rbxthumb://type=AvatarHeadShot&id=%s&w=150&h=150", tostring(LocalPlayer.UserId));
 
-		if Compkiller.SecureMode and string.find(config.UserProfile, "rbxassetid://",1,true) then
+		if Compkiller.SecureMode and string.find(config.UserProfile, "rbxassetid://", 1, true) then
 			config.UserProfile = Compkiller:_GetIcon("user");
 		end;
 
@@ -11382,7 +11385,25 @@ function Compkiller.new(Config)
 
 		UserText.Text = _displayName;
 		CompLogo.Image = config.Logo;
-		ExpireText.Text = config.ExpireDate;
+
+		-- [PREMIUM-EXPIRE] When no real expire date is set, show premium status instead of "NEVER"
+		local _expireDisplay = config.ExpireDate
+		if _expireDisplay == "NEVER" or _expireDisplay == nil or _expireDisplay == "0/0/0" then
+			if _isPremium then
+				_expireDisplay = "\226\152\133 Premium"  -- ☆ Premium
+				ExpireText.TextColor3 = Color3.fromRGB(255, 185, 0)  -- gold
+				ExpireText.TextTransparency = 0
+			else
+				_expireDisplay = "NEVER"
+				ExpireText.TextColor3 = Compkiller.Colors.SwitchColor
+				ExpireText.TextTransparency = 0.500
+			end
+		else
+			ExpireText.TextColor3 = Compkiller.Colors.SwitchColor
+			ExpireText.TextTransparency = 0.500
+		end
+		ExpireText.Text = _expireDisplay;
+
 		WindowLabel.Text = config.WindowName;
 
 		-- [AVATAR] Respect HideAvatar toggle
@@ -11416,35 +11437,14 @@ function Compkiller.new(Config)
 	-- ────────────────────────────────────────────────────────────────────────────
 	function WindowArgs:HideUser(bool)
 		WindowArgs._HideUser = (bool ~= false)
-		-- Refresh display immediately
-		pcall(function()
-			local cfg = {
-				Username    = WindowArgs.Username   or LocalPlayer.Name,
-				ExpireDate  = WindowArgs.ExipreDate or "NEVER",
-				WindowName  = Config.Name,
-				Logo        = Config.Logo,
-				UserProfile = WindowArgs.Profile or
-					string.format("rbxthumb://type=AvatarHeadShot&id=%s&w=150&h=150", tostring(LocalPlayer.UserId))
-			}
-			WindowArgs:Update(cfg)
-		end)
-		CKLog("UserCard: HideUser=" .. tostring(WindowArgs._HideUser))
+		WindowArgs:Update()   -- no args = uses saved state
+		_CKLog("UserCard: HideUser=" .. tostring(WindowArgs._HideUser))
 	end;
 
 	function WindowArgs:HideAvatar(bool)
 		WindowArgs._HideAvatar = (bool ~= false)
-		pcall(function()
-			local cfg = {
-				Username    = WindowArgs.Username   or LocalPlayer.Name,
-				ExpireDate  = WindowArgs.ExipreDate or "NEVER",
-				WindowName  = Config.Name,
-				Logo        = Config.Logo,
-				UserProfile = WindowArgs.Profile or
-					string.format("rbxthumb://type=AvatarHeadShot&id=%s&w=150&h=150", tostring(LocalPlayer.UserId))
-			}
-			WindowArgs:Update(cfg)
-		end)
-		CKLog("UserCard: HideAvatar=" .. tostring(WindowArgs._HideAvatar))
+		WindowArgs:Update()   -- no args = uses saved state
+		_CKLog("UserCard: HideAvatar=" .. tostring(WindowArgs._HideAvatar))
 	end;
 
 	function WindowArgs:ShowPremiumStatus()
@@ -11453,25 +11453,11 @@ function Compkiller.new(Config)
 			isPremium = (LocalPlayer.MembershipType == Enum.MembershipType.Premium)
 		end)
 		WindowArgs._IsPremium = isPremium
-		-- Refresh so badge appears/disappears immediately
-		pcall(function()
-			local cfg = {
-				Username    = WindowArgs.Username   or LocalPlayer.Name,
-				ExpireDate  = WindowArgs.ExipreDate or "NEVER",
-				WindowName  = Config.Name,
-				Logo        = Config.Logo,
-				UserProfile = WindowArgs.Profile or
-					string.format("rbxthumb://type=AvatarHeadShot&id=%s&w=150&h=150", tostring(LocalPlayer.UserId))
-			}
-			WindowArgs:Update(cfg)
-		end)
-		CKLog("UserCard: IsPremium=" .. tostring(isPremium))
+		WindowArgs:Update()   -- refresh badge immediately
+		_CKLog("UserCard: IsPremium=" .. tostring(isPremium))
 		return isPremium
 	end;
 
-	WindowArgs._HideUser   = false  -- default: show real username
-	WindowArgs._HideAvatar = false  -- default: show real avatar
-	WindowArgs._IsPremium  = false  -- updated when Update() or ShowPremiumStatus() runs
 
 	WindowArgs.LOOP_THREAD = _TrackThread(task.spawn(function()
 		local TimeTic = tick();
