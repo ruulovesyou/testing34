@@ -11356,7 +11356,7 @@ function Compkiller.new(Config)
 		config = config or {};
 		-- Pull from saved WindowArgs state when no config provided
 		config.Logo        = config.Logo        or Config.Logo;
-		config.Username    = config.Username    or WindowArgs.Username or LocalPlayer.DisplayName;
+		config.Username    = config.Username    or WindowArgs.Username or LocalPlayer.Name;
 		-- Note: intentionally no "NEVER" fallback — nil triggers membership-type display below
 		config.ExpireDate  = config.ExpireDate  or WindowArgs.ExipreDate;
 		config.WindowName  = config.WindowName  or Config.Name;
@@ -11370,7 +11370,18 @@ function Compkiller.new(Config)
 		-- [USER-DISPLAY] Respect HideUser and HideAvatar toggles
 		local _displayName = config.Username
 		if WindowArgs._HideUser then
-			_displayName = string.rep("\226\128\162", 3)  -- "•••" hidden name
+			-- Obfuscate: scramble real chars with lookalike Unicode
+			local _src = config.Username or "user"
+			local _subs = {
+				a="а", e="е", o="о", i="і", u="υ",
+				A="А", E="Е", O="О", I="І",
+				l="ӏ", s="ѕ", c="с", p="р", x="х",
+			}
+			local _obf = {}
+			for ch in _src:gmatch(".") do
+				_obf[#_obf+1] = _subs[ch] or ch
+			end
+			_displayName = table.concat(_obf)
 		end
 
 		-- [PREMIUM] Use override if set by ShowPremiumStatus(), else auto-detect
@@ -11384,16 +11395,9 @@ function Compkiller.new(Config)
 		end
 		WindowArgs._IsPremium = _isPremium
 
-		if _isPremium and not WindowArgs._HideUser then
-			_displayName = "\226\152\133 " .. _displayName  -- ☆ prefix for premium
-		end
+		-- (no star prefix on username — status shown in ExpireText row only)
 
-		-- Show/hide the avatar badge
-		pcall(function()
-			if WindowArgs._PremiumBadge then
-				WindowArgs._PremiumBadge.Visible = (_isPremium and not WindowArgs._HideAvatar)
-			end
-		end)
+		-- (badge visibility set per-branch in status row below)
 
 		UserText.Text = _displayName;
 		CompLogo.Image = config.Logo;
@@ -11411,24 +11415,38 @@ function Compkiller.new(Config)
 			_expireDisplay = config.ExpireDate
 			ExpireText.TextColor3 = Compkiller.Colors.SwitchColor
 			ExpireText.TextTransparency = 0.500
+			-- Hide the status dot when showing a custom date
+			pcall(function()
+				if WindowArgs._PremiumBadge then
+					WindowArgs._PremiumBadge.Visible = false
+				end
+			end)
 		elseif _isPremium then
-			-- No date set but player has Roblox Premium
-			_expireDisplay = "\226\152\133 Premium"  -- ☆ Premium
+			-- Gold "Premium" — no star
+			_expireDisplay = "Premium"
 			ExpireText.TextColor3 = Color3.fromRGB(255, 185, 0)
 			ExpireText.TextTransparency = 0
-		else
-			-- No date, no premium — show membership tier name
-			local _tier = "Free"
+			-- Gold status dot
 			pcall(function()
-				local mt = tostring(LocalPlayer.MembershipType)
-				-- MembershipType names: "None" = free, strip "Enum.MembershipType."
-				mt = mt:match("MembershipType%.(.+)") or mt
-				if mt == "None" then mt = "Free" end
-				_tier = mt
+				if WindowArgs._PremiumBadge then
+					WindowArgs._PremiumBadge.BackgroundColor3 = Color3.fromRGB(255, 185, 0)
+					WindowArgs._PremiumBadge.Text = "\226\152\134"  -- ★ filled star
+					WindowArgs._PremiumBadge.Visible = not WindowArgs._HideAvatar
+				end
 			end)
-			_expireDisplay = _tier
-			ExpireText.TextColor3 = Compkiller.Colors.SwitchColor
-			ExpireText.TextTransparency = 0.500
+		else
+			-- Green "Free" with same dot style as Premium
+			_expireDisplay = "Free"
+			ExpireText.TextColor3 = Color3.fromRGB(100, 210, 120)
+			ExpireText.TextTransparency = 0
+			-- Green status dot
+			pcall(function()
+				if WindowArgs._PremiumBadge then
+					WindowArgs._PremiumBadge.BackgroundColor3 = Color3.fromRGB(60, 180, 90)
+					WindowArgs._PremiumBadge.Text = "\226\156\147"  -- ✓ checkmark
+					WindowArgs._PremiumBadge.Visible = not WindowArgs._HideAvatar
+				end
+			end)
 		end
 		ExpireText.Text = _expireDisplay;
 
