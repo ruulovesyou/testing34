@@ -1692,9 +1692,15 @@ pcall(function()
     end
 
     -- Write as newcclosure so islclosure() returns false
-    _env[_killKey] = (type(newcclosure) == "function")
-        and pcall(function() return newcclosure(_wrapFn) end) and newcclosure(_wrapFn)
-        or  _wrapFn
+    -- Wrap in newcclosure if available, else use raw function
+    local _wrappedFn = _wrapFn
+    if type(newcclosure) == "function" then
+        local _ok, _nc = pcall(newcclosure, _wrapFn)
+        if _ok and type(_nc) == "function" then
+            _wrappedFn = _nc
+        end
+    end
+    _env[_killKey] = _wrappedFn
 
     _CKLog("SingleExec [SE-5]: kill-fn registered under opaque key.")
 end)
@@ -14580,4 +14586,4 @@ Compkiller.MasterControl = function(...)
 end
 
 
-return Compkiller;1
+return Compkiller;
