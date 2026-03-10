@@ -7784,9 +7784,10 @@ function Compkiller.new(Config)
 	};
 
 	WindowArgs.Username    = LocalPlayer.Name;
-	WindowArgs._HideUser   = false   -- privacy: hide real username
-	WindowArgs._HideAvatar = false   -- privacy: hide real avatar
-	WindowArgs._IsPremium  = false   -- set by Update() / ShowPremiumStatus()
+	WindowArgs._HideUser        = false  -- privacy: hide real username
+	WindowArgs._HideAvatar      = false  -- privacy: hide real avatar
+	WindowArgs._IsPremium       = false  -- reflects current premium state
+	WindowArgs._PremiumOverride = nil    -- nil=auto-detect, true/false=forced
 
 	if Compkiller:_IsMobile() then
 		WindowArgs.AlwayShowTab = true;
@@ -11350,7 +11351,8 @@ function Compkiller.new(Config)
 		-- Pull from saved WindowArgs state when no config provided
 		config.Logo        = config.Logo        or Config.Logo;
 		config.Username    = config.Username    or WindowArgs.Username or LocalPlayer.DisplayName;
-		config.ExpireDate  = config.ExpireDate  or WindowArgs.ExipreDate or "NEVER";
+		-- Note: intentionally no "NEVER" fallback — nil triggers membership-type display below
+		config.ExpireDate  = config.ExpireDate  or WindowArgs.ExipreDate;
 		config.WindowName  = config.WindowName  or Config.Name;
 		config.UserProfile = config.UserProfile or WindowArgs.Profile
 			or string.format("rbxthumb://type=AvatarHeadShot&id=%s&w=150&h=150", tostring(LocalPlayer.UserId));
@@ -11365,11 +11367,15 @@ function Compkiller.new(Config)
 			_displayName = string.rep("\226\128\162", 3)  -- "•••" hidden name
 		end
 
-		-- [PREMIUM] Detect Roblox Premium and append badge
+		-- [PREMIUM] Use override if set by ShowPremiumStatus(), else auto-detect
 		local _isPremium = false
-		pcall(function()
-			_isPremium = (LocalPlayer.MembershipType == Enum.MembershipType.Premium)
-		end)
+		if WindowArgs._PremiumOverride ~= nil then
+			_isPremium = WindowArgs._PremiumOverride
+		else
+			pcall(function()
+				_isPremium = (LocalPlayer.MembershipType == Enum.MembershipType.Premium)
+			end)
+		end
 		WindowArgs._IsPremium = _isPremium
 
 		if _isPremium and not WindowArgs._HideUser then
@@ -11386,19 +11392,35 @@ function Compkiller.new(Config)
 		UserText.Text = _displayName;
 		CompLogo.Image = config.Logo;
 
-		-- [PREMIUM-EXPIRE] When no real expire date is set, show premium status instead of "NEVER"
-		local _expireDisplay = config.ExpireDate
-		if _expireDisplay == "NEVER" or _expireDisplay == nil or _expireDisplay == "0/0/0" then
-			if _isPremium then
-				_expireDisplay = "\226\152\133 Premium"  -- ☆ Premium
-				ExpireText.TextColor3 = Color3.fromRGB(255, 185, 0)  -- gold
-				ExpireText.TextTransparency = 0
-			else
-				_expireDisplay = "NEVER"
-				ExpireText.TextColor3 = Compkiller.Colors.SwitchColor
-				ExpireText.TextTransparency = 0.500
-			end
+		-- [STATUS ROW] Show real membership status or the user-supplied expire date
+		-- Priority: 1) real date passed by caller  2) Premium label  3) "Free"
+		local _hasRealDate = config.ExpireDate
+			and config.ExpireDate ~= "NEVER"
+			and config.ExpireDate ~= "0/0/0"
+			and config.ExpireDate ~= ""
+
+		local _expireDisplay
+		if _hasRealDate then
+			-- Caller supplied a real expiry / role string — use it as-is
+			_expireDisplay = config.ExpireDate
+			ExpireText.TextColor3 = Compkiller.Colors.SwitchColor
+			ExpireText.TextTransparency = 0.500
+		elseif _isPremium then
+			-- No date set but player has Roblox Premium
+			_expireDisplay = "\226\152\133 Premium"  -- ☆ Premium
+			ExpireText.TextColor3 = Color3.fromRGB(255, 185, 0)
+			ExpireText.TextTransparency = 0
 		else
+			-- No date, no premium — show membership tier name
+			local _tier = "Free"
+			pcall(function()
+				local mt = tostring(LocalPlayer.MembershipType)
+				-- MembershipType names: "None" = free, strip "Enum.MembershipType."
+				mt = mt:match("MembershipType%.(.+)") or mt
+				if mt == "None" then mt = "Free" end
+				_tier = mt
+			end)
+			_expireDisplay = _tier
 			ExpireText.TextColor3 = Compkiller.Colors.SwitchColor
 			ExpireText.TextTransparency = 0.500
 		end
@@ -11416,7 +11438,10 @@ function Compkiller.new(Config)
 
 		Config.Logo = config.Logo or Config.Logo;
 		WindowArgs.Username = config.Username or WindowArgs.Username;
-		WindowArgs.ExipreDate = config.ExpireDate or WindowArgs.ExipreDate;
+		-- Only persist real expire dates — never overwrite with "NEVER" fallback
+		if config.ExpireDate and config.ExpireDate ~= "NEVER" and config.ExpireDate ~= "0/0/0" then
+			WindowArgs.ExipreDate = config.ExpireDate
+		end
 		Config.Name = config.WindowName or Config.Name;
 		WindowArgs.Profile = config.UserProfile or WindowArgs.Profile;
 	end;
@@ -11447,14 +11472,22 @@ function Compkiller.new(Config)
 		_CKLog("UserCard: HideAvatar=" .. tostring(WindowArgs._HideAvatar))
 	end;
 
-	function WindowArgs:ShowPremiumStatus()
+	function WindowArgs:ShowPremiumStatus(override)
 		local isPremium = false
-		pcall(function()
-			isPremium = (LocalPlayer.MembershipType == Enum.MembershipType.Premium)
-		end)
+		if override ~= nil then
+			-- Caller is forcing a specific value (true = show premium, false = hide)
+			isPremium = (override == true)
+			WindowArgs._PremiumOverride = isPremium
+		else
+			-- Auto-detect from Roblox — clear any previous override first
+			WindowArgs._PremiumOverride = nil
+			pcall(function()
+				isPremium = (LocalPlayer.MembershipType == Enum.MembershipType.Premium)
+			end)
+		end
 		WindowArgs._IsPremium = isPremium
-		WindowArgs:Update()   -- refresh badge immediately
-		_CKLog("UserCard: IsPremium=" .. tostring(isPremium))
+		WindowArgs:Update()   -- refresh display immediately
+		_CKLog("UserCard: ShowPremiumStatus -> " .. tostring(isPremium))
 		return isPremium
 	end;
 
@@ -14547,4 +14580,4 @@ Compkiller.MasterControl = function(...)
 end
 
 
-return Compkiller;
+return Compkiller;1
