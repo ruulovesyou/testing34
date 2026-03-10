@@ -8031,6 +8031,27 @@ function Compkiller.new(Config)
 	UICorner_4.CornerRadius = UDim.new(1, 0)
 	UICorner_4.Parent = UserProfile
 
+	-- [PREMIUM BADGE] Glowing star that appears over avatar when user has Roblox Premium
+	local PremiumBadge = Instance.new("TextLabel")
+	PremiumBadge.Name = Compkiller:_RandomString()
+	PremiumBadge.Parent = Userinfo
+	PremiumBadge.AnchorPoint = Vector2.new(0, 1)
+	PremiumBadge.BackgroundColor3 = Color3.fromRGB(255, 185, 0)
+	PremiumBadge.BackgroundTransparency = 0.15
+	PremiumBadge.BorderSizePixel = 0
+	PremiumBadge.Position = UDim2.new(0, 33, 1, -10)
+	PremiumBadge.Size = UDim2.new(0, 16, 0, 16)
+	PremiumBadge.ZIndex = 4
+	PremiumBadge.Font = Enum.Font.GothamBold
+	PremiumBadge.Text = "\226\152\133"
+	PremiumBadge.TextColor3 = Color3.fromRGB(255, 255, 255)
+	PremiumBadge.TextSize = 10
+	PremiumBadge.Visible = false
+	local _PBCorner = Instance.new("UICorner")
+	_PBCorner.CornerRadius = UDim.new(1, 0)
+	_PBCorner.Parent = PremiumBadge
+	WindowArgs._PremiumBadge = PremiumBadge
+
 	UserText.Name = Compkiller:_RandomString()
 	UserText.Parent = Userinfo
 	UserText.BackgroundTransparency = 1.000
@@ -10979,7 +11000,7 @@ function Compkiller.new(Config)
 
 		CloseWindow.Name = Compkiller:_RandomString()
 		CloseWindow.Parent = CompKiller
-		CloseWindow.AnchorPoint = Vector2.new(1, 0)
+		CloseWindow.AnchorPoint = Vector2.new(0.5, 0.5)
 		CloseWindow.BackgroundColor3 = Compkiller.Colors.BGDBColor
 
 		table.insert(Compkiller.Elements.BGDBColor,{
@@ -10990,12 +11011,12 @@ function Compkiller.new(Config)
 		CloseWindow.BackgroundTransparency = 1
 		CloseWindow.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		CloseWindow.BorderSizePixel = 0
-		CloseWindow.Position = UDim2.new(1, -10, 0, 10)
+		CloseWindow.Position = UDim2.new(0.5, 0, 0.5, 0)  -- centered like Dex v4
 		CloseWindow.Size = UDim2.new(0, 0, 0, 23)
 		CloseWindow.ZIndex = 150
 		CloseWindow.ClipsDescendants = true;
 
-		UICorner.CornerRadius = UDim.new(0, 3)
+		UICorner.CornerRadius = UDim.new(1, 0)  -- full circle like Dex v4
 		UICorner.Parent = CloseWindow
 
 		ImageLabel.Parent = CloseWindow
@@ -11004,12 +11025,15 @@ function Compkiller.new(Config)
 		ImageLabel.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		ImageLabel.BorderSizePixel = 0
 		ImageLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
-		ImageLabel.Size = UDim2.new(0.800000012, 0, 0.800000012, 0)
+		ImageLabel.Size = UDim2.new(0.7, 0, 0.7, 0)
 		ImageLabel.SizeConstraint = Enum.SizeConstraint.RelativeYY
 		ImageLabel.ZIndex = 151
 		ImageLabel.Image = Config.Logo
 		ImageLabel.ImageTransparency = 1
 		ImageLabel.ClipsDescendants = false;
+
+		-- [CENTER-BTN] Make the centered toggle button draggable so user can reposition
+		Compkiller:Drag(CloseWindow, CloseWindow, 0.12)
 
 		local ToggleCloseUI = function(v)
 			ImageLabel.Image = Config.Logo;
@@ -11018,7 +11042,7 @@ function Compkiller.new(Config)
 				ImageLabel.ClipsDescendants = true;
 
 				Compkiller:_Animation(CloseWindow,TweenInfo.new(0.2),{
-					Size = UDim2.new(0, 45, 0, 23),
+					Size = UDim2.new(0, 52, 0, 52),
 					BackgroundTransparency = 0.025
 				})
 
@@ -11332,11 +11356,41 @@ function Compkiller.new(Config)
 			config.UserProfile = Compkiller:_GetIcon("user");
 		end;
 
-		UserText.Text = config.Username;
+		-- [USER-DISPLAY] Respect HideUser and HideAvatar toggles
+		local _displayName = config.Username
+		if WindowArgs._HideUser then
+			_displayName = string.rep("\226\128\162", 3)  -- "•••" hidden name
+		end
+
+		-- [PREMIUM] Detect Roblox Premium and append badge
+		local _isPremium = false
+		pcall(function()
+			_isPremium = (LocalPlayer.MembershipType == Enum.MembershipType.Premium)
+		end)
+		WindowArgs._IsPremium = _isPremium
+
+		if _isPremium and not WindowArgs._HideUser then
+			_displayName = "\226\152\133 " .. _displayName  -- ☆ prefix for premium
+		end
+
+		-- Show/hide the avatar badge
+		pcall(function()
+			if WindowArgs._PremiumBadge then
+				WindowArgs._PremiumBadge.Visible = (_isPremium and not WindowArgs._HideAvatar)
+			end
+		end)
+
+		UserText.Text = _displayName;
 		CompLogo.Image = config.Logo;
 		ExpireText.Text = config.ExpireDate;
 		WindowLabel.Text = config.WindowName;
-		UserProfile.Image = config.UserProfile;
+
+		-- [AVATAR] Respect HideAvatar toggle
+		if WindowArgs._HideAvatar then
+			UserProfile.Image = Compkiller:CacheImage("rbxassetid://18518299306")  -- generic silhouette
+		else
+			UserProfile.Image = config.UserProfile;
+		end
 		WindowArgs.Username = config.Username;
 
 		Config.Logo = config.Logo or Config.Logo;
@@ -11345,6 +11399,79 @@ function Compkiller.new(Config)
 		Config.Name = config.WindowName or Config.Name;
 		WindowArgs.Profile = config.UserProfile or WindowArgs.Profile;
 	end;
+
+	-- ────────────────────────────────────────────────────────────────────────────
+	-- USER CARD PRIVACY API
+	--
+	--  Window:HideUser(bool)
+	--    true  → username shows as ●●●, no premium badge visible
+	--    false → real username restored
+	--
+	--  Window:HideAvatar(bool)
+	--    true  → avatar replaced with the default silhouette icon
+	--    false → real avatar thumbnail restored
+	--
+	--  Window:ShowPremiumStatus()
+	--    Returns true/false — also re-triggers Update so badge refreshes
+	-- ────────────────────────────────────────────────────────────────────────────
+	function WindowArgs:HideUser(bool)
+		WindowArgs._HideUser = (bool ~= false)
+		-- Refresh display immediately
+		pcall(function()
+			local cfg = {
+				Username    = WindowArgs.Username   or LocalPlayer.Name,
+				ExpireDate  = WindowArgs.ExipreDate or "NEVER",
+				WindowName  = Config.Name,
+				Logo        = Config.Logo,
+				UserProfile = WindowArgs.Profile or
+					string.format("rbxthumb://type=AvatarHeadShot&id=%s&w=150&h=150", tostring(LocalPlayer.UserId))
+			}
+			WindowArgs:Update(cfg)
+		end)
+		CKLog("UserCard: HideUser=" .. tostring(WindowArgs._HideUser))
+	end;
+
+	function WindowArgs:HideAvatar(bool)
+		WindowArgs._HideAvatar = (bool ~= false)
+		pcall(function()
+			local cfg = {
+				Username    = WindowArgs.Username   or LocalPlayer.Name,
+				ExpireDate  = WindowArgs.ExipreDate or "NEVER",
+				WindowName  = Config.Name,
+				Logo        = Config.Logo,
+				UserProfile = WindowArgs.Profile or
+					string.format("rbxthumb://type=AvatarHeadShot&id=%s&w=150&h=150", tostring(LocalPlayer.UserId))
+			}
+			WindowArgs:Update(cfg)
+		end)
+		CKLog("UserCard: HideAvatar=" .. tostring(WindowArgs._HideAvatar))
+	end;
+
+	function WindowArgs:ShowPremiumStatus()
+		local isPremium = false
+		pcall(function()
+			isPremium = (LocalPlayer.MembershipType == Enum.MembershipType.Premium)
+		end)
+		WindowArgs._IsPremium = isPremium
+		-- Refresh so badge appears/disappears immediately
+		pcall(function()
+			local cfg = {
+				Username    = WindowArgs.Username   or LocalPlayer.Name,
+				ExpireDate  = WindowArgs.ExipreDate or "NEVER",
+				WindowName  = Config.Name,
+				Logo        = Config.Logo,
+				UserProfile = WindowArgs.Profile or
+					string.format("rbxthumb://type=AvatarHeadShot&id=%s&w=150&h=150", tostring(LocalPlayer.UserId))
+			}
+			WindowArgs:Update(cfg)
+		end)
+		CKLog("UserCard: IsPremium=" .. tostring(isPremium))
+		return isPremium
+	end;
+
+	WindowArgs._HideUser   = false  -- default: show real username
+	WindowArgs._HideAvatar = false  -- default: show real avatar
+	WindowArgs._IsPremium  = false  -- updated when Update() or ShowPremiumStatus() runs
 
 	WindowArgs.LOOP_THREAD = _TrackThread(task.spawn(function()
 		local TimeTic = tick();
