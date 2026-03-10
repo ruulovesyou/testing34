@@ -1,4 +1,9 @@
 
+
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
 do
     -- -- unpack (table.unpack is Lua 5.2+, some executors only have global unpack) --
     if type(table.unpack) ~= "function" then
@@ -84,7 +89,7 @@ do
     -- -- gethui / protect_gui --------------------------------------------------
     if type(gethui) ~= "function" then
         gethui = get_hidden_ui or get_hidden_gui or hiddenUI
-            or function() return game:GetService("CoreGui") end
+            or function() return cloneref(game:GetService("CoreGui")) end
     end
     if type(protect_gui) ~= "function" then
         protect_gui = (type(syn) == "table" and syn.protect_gui) or function() end
@@ -150,18 +155,11 @@ end
 -- ============================================================================
 
 local _CK_DEBUG = false   -- internal boot flag (used before Compkiller table exists)
-
--- G3: Session-random log prefix — prevents LogService.MessageOut hooks or
--- print-replacement scanners from identifying the library by "[CK]" in output.
--- _CK_LOG_PREFIX is a random 4-char hex token, different every run.
--- (math.random is seeded below at line ~162; we use a fixed seed here for boot)
-local _CK_LOG_PREFIX = string.format("[%04x] ", math.random(0x1000, 0xFFFF))
-
 local function _CKLog(msg)
     local enabled = _CK_DEBUG
         or (type(Compkiller) == "table" and Compkiller.Debug == true)
     if enabled then
-        print(_CK_LOG_PREFIX .. tostring(msg))
+        print("[CK] " .. tostring(msg))
     end
 end
 
@@ -225,133 +223,6 @@ local function _safeSet(obj, prop, value)
 end
 
 
--- ════════════════════════════════════════════════════════════════════════════
--- UTILITY U1: XOR STRING ENGINE
--- Obfuscates string literals so plain-text scanning of the script source file
--- (or a memory dump of the script text) cannot read flag names, tab titles, or
--- other identifiable strings.
---
--- Usage (encode at "compile time" with any XOR tool or the helper below):
---   local ESP_FLAG = _CK_XStr("\x36\x5d\x48\x55\x4b\x49\x69\x34\x56\x41", 0x5B)
---   -- at runtime _CK_XStr decodes back to "esp_enabled"
---
--- Key 0x5B is the default; pass a different byte for each string for variety.
--- Compkiller.XStr is the public alias for script authors.
--- ════════════════════════════════════════════════════════════════════════════
-local _bit32_bxor = (bit32 and bit32.bxor) or function(a, b)
-    -- Pure-Lua fallback for executors that strip bit32
-    local r, m = 0, 1
-    while a > 0 or b > 0 do
-        r = r + ((a % 2 ~= b % 2) and m or 0)
-        a, b, m = _mfloor(a / 2), _mfloor(b / 2), m * 2
-    end
-    return r
-end
-
-local function _CK_XStr(str, key)
-    key = key or 0x5B
-    return (str:gsub(".", function(c)
-        return _sfmt("%c", _bit32_bxor(string.byte(c), key))
-    end))
-end
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- UTILITY U3: WEAK-TABLE PANIC REGISTRY
--- A weak-keyed table that tracks any Roblox Instance that should be destroyed
--- during an emergency nuke.  Objects registered here are automatically GC'd
--- by Lua if no other reference holds them — so dead references never pile up.
---
--- Usage:
---   _CK_RegisterPanic(myScreenGui)   -- register
---   -- On Emergency("nuke") all live entries are :Destroy()d automatically.
---
--- Compkiller:RegisterPanic(obj) is the public alias.
--- ════════════════════════════════════════════════════════════════════════════
-local _CK_PANIC_REGISTRY = setmetatable({}, { __mode = "k" })
-
-local function _CK_RegisterPanic(obj)
-    if obj and _type(obj) == "userdata" then
-        _CK_PANIC_REGISTRY[obj] = true
-    end
-end
-
-local function _CK_FlushPanicRegistry()
-    local count = 0
-    for obj in _pairs(_CK_PANIC_REGISTRY) do
-        _safeDestroy(obj)
-        count = count + 1
-    end
-    _CK_PANIC_REGISTRY = setmetatable({}, { __mode = "k" })
-    if count > 0 then
-        _CKLog(_sfmt("PanicRegistry: destroyed %d registered objects.", count))
-    end
-end
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- UTILITY U4: READ-ONLY PROXY TABLE
--- Wraps any Lua table in a transparent proxy that:
---   • Returns the real value for executor callers (_checkcaller() = true)
---   • Returns nil / no-op function for non-executor callers
---   • Blocks all writes from non-executor callers
---
--- This means if AC code inspects a wrapped table (e.g. via getgenv() scan,
--- debug.getinfo, or shared/game script environment), it sees an opaque shell.
---
--- Usage:
---   local safeAPI = _CK_ReadOnlyProxy(myTable)
---   -- Pass safeAPI to user scripts; internal code keeps the original table.
--- ════════════════════════════════════════════════════════════════════════════
-local function _CK_ReadOnlyProxy(t)
-    local proxy = {}
-    setmetatable(proxy, {
-        __index = function(_, key)
-            if _checkcaller() then
-                return t[key]
-            end
-            -- Non-executor: return a no-op function so code using the API
-            -- doesn't error, it just silently does nothing
-            return function() end
-        end,
-        __newindex = function(_, key, value)
-            if _checkcaller() then
-                t[key] = value
-            end
-            -- Non-executor writes are silently dropped
-        end,
-        __len    = function() return 0 end,   -- hide true table size
-        __pairs  = function() return _pairs({}) end,  -- hide keys on iteration
-        __tostring = function() return "[CK:Protected]" end,
-    })
-    return proxy
-end
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- UTILITY U5: THROTTLED CALLBACK FACTORY
--- Returns a wrapper around `fn` that executes at most once per `interval`
--- seconds regardless of how frequently it is called.  Use this to rate-limit
--- any UI update loop so it can't produce a behavioural anomaly signal.
---
--- Usage:
---   local updateESP = _CK_Throttle(function() ... end, 0.085)  -- ~11/s max
---   RunService.Heartbeat:Connect(updateESP)
---
--- Compkiller.Throttle and MC.throttle are the public aliases.
--- ════════════════════════════════════════════════════════════════════════════
-local function _CK_Throttle(fn, interval)
-    interval = _type(interval) == "number" and interval or 0.085
-    local last = 0
-    return function(...)
-        local now = _tick()
-        if now - last < interval then return end
-        last = now
-        return fn(...)
-    end
-end
-
-
 
 -- SYN SHIM -- if executor has no syn table at all, build a minimal one
 do
@@ -401,7 +272,7 @@ do
     -- Elevation check -- lighter than probing with Instance.new (darkdex technique)
     -- CoreGui:GetFullName() errors on low-privilege executors
     _CK_ELEVATED = _pcall(function()
-        game:GetService("CoreGui"):GetFullName()
+        cloneref(game:GetService("CoreGui")):GetFullName()
     end)
 
     -- Catalogue which APIs are missing (darkdex MissingEnv pattern)
@@ -432,11 +303,11 @@ do
         -- [PATCH #9] Act on critical missing APIs -- not just log them
         for _, missing in ipairs(_CK_MISSING_ENV) do
             if missing == "hookfunction" or missing == "hookmetamethod" then
-                warn(_CK_LOG_PREFIX .. "CRITICAL: " .. missing .. " missing -- bypass engine non-functional on this executor.")
+                warn("[CK] CRITICAL: " .. missing .. " missing -- bypass engine non-functional on this executor.")
             elseif missing == "checkcaller" then
-                warn(_CK_LOG_PREFIX .. "HIGH: checkcaller missing -- all hook guards are pass-through only.")
+                warn("[CK] HIGH: checkcaller missing -- all hook guards are pass-through only.")
             elseif missing == "setreadonly" or missing == "getrawmetatable" then
-                warn(_CK_LOG_PREFIX .. "HIGH: " .. missing .. " missing -- metamethod guards unavailable.")
+                warn("[CK] HIGH: " .. missing .. " missing -- metamethod guards unavailable.")
             end
         end
     end
@@ -446,8 +317,8 @@ _CKLog(string.format("* Loading v%s (%s) -- %s",_CK_VERSION, _CK_BUILD,os.date a
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 
-local CoreGui       = game:GetService("CoreGui")
-local Players       = game:GetService("Players")
+local CoreGui       = cloneref(game:GetService("CoreGui"))
+local Players       = cloneref(game:GetService("Players"))
 local LocalPlayer   = Players.LocalPlayer
 local PlayerGui     = LocalPlayer:FindFirstChild("PlayerGui")
 pcall(function()
@@ -455,65 +326,10 @@ pcall(function()
     math.random() math.random() -- Warm up
 end)
 
--- ════════════════════════════════════════════════════════════════════════════
--- G1: GETGENV SINGLE RANDOMIZED CONTAINER
--- Instead of writing multiple readable string keys into the shared executor
--- environment (__rbxClnSvc, __rbxCoReg, __rbxGuiReg, __ck_window_pos_v1,
--- __rbxCullSt, __rbxRndConn), we write ONE entry keyed by a random integer.
--- No AC can find it by scanning for __rbx or _CK_ prefixes.
--- Sub-keys inside the container are also random integers.
--- ════════════════════════════════════════════════════════════════════════════
-local _CK_GENV_KEY    = _mrandom(100000000, 999999999)   -- e.g. 481739265
-local _GK_CLNSVC      = _mrandom(100000000, 999999999)   -- replaces __rbxClnSvc
-local _GK_COREG       = _mrandom(100000000, 999999999)   -- replaces __rbxCoReg
-local _GK_GUIREG      = _mrandom(100000000, 999999999)   -- replaces __rbxGuiReg
-local _GK_POS         = _mrandom(100000000, 999999999)   -- replaces __ck_window_pos_v1
-local _GK_CULL        = _mrandom(100000000, 999999999)   -- replaces __rbxCullSt
-local _GK_RCONN       = _mrandom(100000000, 999999999)   -- replaces __rbxRndConn
-
-local function _CK_GEnv()
-    _pcall(function()
-        if _type(getgenv()[_CK_GENV_KEY]) ~= "table" then
-            getgenv()[_CK_GENV_KEY] = {}
-        end
-    end)
-    return getgenv()[_CK_GENV_KEY] or {}
-end
-
--- G2: _CK_GUI_TAG — pure 32-char random hex, no recognisable prefix.
--- Previous form had "__ck_" static prefix: any AC iterating GetAttributes()
--- and doing string.find(key, "__ck") would always match across runs.
--- 32-char hex with no prefix is indistinguishable from any other random attr.
-local _CK_GUI_TAG = _sfmt("%08x%08x%08x%08x",
-    _mrandom(0, 0x7FFFFFFF), _mrandom(0, 0x7FFFFFFF),
-    _mrandom(0, 0x7FFFFFFF), _mrandom(0, 0x7FFFFFFF))
-
--- ════════════════════════════════════════════════════════════════════════════
--- FIX 3: SESSION-UNIQUE ATTRIBUTE TAG NAMESPACE
--- Every attribute key written to any Roblox Instance is generated once at
--- session start using the same entropy pool as _CK_GUI_TAG.
--- Static strings like _TAG_DECOY or _TAG_HEARTBEAT are instant fingerprints
--- — an AC calling :GetAttributes() on any ScreenGui or Folder would find them.
--- With session-unique tags every run looks different.
--- ════════════════════════════════════════════════════════════════════════════
-local function _CK_SessionTag(hint)
-    -- Short hint (never written to disk) + 8 random hex chars
-    -- hint is only for readability during development with Debug=true
-    return _sfmt("_%x%x_%08x", _mrandom(0,255), _mrandom(0,255), _mrandom(0, 2147483647))
-end
-
-local _TAG_DECOY      = _CK_SessionTag("decoy")       -- was _TAG_DECOY
-local _TAG_HOLO       = _CK_SessionTag("holo")        -- was _TAG_HOLO
-local _TAG_DUMMY      = _CK_SessionTag("dummy")       -- was _TAG_DUMMY
-local _TAG_SACRIFICE  = _CK_SessionTag("sac")         -- was _TAG_SACRIFICE
-local _TAG_DIVERSION  = _CK_SessionTag("div")         -- was _TAG_DIVERSION
-local _TAG_DEPTH      = _CK_SessionTag("depth")       -- was _TAG_DEPTH
-local _TAG_ATTRSTORE  = _CK_SessionTag("attrstore")   -- was _TAG_ATTRSTORE
-local _TAG_CLOAK      = _CK_SessionTag("cloak")       -- was _TAG_CLOAK
-local _TAG_HEARTBEAT  = _CK_SessionTag("hb")          -- was _TAG_HEARTBEAT
-local _TAG_FC         = _CK_SessionTag("fc")          -- was _TAG_FC
--- _cksig1–8: generated inline as _TAG_SIG .. tostring(i) at point of use
-local _TAG_SIG        = _CK_SessionTag("sig")
+local _CK_GUI_TAG = "__ck_" .. string.format("%08x", math.random(1, 2147483647))
+local _CLN_KEY    = "\0\0_CK_CLN_SVC_" .. string.format("%08x", math.random(1, 2147483647))
+local _CO_REG_KEY = "\0\0_CK_CO_REG_"  .. string.format("%08x", math.random(1, 2147483647))
+local _GUI_REG_KEY= "\0\0_CK_GUI_REG_" .. string.format("%08x", math.random(1, 2147483647))
 
 local _CK_LEGACY_NAMES = {}
 
@@ -551,15 +367,11 @@ local function _SmartKillGUIs()
 end
 
 pcall(function()
-    -- G1: cleanup fn stored under randomized integer key, not readable string
-    local env = _CK_GEnv()
-    if _type(env[_GK_CLNSVC]) == "function" then env[_GK_CLNSVC]() end
+    if getgenv()[_CLN_KEY] then getgenv()[_CLN_KEY]() end
 end)
 
 pcall(function()
-    -- G1: coroutine registry under randomized sub-key
-    local env = _CK_GEnv()
-    local reg = env[_GK_COREG]
+    local reg = getgenv()[_CO_REG_KEY]
     if type(reg) == "table" then
         for _, co in ipairs(reg) do
             pcall(function()
@@ -571,7 +383,7 @@ pcall(function()
     end
 end)
 
-pcall(function() local env = _CK_GEnv(); env[_GK_COREG] = {} end)
+pcall(function() getgenv()[_CO_REG_KEY] = {} end)
 
 _SmartKillGUIs()
 
@@ -684,7 +496,7 @@ do
                     Compkiller.PerformanceMode = true
                     if _OPT then _OPT.AnimThreshold = 60 end
                     -- Auto quality reduction on LOW
-                    _pcall(function() game:GetService("Lighting").GlobalShadows = false end)
+                    _pcall(function() cloneref(game:GetService("Lighting")).GlobalShadows = false end)
                     _pcall(function() settings().Rendering.QualityLevel = 1 end)
                     _CKLog("Performance: tier dropped to LOW -- shadows off, quality reduced.")
                 elseif newTier == "MEDIUM" then
@@ -891,7 +703,7 @@ local function _ReApplyShield(screenGui)
     end)
     -- 3. Force correct parent, order, and enabled state
     _safeSet(screenGui, "Parent",       _GUI_PARENT)
-    _safeSet(screenGui, "DisplayOrder", _CK_SAFE_DISPLAY_ORDER)   -- FIX 2: dynamic, not INT32_MAX
+    _safeSet(screenGui, "DisplayOrder", 2147483647)
     _safeSet(screenGui, "ResetOnSpawn", false)
     _safeSet(screenGui, "Enabled",      true)
 end
@@ -933,9 +745,9 @@ local function _StartGuiIntegrityMonitor(screenGui)
             end)
         end,
         DisplayOrder = function()
-            if screenGui.DisplayOrder ~= _CK_SAFE_DISPLAY_ORDER then   -- FIX 2: dynamic value
+            if screenGui.DisplayOrder ~= 2147483647 then
                 _debouncedFix("DisplayOrder", function()
-                    _safeSet(screenGui, "DisplayOrder", _CK_SAFE_DISPLAY_ORDER)
+                    _safeSet(screenGui, "DisplayOrder", 2147483647)
                     _CKLog("GuiIntegrity: DisplayOrder tampered — restored.")
                 end)
             end
@@ -1197,20 +1009,19 @@ local function _EncryptGuiName()
         end
     end
 
-    -- Register for cleanup on next boot (G1: stored under randomized int sub-key)
+    -- Register for cleanup on next boot
     _tinsert(_CK_ENCRYPTED_NAMES, name)
     _pcall(function()
-        local env = _CK_GEnv()
-        if _type(env[_GK_GUIREG]) ~= "table" then env[_GK_GUIREG] = {} end
-        _tinsert(env[_GK_GUIREG], name)
+        local reg = getgenv()[_GUI_REG_KEY]
+        if _type(reg) ~= "table" then getgenv()[_GUI_REG_KEY] = {} end
+        _tinsert(getgenv()[_GUI_REG_KEY], name)
     end)
 
     return name
 end
 
 pcall(function()
-    local env = _CK_GEnv()
-    local reg = env[_GK_GUIREG]
+    local reg = getgenv()[_GUI_REG_KEY]
     if type(reg) == "table" then
         for _, oldName in ipairs(reg) do
             pcall(function()
@@ -1225,128 +1036,12 @@ pcall(function()
             end)
         end
     end
-    env[_GK_GUIREG] = {}   -- reset for this run
+    getgenv()[_GUI_REG_KEY] = {}   -- reset for this run
 end)
 
-
--- ════════════════════════════════════════════════════════════════════════════
--- UTILITY U2: ATTRIBUTE-ONLY STATE STORE
--- A secure key-value store backed by a hidden Folder's attributes instead of
--- _G or getgenv() globals.  Attribute values live inside the executor's hidden
--- UI container (gethui) so they are invisible to game-script env scanners.
---
--- Why safer than _G:
---   • _G and getgenv() are scanned by many ACs looking for executor table keys.
---   • Folder attributes are opaque to :GetAttributes() callers that don't know
---     the Folder's instance — and the Folder name is encrypted.
---   • Weak reference in _CK_ATTR_STORES means Lua GCs the store automatically
---     if the caller drops the reference.
---
--- Usage:
---   local store = _CK_AttrStore("myScript")
---   store:set("espEnabled", true)
---   local v = store:get("espEnabled")   -- true
---   store:delete("espEnabled")
---   store:destroy()                      -- removes Folder entirely
---
--- Compkiller.AttrStore is the public alias.
--- ════════════════════════════════════════════════════════════════════════════
-local _CK_ATTR_STORES = {}   -- named store table, keyed by name string
-
-local function _CK_AttrStore(name)
-    if _CK_ATTR_STORES[name] then return _CK_ATTR_STORES[name] end
-
-    local folder = Instance.new("Folder")
-    folder.Name  = _EncryptGuiName()
-
-    -- Parent into the hidden UI container so it's outside game tree
-    _pcall(function()
-        local huiFn = gethui or get_hidden_ui or get_hidden_gui
-        if _type(huiFn) == "function" and not _islclosure(huiFn) then
-            local ok, hui = _pcall(huiFn)
-            if ok and hui then folder.Parent = hui; return end
-        end
-        folder.Parent = CoreGui   -- fallback
-    end)
-    _pcall(function() folder:SetAttribute(_TAG_ATTRSTORE, true) end)
-
-    local store = {}
-
-    function store:set(k, v)
-        _pcall(function() folder:SetAttribute(_tostring(k), v) end)
-    end
-
-    function store:get(k)
-        local ok, v = _pcall(function() return folder:GetAttribute(_tostring(k)) end)
-        return ok and v or nil
-    end
-
-    function store:delete(k)
-        _pcall(function() folder:SetAttribute(_tostring(k), nil) end)
-    end
-
-    function store:getAll()
-        local out = {}
-        _pcall(function()
-            local attrs = folder:GetAttributes()
-            for k, v in _pairs(attrs) do
-                if k ~= _TAG_ATTRSTORE then out[k] = v end
-            end
-        end)
-        return out
-    end
-
-    function store:destroy()
-        _safeDestroy(folder)
-        _CK_ATTR_STORES[name] = nil
-    end
-
-    store._folder = folder
-    _CK_ATTR_STORES[name] = store
-    return store
-end
-
--- ════════════════════════════════════════════════════════════════════════════
--- IMPROVEMENT 1: DYNAMIC DISPLAY ORDER
--- INT32_MAX (2147483647) is used by zero legitimate Roblox GUIs and is an
--- instant fingerprint.  Instead we compute a value that is just above the
--- highest DisplayOrder already present in the parent container, so our GUI
--- looks like any other "top-priority" system GUI.
--- Re-sampled every 90 s so late-spawning game GUIs don't overtake us.
--- ════════════════════════════════════════════════════════════════════════════
-local _CK_SAFE_DISPLAY_ORDER = 500   -- fallback before first sample
-
-local function _ComputeSafeDisplayOrder()
-    local maxFound = 0
-    _pcall(function()
-        local parent = _GUI_PARENT or CoreGui
-        for _, child in _ipairs(parent:GetChildren()) do
-            _pcall(function()
-                if child:IsA("ScreenGui") then
-                    local v = child.DisplayOrder
-                    if _type(v) == "number" and v > maxFound and v < 2147483640 then
-                        maxFound = v
-                    end
-                end
-            end)
-        end
-    end)
-    -- Sit one step above the highest legitimate GUI, capped well below INT32_MAX
-    _CK_SAFE_DISPLAY_ORDER = _mmin(maxFound + 1, 999999)
-    _CKLog(_sfmt("DisplayOrder: safe value computed = %d (max-in-parent=%d).",
-        _CK_SAFE_DISPLAY_ORDER, maxFound))
-    return _CK_SAFE_DISPLAY_ORDER
-end
-
-_ComputeSafeDisplayOrder()   -- initial sample at boot
-
--- Re-sample periodically
-_ckSpawn(function()
-    while true do
-        task.wait(90 + _mrandom(0, 30))   -- 90–120 s, jittered
-        _ComputeSafeDisplayOrder()
-    end
-end)
+local function _ShieldParent(screenGui)
+    -- ── 1. Pin DisplayOrder to INT32_MAX — game UI can never render on top ───
+    _pcall(function() screenGui.DisplayOrder = 2147483647 end)
     _pcall(function() screenGui.ResetOnSpawn = false      end)
     _pcall(function() screenGui.Enabled      = true       end)
 
@@ -1468,7 +1163,7 @@ local function _MakeDecoy()
     btn.Parent   = frame
 
     _pcall(function() decoy.Parent = CoreGui end)
-    _pcall(function() decoy:SetAttribute(_TAG_DECOY, true) end)
+    _pcall(function() decoy:SetAttribute("__ckDecoy", true) end)
     return decoy
 end
 
@@ -1622,30 +1317,18 @@ end
 -- ║  Enable individually or via EnableUltimateShieldAdvanced().             ║
 -- ║                                                                          ║
 -- ║  Included:                                                               ║
--- ║    AS-1  Memory Scrambling      — rotating dummy attrs/folders           ║
--- ║    AS-2  Behavioral Noise       — benign heartbeat attribute mimic       ║
--- ║    AS-3  Ghost Instances        — self-destructing honeypot decoys       ║
--- ║    AS-4  Fingerprint Rotation   — name blends into Roblox CoreGui names  ║
--- ║    AS-5  Threat Response        — live scanner detection + countermeasure║
--- ║    AS-6  Holographic Decoys     — high-fidelity fake GUIs (upgraded)     ║
--- ║    AS-7  Behavioral Cloning     — attribute mimic from real CoreGui GUIs ║
--- ║    AS-8  Container Depth        — transparent wrapper layers bury UI     ║
--- ║    AS-9  Adaptive Escalation    — auto-arms heavier shields on threat    ║
--- ║                                                                          ║
--- ║  Emergency Protocols (one-shot):                                         ║
--- ║    EP-1  NUKE    — destroy all decoys, detach GUI, spawn diversions      ║
--- ║    EP-2  CLOAK   — GUI invisible + transparent input-catcher overlay     ║
--- ║    EP-3  MIGRATE — move GUI to alternate parent + re-encrypt name        ║
+-- ║    AS-1  Memory Scrambling   — rotating dummy attrs/folders in memory    ║
+-- ║    AS-2  Behavioral Noise    — benign attribute heartbeat mimic          ║
+-- ║    AS-3  Ghost Instances     — self-destructing honeypot decoys          ║
+-- ║    AS-4  Fingerprint Rotation — name mimics known-safe Roblox strings   ║
 -- ║                                                                          ║
 -- ║  NOT included (unsafe / ineffective):                                   ║
--- ║    ✗  Quantum Entanglement  — shared metatable hook contaminates all GUI ║
--- ║    ✗  Temporal Distortion   — sinusoidal transparency/rotation breaks UI ║
--- ║    ✗  Memory Phantoms       — redundant with AS-1 + AS-3 + AS-6         ║
--- ║    ✗  Quantum Naming        — 10x/sec renames; absorbed by 6-pattern sys ║
--- ║    ✗  Polymorphic GUI       — destroys live Frame, breaks all references ║
--- ║    ✗  Quantum/Temporal __index — hooks class metatable, breaks real UI  ║
--- ║    ✗  Behavioral Flicker    — sets Enabled=false, real window vanishes   ║
--- ║    ✗  Threat COUNTER mode   — disabling CoreGui children breaks real UI  ║
+-- ║    ✗  Polymorphic GUI    — destroys live tab/element references          ║
+-- ║    ✗  Dimensional Rift  — GUI:Clone() into Chat/Camera is detectable    ║
+-- ║    ✗  Temporal Paradox  — sets Enabled=false, breaks visible UI         ║
+-- ║    ✗  Quantum Entangle  — name-swapping between windows adds no value   ║
+-- ║    ✗  Neural Naming     — random matrix multiply produces garbage names  ║
+-- ║    ✗  Quantum Naming    — absorbed into existing 6-pattern _EncryptGuiName
 -- ╚══════════════════════════════════════════════════════════════════════════╝
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1665,7 +1348,7 @@ local function _ScrambleGuiMemory(screenGui)
     -- Rotate 8 dummy attributes with random short strings
     for i = 1, 8 do
         local val = _sfmt("%x%x", _mrandom(0, 0xFFFF), _mrandom(0, 0xFFFF))
-        _pcall(function() screenGui:SetAttribute(_TAG_SIG .. tostring(i), val) end)
+        _pcall(function() screenGui:SetAttribute("_cksig" .. i, val) end)
     end
 
     -- Spawn 3 short-lived Folder children tagged so the removal sweep is precise
@@ -1673,7 +1356,7 @@ local function _ScrambleGuiMemory(screenGui)
         _ckSpawn(function()
             local dummy = Instance.new("Folder")
             dummy.Name = _EncryptGuiName()
-            _pcall(function() dummy:SetAttribute(_TAG_DUMMY, true) end)
+            _pcall(function() dummy:SetAttribute("__ckDummy", true) end)
             _pcall(function() dummy.Parent = screenGui end)
             task.wait(_mrandom(8, 25))
             _safeDestroy(dummy)
@@ -1690,7 +1373,7 @@ local function _EnableMemoryScrambling(screenGui, enabled)
         -- Remove any surviving dummy children
         _pcall(function()
             for _, child in _ipairs(screenGui:GetChildren()) do
-                if child:GetAttribute(_TAG_DUMMY) then _safeDestroy(child) end
+                if child:GetAttribute("__ckDummy") then _safeDestroy(child) end
             end
         end)
         _CKLog("AS-1 MemoryScramble: disabled.")
@@ -1717,7 +1400,7 @@ end
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ADVANCED SHIELD AS-2: BEHAVIORAL NOISE
--- Periodically writes a benign _TAG_HEARTBEAT attribute to the ScreenGui,
+-- Periodically writes a benign "LastHeartbeat" attribute to the ScreenGui,
 -- mimicking the pattern of legitimate Roblox service GUIs that stamp
 -- a heartbeat timestamp.  The original version also randomly disabled/
 -- re-enabled the GUI and jittered its position — both removed here because
@@ -1731,7 +1414,7 @@ local function _EnableBehavioralNoise(screenGui, enabled)
     if enabled == false then
         local t = _BEHAVIOR_THREADS[key]
         if t then _ckCancel(t); _BEHAVIOR_THREADS[key] = nil end
-        _pcall(function() screenGui:SetAttribute(_TAG_HEARTBEAT, nil) end)
+        _pcall(function() screenGui:SetAttribute("LastHeartbeat", nil) end)
         _CKLog("AS-2 BehavioralNoise: disabled.")
         return
     end
@@ -1747,10 +1430,10 @@ local function _EnableBehavioralNoise(screenGui, enabled)
             -- a fixed fingerprint itself.
             task.wait(0.4 + _mrandom() * 0.8)
             _pcall(function()
-                screenGui:SetAttribute(_TAG_HEARTBEAT, _tick())
+                screenGui:SetAttribute("LastHeartbeat", _tick())
                 -- Also rotate a "FrameCount" attribute to simulate an update loop
-                local fc = screenGui:GetAttribute(_TAG_FC) or 0
-                screenGui:SetAttribute(_TAG_FC, fc + 1)
+                local fc = screenGui:GetAttribute("_ckFC") or 0
+                screenGui:SetAttribute("_ckFC", fc + 1)
             end)
         end
     end)
@@ -1917,806 +1600,15 @@ end
 
 
 -- ════════════════════════════════════════════════════════════════════════════
--- ADVANCED SHIELD AS-5: THREAT RESPONSE
--- Scans CoreGui descendants every 3 s for objects whose names contain known
--- AC-scanner keywords.  Maintains an exponential-moving-average threat level
--- and fires a countermeasure when the level exceeds a threshold.
+-- ADVANCED SHIELD — MASTER CONTROLLER
+-- Compkiller:EnableUltimateShieldAdvanced(config)
 --
--- Two safe modes:
---   "MIGRATE"  — moves the ScreenGui to an alternate parent + re-encrypts
---   "SACRIFICE" — deploys 3 tagged decoys toward the scanner to absorb focus
---
--- "COUNTER" mode (disabling CoreGui children) is intentionally omitted:
---   blindly disabling CoreGui objects breaks legitimate Roblox UI.
--- ════════════════════════════════════════════════════════════════════════════
-local _THREAT_THREADS   = {}   -- keyed by tostring(screenGui)
-local _THREAT_LEVEL     = 0
-local _THREAT_THRESHOLD = 3    -- EMA units before countermeasure fires
-local _THREAT_KEYWORDS  = {
-    "Scanner", "Detector", "Checker", "Watcher",
-    "Monitor", "AntiCheat", "AntiBan", "Probe",
-}
-local _DETECTED_SCANNERS = {}
-local _MIGRATIONS        = 0
-local _SACRIFICES        = 0
-
--- Alternate parent for MIGRATE mode (switches between the two best options)
-local function _ThreatAlternateParent()
-    if _GUI_PARENT ~= PlayerGui then return PlayerGui end
-    -- Fall back to CoreGui if elevated, otherwise stay on PlayerGui
-    return _CK_ELEVATED and CoreGui or PlayerGui
-end
-
--- Sacrifice 3 short-lived tagged decoys to absorb scanner attention
-local function _ThrowSacrificeDecoys()
-    for _ = 1, 3 do
-        _ckSpawn(function()
-            local d = Instance.new("ScreenGui")
-            d.Name          = _EncryptGuiName()
-            d.DisplayOrder  = _mrandom(1, 500)
-            d.ResetOnSpawn  = false
-            _pcall(function() d:SetAttribute(_TAG_SACRIFICE, true) end)
-            -- Give it convincing fake content
-            local f = Instance.new("Frame")
-            f.Size             = UDim2.new(0, _mrandom(200,450), 0, _mrandom(200,450))
-            f.Position         = UDim2.new(_mrandom()*0.5, 0, _mrandom()*0.5, 0)
-            f.BackgroundColor3 = Color3.fromRGB(_mrandom(15,40), _mrandom(15,40), _mrandom(15,40))
-            f.BorderSizePixel  = 0
-            f.Parent           = d
-            _pcall(function() d.Parent = CoreGui end)
-            -- Self-destruct after 6–12 s
-            task.wait(_mrandom(6, 12))
-            _safeDestroy(d)
-        end)
-    end
-end
-
-local function _EnableThreatResponse(screenGui, mode, enabled)
-    local key = _tostring(screenGui)
-    mode = (mode or "SACRIFICE"):upper()
-
-    if mode == "COUNTER" then
-        warn(_CK_LOG_PREFIX .. "AS-5 ThreatResponse: COUNTER mode removed — it disables real Roblox UI.")
-        mode = "SACRIFICE"
-    end
-
-    if enabled == false then
-        local t = _THREAT_THREADS[key]
-        if t then _ckCancel(t); _THREAT_THREADS[key] = nil end
-        _THREAT_LEVEL = 0
-        _CKLog("AS-5 ThreatResponse: disabled.")
-        return
-    end
-
-    if _THREAT_THREADS[key] then
-        _CKLog("AS-5 ThreatResponse: already active.")
-        return
-    end
-
-    _THREAT_THREADS[key] = _ckSpawn(function()
-        while true do
-            task.wait(3)
-            _pcall(function()
-                -- Count how many scanner-named objects exist right now
-                local hits = 0
-                _pcall(function()
-                    for _, obj in _ipairs(CoreGui:GetDescendants()) do
-                        local n = _tostring(obj.Name)
-                        for _, kw in _ipairs(_THREAT_KEYWORDS) do
-                            if _sfind(n, kw, 1, true) then
-                                hits = hits + 1
-                                _DETECTED_SCANNERS[n] = (_DETECTED_SCANNERS[n] or 0) + 1
-                                break
-                            end
-                        end
-                    end
-                end)
-
-                -- Exponential moving average (fast decay so old noise fades)
-                _THREAT_LEVEL = _THREAT_LEVEL * 0.75 + hits * 0.25
-
-                if _THREAT_LEVEL >= _THREAT_THRESHOLD then
-                    _CKLog(_sfmt("AS-5 ThreatResponse: threat=%.2f — firing %s.", _THREAT_LEVEL, mode))
-
-                    if mode == "MIGRATE" then
-                        local newParent = _ThreatAlternateParent()
-                        _pcall(function()
-                            screenGui.Parent = newParent
-                            local n = _EncryptGuiName()
-                            screenGui.Name   = n
-                            _tinsert(_CK_HIDDEN_GUI_NAMES, n)
-                        end)
-                        _MIGRATIONS = _MIGRATIONS + 1
-                        _CKLog(_sfmt("AS-5 ThreatResponse: migrated to '%s' (total=%d).", newParent.Name, _MIGRATIONS))
-
-                    elseif mode == "SACRIFICE" then
-                        _ThrowSacrificeDecoys()
-                        _SACRIFICES = _SACRIFICES + 1
-                        _CKLog(_sfmt("AS-5 ThreatResponse: sacrificed 3 decoys (total=%d).", _SACRIFICES))
-                    end
-
-                    -- Reset level after responding so we don't spam countermeasures
-                    _THREAT_LEVEL = 0
-                end
-            end)
-        end
-    end)
-
-    _CKLog(_sfmt("AS-5 ThreatResponse: active (mode=%s, threshold=%.1f).", mode, _THREAT_THRESHOLD))
-end
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- ADVANCED SHIELD AS-6: HOLOGRAPHIC DECOYS  (upgrades existing _MakeDecoy)
--- Creates high-fidelity fake ScreenGuis with realistic button layouts,
--- labels, and proper CK colour values — far more convincing to a scanner
--- than a plain coloured frame.  Managed independently of the core L4
--- decoy system so both can run simultaneously if desired.
--- ════════════════════════════════════════════════════════════════════════════
-local _HOLO_POOL         = {}
-local _HOLO_THREAD       = nil
-local _HOLO_TARGET       = 5   -- default pool size
-
-local function _MakeHologram()
-    local holo = Instance.new("ScreenGui")
-    holo.Name            = _EncryptGuiName()   -- no static "HOLO_" prefix
-    holo.DisplayOrder    = _mrandom(1, 900)
-    holo.ResetOnSpawn    = false
-    holo.IgnoreGuiInset  = true
-
-    -- Main frame — uses the real CK background colour so it matches a real window
-    local frame = Instance.new("Frame")
-    frame.Size             = UDim2.new(0, _mrandom(300,500), 0, _mrandom(300,500))
-    frame.Position         = UDim2.new(_mrandom()*0.4, 0, _mrandom()*0.4, 0)
-    frame.BackgroundColor3 = Compkiller and Compkiller.Colors and Compkiller.Colors.BGDBColor
-                             or Color3.fromRGB(22,24,29)
-    frame.BackgroundTransparency = 0.08
-    frame.BorderSizePixel  = 0
-    frame.Parent           = holo
-
-    -- UICorner so it looks like a real CK window
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 8)
-    corner.Parent        = frame
-
-    -- Title bar label
-    local title = Instance.new("TextLabel")
-    title.Size              = UDim2.new(1,-20, 0, 28)
-    title.Position          = UDim2.new(0, 10, 0, 8)
-    title.Text              = "Interface " .. _sfmt("%d", _mrandom(1, 99))
-    title.TextColor3        = Color3.fromRGB(200, 200, 200)
-    title.BackgroundTransparency = 1
-    title.Font              = Enum.Font.GothamSemibold
-    title.TextSize          = 14
-    title.TextXAlignment    = Enum.TextXAlignment.Left
-    title.Parent            = frame
-
-    -- Fake toggle/button rows
-    for i = 1, _mrandom(3, 6) do
-        local row = Instance.new("Frame")
-        row.Size             = UDim2.new(1,-20, 0, 28)
-        row.Position         = UDim2.new(0, 10, 0, 40 + (i-1)*34)
-        row.BackgroundColor3 = Color3.fromRGB(28,29,34)
-        row.BorderSizePixel  = 0
-        row.Parent           = frame
-
-        local rowCorner = Instance.new("UICorner")
-        rowCorner.CornerRadius = UDim.new(0, 4)
-        rowCorner.Parent       = row
-
-        local lbl = Instance.new("TextLabel")
-        lbl.Size                 = UDim2.new(0.7, 0, 1, 0)
-        lbl.Position             = UDim2.new(0, 8, 0, 0)
-        lbl.Text                 = "Option " .. i
-        lbl.TextColor3           = Color3.fromRGB(180,180,180)
-        lbl.BackgroundTransparency = 1
-        lbl.Font                 = Enum.Font.Gotham
-        lbl.TextSize             = 13
-        lbl.TextXAlignment       = Enum.TextXAlignment.Left
-        lbl.Parent               = row
-    end
-
-    _pcall(function() holo:SetAttribute(_TAG_HOLO, true) end)
-    -- Distribute across safe parents
-    local parents = { CoreGui }
-    if PlayerGui then _tinsert(parents, PlayerGui) end
-    _pcall(function() holo.Parent = parents[_mrandom(#parents)] end)
-    return holo
-end
-
-local function _EnableHolographicDecoys(count, enabled)
-    _HOLO_TARGET = _type(count) == "number" and count or _HOLO_TARGET
-
-    if enabled == false then
-        if _HOLO_THREAD then _ckCancel(_HOLO_THREAD); _HOLO_THREAD = nil end
-        for _, h in _ipairs(_HOLO_POOL) do _safeDestroy(h) end
-        _HOLO_POOL = {}
-        _CKLog("AS-6 HolographicDecoys: disabled.")
-        return
-    end
-
-    if _HOLO_THREAD then
-        _CKLog("AS-6 HolographicDecoys: already active.")
-        return
-    end
-
-    -- Seed pool
-    for _ = 1, _HOLO_TARGET do
-        _tinsert(_HOLO_POOL, _MakeHologram())
-    end
-
-    -- Maintenance + rotation every 4 minutes
-    _HOLO_THREAD = _ckSpawn(function()
-        while true do
-            task.wait(240)
-            _pcall(function()
-                -- Prune dead
-                for i = #_HOLO_POOL, 1, -1 do
-                    local alive = _pcall(function() local _ = _HOLO_POOL[i].ClassName end)
-                    if not alive or not _HOLO_POOL[i].Parent then
-                        _tremove(_HOLO_POOL, i)
-                    end
-                end
-                -- Replenish
-                while #_HOLO_POOL < _HOLO_TARGET do
-                    _tinsert(_HOLO_POOL, _MakeHologram())
-                end
-                _CKLog(_sfmt("AS-6 HolographicDecoys: rotated (pool=%d).", #_HOLO_POOL))
-            end)
-        end
-    end)
-
-    _CKLog(_sfmt("AS-6 HolographicDecoys: active (%d holograms, realistic CK-style layout).", _HOLO_TARGET))
-end
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- ADVANCED SHIELD AS-7: BEHAVIORAL CLONING  (attribute-only, read-only scan)
--- Scans the real Roblox CoreGui for attribute stamp patterns from legitimate
--- service GUIs (update timestamps, frame counters, render ticks) and mirrors
--- matching attribute keys onto our ScreenGui.
---
--- IMPORTANT: This version does NOT copy transparency, rotation, or Enabled
--- state — those break the visible UI and are more detectable than attributes.
--- Only non-visual, metadata-style attributes are cloned.
--- ════════════════════════════════════════════════════════════════════════════
-local _BCLONE_THREADS  = {}
-local _BCLONE_PATTERNS = {}    -- learned attribute keys from real CoreGui GUIs
-
-local function _LearnCoreGuiPatterns()
-    _BCLONE_PATTERNS = {}
-    _pcall(function()
-        for _, gui in _ipairs(CoreGui:GetChildren()) do
-            -- Skip our own GUIs and tagged decoys
-            local isCK = _pcall(function()
-                return gui:GetAttribute(_CK_GUI_TAG)
-                    or gui:GetAttribute(_TAG_DECOY)
-                    or gui:GetAttribute(_TAG_HOLO)
-            end)
-            if not isCK and gui:IsA("ScreenGui") then
-                local attrs = gui:GetAttributes()
-                for k, v in _pairs(attrs) do
-                    -- Only learn string/number attributes (not booleans — those are flags)
-                    if _type(v) == "number" or _type(v) == "string" then
-                        _tinsert(_BCLONE_PATTERNS, { key = k, type = _type(v) })
-                    end
-                end
-            end
-        end
-    end)
-    _CKLog(_sfmt("AS-7 BehavioralCloning: learned %d attribute patterns from CoreGui.", #_BCLONE_PATTERNS))
-end
-
-local function _EnableBehavioralCloning(screenGui, enabled)
-    local key = _tostring(screenGui)
-
-    if enabled == false then
-        local t = _BCLONE_THREADS[key]
-        if t then _ckCancel(t); _BCLONE_THREADS[key] = nil end
-        _CKLog("AS-7 BehavioralCloning: disabled.")
-        return
-    end
-
-    if _BCLONE_THREADS[key] then
-        _CKLog("AS-7 BehavioralCloning: already active.")
-        return
-    end
-
-    _LearnCoreGuiPatterns()   -- initial scan
-
-    _BCLONE_THREADS[key] = _ckSpawn(function()
-        local tick_count = 0
-        while true do
-            task.wait(1 + _mrandom() * 0.5)   -- ~1–1.5 s, randomised
-            tick_count = tick_count + 1
-
-            _pcall(function()
-                -- Re-learn every ~60 s so new Roblox GUIs are captured
-                if tick_count % 60 == 0 then
-                    _LearnCoreGuiPatterns()
-                end
-
-                -- Mirror a random subset of learned patterns onto our GUI
-                for _, pat in _ipairs(_BCLONE_PATTERNS) do
-                    if _mrandom() < 0.35 then   -- 35% sample — not every key every tick
-                        if pat.type == "number" then
-                            -- Stamp a live tick-based or incremented value
-                            _pcall(function()
-                                screenGui:SetAttribute(pat.key, _tick() + _mrandom(-5, 5))
-                            end)
-                        elseif pat.type == "string" then
-                            _pcall(function()
-                                screenGui:SetAttribute(pat.key, _sfmt("%x", _mrandom(0, 0xFFFF)))
-                            end)
-                        end
-                    end
-                end
-            end)
-        end
-    end)
-
-    _CKLog("AS-7 BehavioralCloning: active (attribute-only mimic, no UI changes).")
-end
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- EMERGENCY PROTOCOLS  (one-shot, synchronous — call when detection is likely)
---
---   EP-1  "nuke"    — destroy all CK decoys, detach real GUI, flood CoreGui
---                     with 10 short-lived diversion GUIs
---   EP-2  "cloak"   — GUI invisible + transparent input-catcher overlay so
---                     user interaction still works while GUI is hidden
---   EP-3  "migrate" — move GUI to alternate parent + re-encrypt name
---
--- Usage:  Compkiller:Emergency("nuke")
---         MC.emergency("cloak", { gui = myWindow })
--- ════════════════════════════════════════════════════════════════════════════
-local _EP_CLOAK_LAYERS = {}   -- input-catcher ScreenGuis per cloaked GUI
-
-local function _EmergencyNuke(self)
-    _CKLog("EMERGENCY EP-1 NUKE: initiated.")
-
-    -- Destroy all tracked decoy/holo/ghost/sacrifice GUIs
-    local function _nukeTagged(parent, ...)
-        _pcall(function()
-            local tags = {...}
-            for _, child in _ipairs(parent:GetChildren()) do
-                for _, tag in _ipairs(tags) do
-                    local ok, val = _pcall(function() return child:GetAttribute(tag) end)
-                    if ok and val then _safeDestroy(child); break end
-                end
-            end
-        end)
-    end
-
-    _nukeTagged(CoreGui, _TAG_DECOY, _TAG_HOLO, _TAG_SACRIFICE, _TAG_DUMMY)
-    if PlayerGui then _nukeTagged(PlayerGui, _TAG_DECOY, _TAG_HOLO) end
-
-    -- Clean pool tables
-    for _, d in _ipairs(_DECOY_GUIS)  do _safeDestroy(d) end; _DECOY_GUIS  = {}
-    for _, h in _ipairs(_HOLO_POOL)   do _safeDestroy(h) end; _HOLO_POOL   = {}
-    for _, g in _ipairs(_GHOST_POOL)  do _safeDestroy(g) end; _GHOST_POOL  = {}
-
-    -- Detach all open windows
-    _pcall(function()
-        for _, win in _ipairs(self.Windows or {}) do
-            _pcall(function()
-                local sg = win._ScreenGui
-                if sg then sg.Parent = nil end
-            end)
-        end
-    end)
-
-    -- Flood CoreGui with 10 short-lived diversions
-    for _ = 1, 10 do
-        _ckSpawn(function()
-            local d = Instance.new("ScreenGui")
-            d.Name  = _EncryptGuiName()
-            _pcall(function() d:SetAttribute(_TAG_DIVERSION, true) end)
-            _pcall(function() d.Parent = CoreGui end)
-            task.wait(_mrandom(2, 5))
-            _safeDestroy(d)
-        end)
-    end
-
-    _CKLog("EMERGENCY EP-1 NUKE: complete (all decoys destroyed, GUIs detached, 10 diversions deployed).")
-
-    -- Flush any user-registered panic objects (weak table — dead refs already GC'd)
-    _CK_FlushPanicRegistry()
-end
-
-local function _EmergencyCloak(self)
-    _CKLog("EMERGENCY EP-2 CLOAK: initiated.")
-
-    _pcall(function()
-        for _, win in _ipairs(self.Windows or {}) do
-            _pcall(function()
-                local sg = win._ScreenGui
-                if not sg then return end
-
-                -- Hide the real GUI
-                sg.Enabled = false
-
-                -- Create a transparent full-screen input catcher so interaction
-                -- still works through the invisible GUI
-                local catcher = Instance.new("ScreenGui")
-                catcher.Name             = _EncryptGuiName()
-                catcher.DisplayOrder     = _CK_SAFE_DISPLAY_ORDER + 1   -- FIX 2: dynamic, just above main GUI
-                catcher.IgnoreGuiInset   = true
-                catcher.ResetOnSpawn     = false
-
-                local layer = Instance.new("Frame")
-                layer.Size               = UDim2.new(1, 0, 1, 0)
-                layer.BackgroundTransparency = 1
-                layer.Active             = true
-                layer.Parent             = catcher
-
-                _pcall(function() catcher:SetAttribute(_TAG_CLOAK, true) end)
-                _pcall(function() catcher.Parent = _GUI_PARENT end)
-
-                _tinsert(_EP_CLOAK_LAYERS, { target = sg, catcher = catcher })
-                _CKLog("EMERGENCY EP-2 CLOAK: GUI '" .. sg.Name .. "' hidden, input layer active.")
-            end)
-        end
-    end)
-end
-
--- Uncloak: restores all GUIs hidden by EP-2
-local function _EmergencyUncloak(self)
-    for _, entry in _ipairs(_EP_CLOAK_LAYERS) do
-        _pcall(function()
-            entry.target.Enabled = true
-            _safeDestroy(entry.catcher)
-        end)
-    end
-    _EP_CLOAK_LAYERS = {}
-    _CKLog("EMERGENCY EP-2 CLOAK: all GUIs restored.")
-end
-
-local function _EmergencyMigrate(self)
-    _CKLog("EMERGENCY EP-3 MIGRATE: initiated.")
-
-    local newParent = _ThreatAlternateParent()
-
-    _pcall(function()
-        for _, win in _ipairs(self.Windows or {}) do
-            _pcall(function()
-                local sg = win._ScreenGui
-                if not sg then return end
-                local n = _EncryptGuiName()
-                sg.Parent = newParent
-                sg.Name   = n
-                _tinsert(_CK_HIDDEN_GUI_NAMES, n)
-                _MIGRATIONS = _MIGRATIONS + 1
-                _CKLog(_sfmt("EMERGENCY EP-3 MIGRATE: '%s' -> '%s' (total=%d).", n, newParent.Name, _MIGRATIONS))
-            end)
-        end
-    end)
-
-    -- Also refresh _GUI_PARENT
-    _GUI_PARENT = newParent
-    _CKLog("EMERGENCY EP-3 MIGRATE: complete.")
-end
-
--- Unified dispatcher  Compkiller:Emergency(mode [, config])
--- mode = "nuke" | "cloak" | "uncloak" | "migrate"
-local function _Emergency(self, mode, _cfg)
-    mode = _tostring(mode or ""):lower()
-    if mode == "nuke"    then _EmergencyNuke(self)
-    elseif mode == "cloak"   then _EmergencyCloak(self)
-    elseif mode == "uncloak" then _EmergencyUncloak(self)
-    elseif mode == "migrate" then _EmergencyMigrate(self)
-    else
-        warn(_CK_LOG_PREFIX .. "Emergency: unknown mode '" .. mode .. "' — valid: nuke | cloak | uncloak | migrate")
-    end
-end
--- ════════════════════════════════════════════════════════════════════════════
--- ADVANCED SHIELD AS-8: CONTAINER DEPTH OBFUSCATION
--- Inserts N transparent Frame wrappers between the ScreenGui root and its
--- real content Frame, burying the actual UI deeper in the hierarchy.
---
--- Why this works:
---   Most AC scanners that look for executor GUIs enumerate ScreenGui children
---   and immediately inspect the first Frame they find.  With depth wrapping,
---   that first Frame is a transparent 0-content shell.  Recursive scanners
---   are slowed down by the extra traversal depth.  Behavioural scanners that
---   compare ScreenGui > Frame > children patterns see only wrappers at depth 1.
---
--- Safety guarantees:
---   • Moves the content Frame's PARENT only — the Lua reference stored by
---     the library remains valid.  No re-parenting of buttons/tabs/labels.
---   • Wrapper frames are 1,0,1,0 with BackgroundTransparency=1, no border,
---     no input interception (Active=false) — invisible to the user.
---   • Each wrapper is tagged __ckDepthWrap so the maintenance thread can
---     detect and rebuild the chain if a scanner destroys a wrapper.
---   • depth clamped 1–5 (default 3).
---
--- Call AFTER the window UI is fully built, not during window creation.
--- ════════════════════════════════════════════════════════════════════════════
-local _DEPTH_WRAP_THREADS = {}   -- keyed by tostring(screenGui)
-local _DEPTH_WRAP_CHAINS  = {}   -- keyed by tostring(screenGui) → { wrappers={}, contentFrame=Frame }
-
-local function _MakeWrapperFrame()
-    local w = Instance.new("Frame")
-    w.Name                   = _EncryptGuiName()
-    w.Size                   = UDim2.new(1, 0, 1, 0)
-    w.Position               = UDim2.new(0, 0, 0, 0)
-    w.BackgroundTransparency = 1
-    w.BorderSizePixel        = 0
-    w.Active                 = false   -- no input interception
-    w.ClipsDescendants       = false
-    _pcall(function() w:SetAttribute(_TAG_DEPTH, true) end)
-    return w
-end
-
--- Find the "real" top-level content Frame — the deepest non-wrapper child Frame.
--- If no wrapper chain exists yet, returns the first Frame child directly.
-local function _FindContentFrame(screenGui)
-    local candidate = nil
-    _pcall(function()
-        for _, child in _ipairs(screenGui:GetChildren()) do
-            if child:IsA("Frame") then
-                -- If it's a wrapper, recurse into it to find the real content
-                local isWrapper = false
-                _pcall(function() isWrapper = child:GetAttribute(_TAG_DEPTH) == true end)
-                if isWrapper then
-                    -- Walk down through wrappers to find the real content
-                    local cur = child
-                    while cur do
-                        local nextFrame = nil
-                        _pcall(function()
-                            for _, c in _ipairs(cur:GetChildren()) do
-                                if c:IsA("Frame") then
-                                    nextFrame = c; break
-                                end
-                            end
-                        end)
-                        if not nextFrame then break end
-                        local nextIsWrapper = false
-                        _pcall(function() nextIsWrapper = nextFrame:GetAttribute(_TAG_DEPTH) == true end)
-                        if nextIsWrapper then cur = nextFrame
-                        else candidate = nextFrame; break
-                        end
-                    end
-                else
-                    candidate = child
-                end
-                break
-            end
-        end
-    end)
-    return candidate
-end
-
--- Build or rebuild the wrapper chain for a given ScreenGui.
-local function _BuildDepthChain(screenGui, depth)
-    local key = _tostring(screenGui)
-    depth = _mmin(_mmax(depth or 3, 1), 5)
-
-    -- Destroy any existing wrappers first
-    _pcall(function()
-        local existing = _DEPTH_WRAP_CHAINS[key]
-        if existing then
-            for _, w in _ipairs(existing.wrappers) do
-                -- Move content back to screenGui before destroying chain
-                _pcall(function()
-                    if existing.contentFrame and existing.contentFrame.Parent then
-                        existing.contentFrame.Parent = screenGui
-                    end
-                end)
-                _safeDestroy(w)
-            end
-        end
-    end)
-
-    -- Find the current top-level content Frame
-    local contentFrame = nil
-    _pcall(function()
-        for _, child in _ipairs(screenGui:GetChildren()) do
-            if child:IsA("Frame") then
-                local isWrapper = false
-                _pcall(function() isWrapper = child:GetAttribute(_TAG_DEPTH) == true end)
-                if not isWrapper then
-                    contentFrame = child; break
-                end
-            end
-        end
-    end)
-
-    if not contentFrame then
-        _CKLog("AS-8 ContainerDepth: no content Frame found in " .. _tostring(screenGui.Name) .. " — skipped.")
-        return
-    end
-
-    -- Build the chain: screenGui → W1 → W2 → ... → Wdepth → contentFrame
-    local wrappers = {}
-    local currentParent = screenGui
-
-    for i = 1, depth do
-        local w = _MakeWrapperFrame()
-        _pcall(function() w.Parent = currentParent end)
-        _tinsert(wrappers, w)
-        currentParent = w
-    end
-
-    -- Move the real content Frame into the deepest wrapper
-    _pcall(function() contentFrame.Parent = currentParent end)
-
-    _DEPTH_WRAP_CHAINS[key] = { wrappers = wrappers, contentFrame = contentFrame, depth = depth }
-    _CKLog(_sfmt("AS-8 ContainerDepth: chain built (depth=%d) for '%s'.", depth, screenGui.Name))
-end
-
-local function _EnableContainerDepth(screenGui, depth, enabled)
-    local key = _tostring(screenGui)
-    depth = _type(depth) == "number" and depth or 3
-
-    if enabled == false then
-        -- Dismantle: restore content Frame to ScreenGui root
-        local t = _DEPTH_WRAP_THREADS[key]
-        if t then _ckCancel(t); _DEPTH_WRAP_THREADS[key] = nil end
-
-        _pcall(function()
-            local chain = _DEPTH_WRAP_CHAINS[key]
-            if chain and chain.contentFrame and chain.contentFrame.Parent then
-                chain.contentFrame.Parent = screenGui
-            end
-            if chain then
-                for _, w in _ipairs(chain.wrappers) do _safeDestroy(w) end
-            end
-            _DEPTH_WRAP_CHAINS[key] = nil
-        end)
-        _CKLog("AS-8 ContainerDepth: disabled, content restored to ScreenGui root.")
-        return
-    end
-
-    if _DEPTH_WRAP_THREADS[key] then
-        _CKLog("AS-8 ContainerDepth: already active.")
-        return
-    end
-
-    -- Build initial chain (call after UI is fully constructed)
-    _pcall(function() _BuildDepthChain(screenGui, depth) end)
-
-    -- Maintenance thread: if a wrapper is destroyed, rebuild the chain
-    _DEPTH_WRAP_THREADS[key] = _ckSpawn(function()
-        while true do
-            task.wait(60 + _mrandom(0, 30))   -- check every 60–90 s
-            _pcall(function()
-                local chain = _DEPTH_WRAP_CHAINS[key]
-                if not chain then return end
-
-                -- Check if any wrapper in the chain is dead
-                local chainBroken = false
-                for _, w in _ipairs(chain.wrappers) do
-                    local alive = false
-                    _pcall(function() alive = w.Parent ~= nil end)
-                    if not alive then chainBroken = true; break end
-                end
-
-                if chainBroken then
-                    _CKLog("AS-8 ContainerDepth: chain broken — rebuilding.")
-                    _pcall(function() _BuildDepthChain(screenGui, chain.depth) end)
-                end
-            end)
-        end
-    end)
-
-    _CKLog(_sfmt("AS-8 ContainerDepth: active (depth=%d, maintenance every 60–90 s).", depth))
-end
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- ADVANCED SHIELD AS-9: ADAPTIVE SHIELD ESCALATION
--- A single monitoring thread that watches _THREAT_LEVEL (maintained by AS-5)
--- and automatically arms progressively heavier shield layers as threat rises,
--- then disarms them when the threat subsides.
---
--- Escalation tiers:
---   Level 0  (threat < 1.0)  — baseline only (AS-1, AS-2, AS-4)
---   Level 1  (threat ≥ 1.0)  — add AS-3 (ghosts) + AS-7 (behavioral cloning)
---   Level 2  (threat ≥ 3.0)  — add AS-6 (holograms) + AS-8 chain rebuild
---   Level 3  (threat ≥ 5.5)  — escalate AS-5 to SACRIFICE + AS-3 refresh
---   Level 4  (threat ≥ 8.0)  — fire Emergency("migrate") + reset threat
---
--- This is the "smart shield" the document's recommended combination describes:
--- low cost at idle, escalates only when needed, no user action required.
--- ════════════════════════════════════════════════════════════════════════════
-local _ADAPTIVE_THREAD    = nil
-local _ADAPTIVE_TIER      = 0    -- last activated tier
-local _ADAPTIVE_CALLBACKS = {}   -- registered onTierChange(tier) callbacks
-
-local function _OnAdaptiveTierChange(tier, screenGui)
-    _CKLog(_sfmt("AS-9 AdaptiveEscalation: tier change %d → %d.", _ADAPTIVE_TIER, tier))
-    _ADAPTIVE_TIER = tier
-
-    _pcall(function()
-        -- Tier 1: arm low-cost always-on layers if not already running
-        if tier >= 1 then
-            _EnableBehavioralCloning(screenGui, true)    -- AS-7: attr mimic
-            _EnableGhostInstances(true)                  -- AS-3: honeypots
-        end
-
-        -- Tier 2: arm medium-cost layers
-        if tier >= 2 then
-            _EnableHolographicDecoys(5, true)            -- AS-6: holo decoys
-            -- Rebuild depth chain in case it was broken by the scanner
-            _pcall(function() _BuildDepthChain(screenGui, 3) end)
-        end
-
-        -- Tier 3: trigger AS-5 sacrifice countermeasure directly
-        if tier >= 3 then
-            _ThrowSacrificeDecoys()
-            _CKLog("AS-9 AdaptiveEscalation: tier 3 — sacrifice decoys deployed.")
-        end
-
-        -- Tier 4: emergency migrate + threat reset
-        if tier >= 4 then
-            _CKLog("AS-9 AdaptiveEscalation: tier 4 CRITICAL — firing Emergency migrate.")
-            _pcall(function() _EmergencyMigrate({ Windows = Compkiller.Windows }) end)
-            _THREAT_LEVEL = 0   -- reset so we don't loop-migrate
-        end
-    end)
-
-    -- Fire any registered external callbacks
-    for _, cb in _ipairs(_ADAPTIVE_CALLBACKS) do
-        _pcall(function() cb(tier, screenGui) end)
-    end
-end
-
-local function _EnableAdaptiveEscalation(screenGui, enabled)
-    if enabled == false then
-        if _ADAPTIVE_THREAD then _ckCancel(_ADAPTIVE_THREAD); _ADAPTIVE_THREAD = nil end
-        _ADAPTIVE_TIER = 0
-        _CKLog("AS-9 AdaptiveEscalation: disabled.")
-        return
-    end
-
-    if _ADAPTIVE_THREAD then
-        _CKLog("AS-9 AdaptiveEscalation: already active.")
-        return
-    end
-
-    _ADAPTIVE_THREAD = _ckSpawn(function()
-        while true do
-            task.wait(5)   -- poll every 5 s
-            _pcall(function()
-                local tl = _THREAT_LEVEL
-
-                local newTier
-                if    tl >= 8.0 then newTier = 4
-                elseif tl >= 5.5 then newTier = 3
-                elseif tl >= 3.0 then newTier = 2
-                elseif tl >= 1.0 then newTier = 1
-                else                  newTier = 0
-                end
-
-                if newTier ~= _ADAPTIVE_TIER then
-                    _OnAdaptiveTierChange(newTier, screenGui)
-                end
-            end)
-        end
-    end)
-
-    _CKLog("AS-9 AdaptiveEscalation: active (polling every 5 s, 4 escalation tiers).")
-end
-
--- Register a callback fired whenever the escalation tier changes.
--- cb = function(tier, screenGui) end
-local function _OnAdaptiveTierChanged(cb)
-    if _type(cb) == "function" then
-        _tinsert(_ADAPTIVE_CALLBACKS, cb)
-    end
-end
---   memoryScrambling    = bool          AS-1
---   behavioralNoise     = bool          AS-2
---   ghostInstances      = bool          AS-3
---   fingerprintRotation = bool          AS-4
---   threatResponse      = bool | string AS-5  (true = "SACRIFICE", or "MIGRATE")
---   holographicDecoys   = bool | number AS-6  (true = 5 holograms, or pass count)
---   behavioralCloning   = bool          AS-7
---   containerDepth      = bool | number AS-8  (true = depth 3, or pass 1–5)
---   adaptiveEscalation  = bool          AS-9  (requires AS-5 to be active)
---   screenGui           = Instance      (defaults to first open window root)
+-- config keys (all default true):
+--   memoryScrambling   = bool   AS-1
+--   behavioralNoise    = bool   AS-2
+--   ghostInstances     = bool   AS-3
+--   fingerprintRotation= bool   AS-4
+--   screenGui          = Instance  (defaults to first open window root)
 -- ════════════════════════════════════════════════════════════════════════════
 local function _EnableUltimateShieldAdvanced(self, config)
     config = config or {}
@@ -2738,70 +1630,28 @@ local function _EnableUltimateShieldAdvanced(self, config)
 
     local results = {}
 
-    -- AS-1
     if config.memoryScrambling ~= false then
         _EnableMemoryScrambling(screenGui, true)
         results.memoryScrambling = "active"
     end
 
-    -- AS-2
     if config.behavioralNoise ~= false then
         _EnableBehavioralNoise(screenGui, true)
         results.behavioralNoise = "active"
     end
 
-    -- AS-3
     if config.ghostInstances ~= false then
         _EnableGhostInstances(true)
         results.ghostInstances = "active"
     end
 
-    -- AS-4
     if config.fingerprintRotation ~= false then
         _EnableFingerprintRotation(screenGui, true)
         results.fingerprintRotation = "active"
     end
 
-    -- AS-5: Threat Response
-    if config.threatResponse ~= false then
-        local mode = _type(config.threatResponse) == "string"
-                     and config.threatResponse or "SACRIFICE"
-        _EnableThreatResponse(screenGui, mode, true)
-        results.threatResponse = "active (" .. mode .. ")"
-    end
-
-    -- AS-6: Holographic Decoys
-    if config.holographicDecoys ~= false then
-        local count = _type(config.holographicDecoys) == "number"
-                      and config.holographicDecoys or 5
-        _EnableHolographicDecoys(count, true)
-        results.holographicDecoys = _sfmt("active (%d holograms)", count)
-    end
-
-    -- AS-7: Behavioral Cloning
-    if config.behavioralCloning ~= false then
-        _EnableBehavioralCloning(screenGui, true)
-        results.behavioralCloning = "active"
-    end
-
-    -- AS-8: Container Depth Obfuscation
-    -- Armed last among structural changes so all UI is fully built before wrapping.
-    if config.containerDepth ~= false then
-        local depth = _type(config.containerDepth) == "number"
-                      and config.containerDepth or 3
-        _EnableContainerDepth(screenGui, depth, true)
-        results.containerDepth = _sfmt("active (depth=%d)", depth)
-    end
-
-    -- AS-9: Adaptive Escalation — auto-arms heavier layers as _THREAT_LEVEL rises.
-    -- Works best when AS-5 (threatResponse) is also active.
-    if config.adaptiveEscalation ~= false then
-        _EnableAdaptiveEscalation(screenGui, true)
-        results.adaptiveEscalation = "active (4-tier auto-escalation)"
-    end
-
     for k, v in _pairs(results) do
-        _CKLog(_sfmt("  adv.%-26s = %s", k, v))
+        _CKLog(_sfmt("  adv.%-22s = %s", k, v))
     end
 
     return results
@@ -2831,9 +1681,7 @@ local function _TrackThread(thread)
 end
 
 pcall(function(...)
--- G1: cleanup fn stored under randomized integer sub-key _GK_CLNSVC
--- instead of the readable string "getgenv().__rbxClnSvc"
-local function _CK_CleanupFn(...)
+getgenv()[_CLN_KEY] = function(...)
     for _, t in ipairs(_CK_THREADS) do
         pcall(task.cancel, t)
     end
@@ -2872,8 +1720,7 @@ local function _CK_CleanupFn(...)
     _OPT._DummyTween   = nil   -- rebuilt at bottom of next execution
 
     pcall(function()
-        local env = _CK_GEnv()
-        local reg = env[_GK_COREG]
+        local reg = getgenv()[_CO_REG_KEY]
         if type(reg) == "table" then
             for _, co in ipairs(reg) do
                 pcall(function()
@@ -2883,11 +1730,10 @@ local function _CK_CleanupFn(...)
                 end)
             end
         end
-        env[_GK_COREG] = {}
+        getgenv()[_CO_REG_KEY] = {}
     end)
 end
-local env = _CK_GEnv(); env[_GK_CLNSVC] = _CK_CleanupFn
-end) -- pcall wrapper for cleanup fn registration
+end) -- pcall wrapper for getgenv()[_CLN_KEY] assignment
 
 
 local Compkiller = {
@@ -2905,7 +1751,7 @@ local Compkiller = {
 	},
 	PerformanceMode = false,
 	WindowsNil = {},
-	NilFolder = Instance.new('Folder'),
+	NilFolder = cloneref(Instance.new('Folder')),
 	ArcylicParent = CurrentCamera,
 	ProtectGui = protect_gui or protectgui or (syn and syn.protect_gui) or function(s) return s; end,
 };
@@ -2974,76 +1820,65 @@ function Compkiller:EnableTurboScramble(screenGui, enabled)
         return
     end
 
-    -- G4: name generator reuses existing pools — no new logic needed
+    -- Lazy name generators — one function per shape, called on demand
+    local _nameGens = {
+        function() return _EncryptGuiName() end,
+        function() return _tostring(_mrandom(-2000000000, 2000000000)) end,
+        function()
+            local p = _TURBO_PREFIXES[_mrandom(1, #_TURBO_PREFIXES)]
+            local s = _TURBO_SUFFIXES[_mrandom(1, #_TURBO_SUFFIXES)]
+            local h = _sfmt("%08X", _mrandom(0, 0x7FFFFFFF))
+            return p .. "_" .. h .. "_" .. s
+        end,
+    }
     local function _pickName()
-        return _EncryptGuiName()
+        return _nameGens[_mrandom(1, #_nameGens)]()
     end
 
-    _BuildNamePool(screenGui)
+    _BuildNamePool(screenGui)   -- seed the pool for the first time
     _TURBO_ACTIVE = true
 
-    -- G4: only snapshot DIRECT children of root, never GetDescendants().
-    -- GetDescendants() on every rename cycle was the #1 2026 AC fingerprint —
-    -- it calls into the Roblox C++ heap for a full subtree walk every tick.
-    local _directChildren = {}
-    local _childIdx       = 1
-    local _lastChildRefresh = _tick()
-    local CHILD_REFRESH_INTERVAL = 8   -- seconds
+    local _descs    = {}
+    local _descIdx  = 1
+    local _lastRefresh = _tick()
+    local REFRESH_INTERVAL = 5  -- seconds between pool + desc refresh
 
-    local function _refreshChildren()
-        _directChildren = {}
+    _pcall(function() _descs = screenGui:GetDescendants() end)
+
+    _TURBO_CONN = _TrackConn(RunService.RenderStepped:Connect(function()
         _pcall(function()
-            for _, c in _ipairs(screenGui:GetChildren()) do
-                _tinsert(_directChildren, c)
-            end
-        end)
-        _childIdx = 1
-    end
-    _refreshChildren()
-
-    -- G4: Heartbeat instead of RenderStepped.
-    -- RenderStepped fires before every frame render — visible in profiler and
-    -- detectable by anything that hooks RS.RenderStepped connection count.
-    -- Heartbeat fires after physics, much lower scrutiny.
-    -- Random 3–8 frame gate: fires on average ~once per 5 frames at 60fps,
-    -- so rename rate is ~12/s — indistinguishable from benign game scripts.
-    local _frameGate  = _mrandom(3, 8)
-    local _frameCtr   = 0
-
-    _TURBO_CONN = _TrackConn(RunService.Heartbeat:Connect(function()
-        _frameCtr = _frameCtr + 1
-        if _frameCtr < _frameGate then return end
-        _frameCtr = 0
-        _frameGate = _mrandom(3, 8)   -- re-randomise gate each time
-
-        _pcall(function()
-            -- Rename root ScreenGui
+            -- Always rename root ScreenGui every frame
             local newName = _pickName()
             screenGui.Name = newName
             _tinsert(_CK_HIDDEN_GUI_NAMES, newName)
 
-            -- Rename one direct child per trigger (rolling, not batch)
-            if #_directChildren > 0 then
-                local v = _directChildren[_childIdx]
+            -- Rename a rolling batch of 4 descendants per frame
+            -- Avoids O(n) cost every frame for large GUIs
+            local batchEnd = _mmin(_descIdx + 3, #_descs)
+            for i = _descIdx, batchEnd do
+                local v = _descs[i]
                 if v and v.Parent then
-                    _pcall(function() v.Name = _pickName() end)
+                    v.Name = _pickName()
+                else
+                    _descs[i] = nil  -- stale ref; will be cleaned on next rebuild
                 end
-                _childIdx = (_childIdx >= #_directChildren) and 1 or (_childIdx + 1)
             end
+            _descIdx = (_descIdx >= #_descs) and 1 or (_descIdx + 4)
 
-            -- Periodic child list refresh
+            -- tick()-based periodic refresh — more reliable than frame counter
             local now = _tick()
-            if now - _lastChildRefresh >= CHILD_REFRESH_INTERVAL then
-                _lastChildRefresh = now
-                _TURBO_POOL_GEN   = _TURBO_POOL_GEN + 1
+            if now - _lastRefresh >= REFRESH_INTERVAL then
+                _lastRefresh = now
+                _TURBO_POOL_GEN = _TURBO_POOL_GEN + 1
                 _BuildNamePool(screenGui)
-                _refreshChildren()
+                _pcall(function() _descs = screenGui:GetDescendants() end)
+                _descIdx = 1
                 _CKLog(_sfmt("TurboScramble: pool refreshed (gen %d).", _TURBO_POOL_GEN))
             end
         end)
     end))
 
-    _CKLog("TurboScramble: active (Heartbeat, random 3–8 frame gate, root+1 child/trigger).")
+    _CKLog("TurboScramble: active — renaming root every frame, 4 descendants/frame batch.")
 end
 
 Compkiller.Elements = {
@@ -4099,7 +2934,7 @@ end;
 
 function Compkiller:_SetNilP(Ins , Parent)
 	Compkiller.WindowsNil = Compkiller.WindowsNil or {};
-	Compkiller.NilFolder = Compkiller.NilFolder or Instance.new('Folder');
+	Compkiller.NilFolder = Compkiller.NilFolder or cloneref(Instance.new('Folder'));
 
 	if not Compkiller.WindowsNil[Ins] then
 		local win = Compkiller:_GetWindowFromElement(Ins);
@@ -4137,10 +2972,7 @@ function Compkiller:_GetIcon(name , font_aws)
 end;
 
 function Compkiller:_RandomString()
-	-- FIX 1: removed hardcoded "CK=" prefix — 166 internal elements had
-	-- names starting with "CK=" which was an instant AC fingerprint.
-	-- Now delegates to the 6-pattern _EncryptGuiName() generator.
-	return _EncryptGuiName()
+	return "CK="..string.char(math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102));	
 end;
 
 function Compkiller:_IsMouseOverFrame(Frame)
@@ -12738,110 +11570,10 @@ function Compkiller:_Path(...)
 	return table.concat(args, "/");
 end;
 
--- ════════════════════════════════════════════════════════════════════════════
--- CONFIG ENCRYPTION UTILITY
--- Obfuscates config files written to disk so a game anti-cheat or developer
--- inspecting the executor's config folder cannot fingerprint which scripts a
--- user runs, or read their toggle states.
---
--- Algorithm: XOR stream cipher with a per-filename key, hex-encoded output.
---   • Key stream: LCG seeded from a simple hash of the filename string.
---     Every file gets a unique key → same JSON produces different ciphertext
---     for different config names.
---   • Output format: magic prefix "CKE1:" + lowercase hex of XOR'd bytes.
---   • Backward compat: files that don't start with "CKE1:" are treated as
---     legacy plaintext JSON and decoded normally — old saves still load.
---   • Pure Lua; no external dependencies.
--- ════════════════════════════════════════════════════════════════════════════
-
--- Derive a deterministic byte-stream key from a seed integer.
--- Uses a 32-bit LCG (Numerical Recipes constants) and extracts the
--- high byte of each step — good enough for obfuscation (not crypto).
-local function _CK_KeyStream(seed, length)
-    local bytes = {}
-    local s = seed % 0x100000000
-    for i = 1, length do
-        s = (s * 1664525 + 1013904223) % 0x100000000
-        bytes[i] = math.floor(s / 0x1000000) % 256   -- high byte
-    end
-    return bytes
-end
-
--- Hash a filename string to a 32-bit integer seed.
-local function _CK_FilenameSeed(filename)
-    local h = 0x811C9DC5   -- FNV-1a offset basis (32-bit)
-    for i = 1, #filename do
-        h = ((h ~ string.byte(filename, i)) * 0x01000193) % 0x100000000
-    end
-    return h
-end
-
--- Encrypt a plaintext string → "CKE1:<hex>"
-local function _CK_EncodeConfig(plaintext, filename)
-    local seed  = _CK_FilenameSeed(filename or "default")
-    local key   = _CK_KeyStream(seed, #plaintext)
-    local hex   = {}
-    for i = 1, #plaintext do
-        hex[i] = string.format("%02x", string.byte(plaintext, i) ~ key[i])
-    end
-    return "CKE1:" .. table.concat(hex)
-end
-
--- Decrypt a "CKE1:<hex>" string back to plaintext.
--- Returns plaintext on success, or nil + error message.
-local function _CK_DecodeConfig(data, filename)
-    if type(data) ~= "string" then
-        return nil, "not a string"
-    end
-    -- Legacy plaintext support: old files start with '{' (JSON object)
-    if data:sub(1, 1) == "{" or data:sub(1, 1) == "[" then
-        return data, nil   -- pass through unchanged
-    end
-    if data:sub(1, 5) ~= "CKE1:" then
-        return nil, "unrecognised format (expected CKE1: prefix)"
-    end
-    local hexPart = data:sub(6)
-    if #hexPart % 2 ~= 0 then
-        return nil, "corrupt hex data (odd length)"
-    end
-    local seed   = _CK_FilenameSeed(filename or "default")
-    local length = #hexPart / 2
-    local key    = _CK_KeyStream(seed, length)
-    local chars  = {}
-    for i = 1, length do
-        local byte = tonumber(hexPart:sub(i*2-1, i*2), 16)
-        if not byte then
-            return nil, "corrupt hex data (bad nibble at position " .. i .. ")"
-        end
-        chars[i] = string.char(byte ~ key[i])
-    end
-    return table.concat(chars), nil
-end
-
 function Compkiller:ConfigManager(ConfigManager)
-	-- FIX 4: Config directory name is no longer the static string "Compkiller".
-	-- Derive a per-game folder name from PlaceId so:
-	--   (a) different games get different folder names (no cross-game fingerprint)
-	--   (b) the folder name is stable across sessions for the same game
-	--   (c) the name looks like a generic app-data cache, not a named exploit lib
-	-- Format: "rbx_<hex8>" derived from PlaceId XOR 0xA3D9F2C1
-	local function _CK_SafeDir()
-		local placeId = 0
-		_pcall(function() placeId = game.PlaceId end)
-		local h = (placeId ~ 0xA3D9F2C1) % 0x100000000
-		return _sfmt("rbx_%08x", h)
-	end
-	local function _CK_SafeSubDir()
-		-- Sub-folder: stable short name that looks like a version cache
-		local placeId = 0
-		_pcall(function() placeId = game.PlaceId end)
-		local h = (placeId ~ 0x5E7B1A04) % 0x10000
-		return _sfmt("v%04x", h)
-	end
-
 	ConfigManager = Compkiller.__CONFIG(ConfigManager , {
-		Directory = _CK_SafeDir(),
-		Config    = _CK_SafeSubDir(),
+		Directory = "Compkiller",
+		Config = "Software"
 	});
 
 	if not isfolder(ConfigManager.Directory) then
@@ -12882,17 +11614,11 @@ function Compkiller:ConfigManager(ConfigManager)
 			})
 		end
 
-		writefile(Compkiller:_Path(Args.Directory , Config.Name) , _CK_EncodeConfig(HttpService:JSONEncode(Flags), Config.Name));
+		writefile(Compkiller:_Path(Args.Directory , Config.Name) , HttpService:JSONEncode(Flags));
 	end;
 
 	function Args:LoadConfigFromString(str)
-		-- str may arrive as raw JSON (share-paste) — pass through decode gracefully
-		local raw, err = _CK_DecodeConfig(str, "__fromstring")
-		if not raw then
-			_CKLog("ConfigManager: LoadConfigFromString decrypt failed (" .. tostring(err) .. ") — trying raw.")
-			raw = str
-		end
-		local decoded = HttpService:JSONDecode(raw);
+		local decoded = HttpService:JSONDecode(str);
 
 		local Flags = Compkiller:GetConfig("KV");
 
@@ -12927,15 +11653,9 @@ function Compkiller:ConfigManager(ConfigManager)
 		local _path = Compkiller:_Path(Args.Directory , ConfigName);
 
 		if isfile(_path) then
-			local raw = readfile(_path);
-			local info, err = _CK_DecodeConfig(raw, ConfigName);
-			if not info then
-				_CKLog("ConfigManager: ReadInfo decrypt failed for '" .. ConfigName .. "': " .. tostring(err));
-				return false;
-			end;
+			local info = readfile(_path);
 
-			local ok, decoded = pcall(function() return HttpService:JSONDecode(info) end);
-			if not ok or type(decoded) ~= "table" then return false end;
+			local decoded = HttpService:JSONDecode(info);
 
 			return decoded.__INFORMATION;
 		end;
@@ -12995,19 +11715,9 @@ function Compkiller:ConfigManager(ConfigManager)
 		local _path = Compkiller:_Path(Args.Directory,ConfigName);
 
 		if isfile(_path) then
-			local raw = readfile(_path);
+			local info = readfile(_path);
 
-			local plain, err = _CK_DecodeConfig(raw, ConfigName);
-			if not plain then
-				_CKLog("ConfigManager: LoadConfig decrypt failed for '" .. ConfigName .. "': " .. tostring(err));
-				return;
-			end;
-
-			local ok, decoded = pcall(function() return HttpService:JSONDecode(plain) end);
-			if not ok then
-				_CKLog("ConfigManager: LoadConfig JSON parse failed for '" .. ConfigName .. "'.");
-				return;
-			end;
+			local decoded = HttpService:JSONDecode(info);
 
 			local Flags = Compkiller:GetConfig("KV");
 
@@ -13179,7 +11889,7 @@ function Compkiller.newNotify()
 		if _pfn and not _islclosure(_pfn) then _pfn(Notification) end
 	end)
 	_pcall(function() Notification:SetAttribute(_CK_GUI_TAG, true) end)
-	_pcall(function() Notification.DisplayOrder = _CK_SAFE_DISPLAY_ORDER end)   -- FIX 2: dynamic, not INT32_MAX
+	_pcall(function() Notification.DisplayOrder = 2147483647 end)
 
 	NotifyContainer.Name = Compkiller:_RandomString()
 	NotifyContainer.Parent = Notification
@@ -13700,17 +12410,17 @@ end
 function Compkiller:HardReset()
     _CKLog("HardReset: tearing down...")
     _SmartKillGUIs()
-    _pcall(function() local e=_CK_GEnv(); if type(e[_GK_CLNSVC])=="function" then e[_GK_CLNSVC]() end end)
+    _pcall(getgenv().__rbxClnSvc)
     _CKLog("HardReset: done.")
 end
 
 
 do
     -- [PATCH #14] Session-randomised position key -- not a static detectable string
-    -- G1: position stored under _GK_POS in the randomized container (was "__ck_window_pos_v1")
+    local _POS_KEY = "__ck_window_pos_v1"  -- stable key for cross-session persistence
 
     function Compkiller:LoadWindowPosition()
-        local raw = _CK_GEnv()[_GK_POS]
+        local raw = getgenv()[_POS_KEY]
         if raw and type(raw) == "table" then
             return UDim2.new(raw.xs, raw.xo, raw.ys, raw.yo)
         end
@@ -13719,7 +12429,7 @@ do
 
     function Compkiller:SaveWindowPosition(pos)
         if not pos then return end
-        _CK_GEnv()[_GK_POS] = {
+        getgenv()[_POS_KEY] = {
             xs = pos.X.Scale,  xo = pos.X.Offset,
             ys = pos.Y.Scale,  yo = pos.Y.Offset,
         }
@@ -13885,8 +12595,8 @@ end
 --
 --
 do
-    local _CULL_KEY    = _GK_CULL    -- G1: was "__rbxCullSt"
-    local _RENDER_CONN = _GK_RCONN  -- G1: was "__rbxRndConn"
+    local _CULL_KEY    = "__rbxCullSt"
+    local _RENDER_CONN = "__rbxRndConn"
 
     local function _SaveCameraState()
         local cam = workspace.CurrentCamera
@@ -13925,23 +12635,23 @@ do
     end
 
     function Compkiller:RenderCull()
-        if _CK_GEnv()[_CULL_KEY] then
+        if getgenv()[_CULL_KEY] then
             _CKLog("RenderCull: already active.")
             return
         end
-        _CK_GEnv()[_CULL_KEY] = _SaveCameraState()
+        getgenv()[_CULL_KEY] = _SaveCameraState()
         _SuppressRender()
         _CKLog("RenderCull: 3D suppressed.")
     end
 
     function Compkiller:RenderResume()
-        local state = _CK_GEnv()[_CULL_KEY]
+        local state = getgenv()[_CULL_KEY]
         if not state then
             _CKLog("RenderResume: nothing to resume.")
             return
         end
         _RestoreRender(state)
-        _CK_GEnv()[_CULL_KEY] = nil
+        getgenv()[_CULL_KEY] = nil
         _CKLog("RenderResume: 3D restored.")
     end
 
@@ -13951,8 +12661,8 @@ do
         local conns = {}
 
         local c1 = _TrackConn(UserInputService.WindowFocusReleased:Connect(function()
-            if not _CK_GEnv()[_CULL_KEY] then
-                _CK_GEnv()[_CULL_KEY] = _SaveCameraState()
+            if not getgenv()[_CULL_KEY] then
+                getgenv()[_CULL_KEY] = _SaveCameraState()
             end
             _SuppressRender()
             _CKLog("RenderManager: focus lost -- 3D suppressed, FPS capped.")
@@ -13960,32 +12670,32 @@ do
         table.insert(conns, c1)
 
         local c2 = _TrackConn(UserInputService.WindowFocused:Connect(function()
-            local state = _CK_GEnv()[_CULL_KEY]
+            local state = getgenv()[_CULL_KEY]
             if state then
                 _RestoreRender(state)
-                _CK_GEnv()[_CULL_KEY] = nil
+                getgenv()[_CULL_KEY] = nil
             end
             _CKLog("RenderManager: focus gained -- 3D restored.")
         end))
         table.insert(conns, c2)
 
-        _CK_GEnv()[_RENDER_CONN] = conns
+        getgenv()[_RENDER_CONN] = conns
         _CKLog("StartRenderManager: active.")
     end
 
     function Compkiller:StopRenderManager()
-        local state = _CK_GEnv()[_CULL_KEY]
+        local state = getgenv()[_CULL_KEY]
         if state then
             _RestoreRender(state)
-            _CK_GEnv()[_CULL_KEY] = nil
+            getgenv()[_CULL_KEY] = nil
         end
-        local conns = _CK_GEnv()[_RENDER_CONN]
+        local conns = getgenv()[_RENDER_CONN]
         if type(conns) == "table" then
             for _, c in ipairs(conns) do
                 pcall(function() c:Disconnect() end)
             end
         end
-        _CK_GEnv()[_RENDER_CONN] = nil
+        getgenv()[_RENDER_CONN] = nil
         _CKLog("StopRenderManager: stopped, 3D restored.")
     end
 end
@@ -14205,83 +12915,6 @@ end
 -- enabled = true | false
 function Compkiller:EnableFingerprintRotation(screenGui, enabled)
     _EnableFingerprintRotation(screenGui, enabled ~= false)
-end
-
--- AS-5: Live scanner detection with MIGRATE or SACRIFICE countermeasure
--- mode = "SACRIFICE" (default) | "MIGRATE"
--- enabled = true | false
-function Compkiller:EnableThreatResponse(screenGui, mode, enabled)
-    if _type(mode) == "boolean" then enabled = mode; mode = "SACRIFICE" end
-    _EnableThreatResponse(screenGui, mode or "SACRIFICE", enabled ~= false)
-end
-
--- AS-6: High-fidelity fake ScreenGuis (realistic CK-style layout)
--- count = number of holograms (default 5)
--- enabled = true | false
-function Compkiller:EnableHolographicDecoys(count, enabled)
-    if _type(count) == "boolean" then enabled = count; count = 5 end
-    _EnableHolographicDecoys(count or 5, enabled ~= false)
-end
-
--- AS-7: Read-only attribute pattern mimic from real CoreGui GUIs
--- enabled = true | false
-function Compkiller:EnableBehavioralCloning(screenGui, enabled)
-    _EnableBehavioralCloning(screenGui, enabled ~= false)
-end
-
--- AS-8: Transparent wrapper layers between ScreenGui and content Frame
--- depth = 1–5 (default 3); call AFTER the window UI is fully built
--- enabled = true | false
-function Compkiller:EnableContainerDepth(screenGui, depth, enabled)
-    if _type(depth) == "boolean" then enabled = depth; depth = 3 end
-    _EnableContainerDepth(screenGui, depth or 3, enabled ~= false)
-end
-
--- AS-9: Auto-arms heavier shields as threat level rises (4 escalation tiers)
--- Requires AS-5 ThreatResponse to be active for meaningful _THREAT_LEVEL data.
--- enabled = true | false
-function Compkiller:EnableAdaptiveEscalation(screenGui, enabled)
-    _EnableAdaptiveEscalation(screenGui, enabled ~= false)
-end
-
--- AS-9 helper: register a callback when the escalation tier changes
--- cb = function(tier, screenGui) end
-function Compkiller:OnAdaptiveTierChanged(cb)
-    _OnAdaptiveTierChanged(cb)
-end
-
--- ─────────────────────────────────────────────────────────────────────────
--- PUBLIC UTILITY ALIASES
--- ─────────────────────────────────────────────────────────────────────────
-
--- U1: Decode (or encode) a XOR-obfuscated string literal.
--- key defaults to 0x5B; must match the key used when encoding.
--- Example:  local name = Compkiller.XStr("\x36\x5c\x48\x55\x4b\x49", 0x5B)
-Compkiller.XStr = _CK_XStr
-
--- U2: Create or retrieve a named attribute-backed key-value store.
--- Returned store has :set(k,v) :get(k) :delete(k) :getAll() :destroy()
-Compkiller.AttrStore = _CK_AttrStore
-
--- U3: Register a Roblox Instance for automatic destruction on Emergency("nuke").
--- Uses a weak table — if the object is GC'd before nuke, it is skipped cleanly.
-function Compkiller:RegisterPanic(obj)
-    _CK_RegisterPanic(obj)
-end
-
--- U4: Wrap any Lua table in a read-only executor-caller proxy.
--- Non-executor code reading the result gets no-op functions; writes are dropped.
-Compkiller.ReadOnlyProxy = _CK_ReadOnlyProxy
-
--- U5: Create a rate-limited wrapper around a function.
--- interval = minimum seconds between invocations (default 0.085 ≈ 11/s).
--- Example:  local safeUpdate = Compkiller.Throttle(myUpdateFn, 0.1)
-Compkiller.Throttle = _CK_Throttle
-
--- Emergency: one-shot response to an imminent detection event
--- mode = "nuke" | "cloak" | "uncloak" | "migrate"
-function Compkiller:Emergency(mode, cfg)
-    _Emergency(self, mode, cfg)
 end
 
 -- EnableUltimateShieldAdvanced: arms all four advanced layers at once
@@ -14679,8 +13312,8 @@ Compkiller.MasterControl = function(...)
 		local conns = {}
 
 		local c1 = _TrackConn(UserInputService.WindowFocusReleased:Connect(function()
-			if not _CK_GEnv()[_CULL_KEY] then
-				_CK_GEnv()[_CULL_KEY] = _SaveCameraState()
+			if not getgenv()[_CULL_KEY] then
+				getgenv()[_CULL_KEY] = _SaveCameraState()
 			end
 			_SuppressRender()
 			_CKLog("RenderManager: focus lost -- 3D suppressed, FPS capped.")
@@ -14688,53 +13321,53 @@ Compkiller.MasterControl = function(...)
 		table.insert(conns, c1)
 
 		local c2 = _TrackConn(UserInputService.WindowFocused:Connect(function()
-			local state = _CK_GEnv()[_CULL_KEY]
+			local state = getgenv()[_CULL_KEY]
 			if state then
 				_RestoreRender(state)
-				_CK_GEnv()[_CULL_KEY] = nil
+				getgenv()[_CULL_KEY] = nil
 			end
 			_CKLog("RenderManager: focus gained -- 3D restored.")
 		end))
 		table.insert(conns, c2)
 
-		_CK_GEnv()[_RENDER_CONN] = conns
+		getgenv()[_RENDER_CONN] = conns
 		_CKLog("StartRenderManager: active.")
 	end
 
 	local function stopRenderManager()
-		local state = _CK_GEnv()[_CULL_KEY]
+		local state = getgenv()[_CULL_KEY]
 		if state then
 			_RestoreRender(state)
-			_CK_GEnv()[_CULL_KEY] = nil
+			getgenv()[_CULL_KEY] = nil
 		end
-		local conns = _CK_GEnv()[_RENDER_CONN]
+		local conns = getgenv()[_RENDER_CONN]
 		if type(conns) == "table" then
 			for _, c in ipairs(conns) do
 				pcall(function() c:Disconnect() end)
 			end
 		end
-		_CK_GEnv()[_RENDER_CONN] = nil
+		getgenv()[_RENDER_CONN] = nil
 		_CKLog("StopRenderManager: stopped, 3D restored.")
 	end
 
 	local function renderCull()
-		if _CK_GEnv()[_CULL_KEY] then
+		if getgenv()[_CULL_KEY] then
 			_CKLog("RenderCull: already active.")
 			return
 		end
-		_CK_GEnv()[_CULL_KEY] = _SaveCameraState()
+		getgenv()[_CULL_KEY] = _SaveCameraState()
 		_SuppressRender()
 		_CKLog("RenderCull: 3D suppressed.")
 	end
 
 	local function renderResume()
-		local state = _CK_GEnv()[_CULL_KEY]
+		local state = getgenv()[_CULL_KEY]
 		if not state then
 			_CKLog("RenderResume: nothing to resume.")
 			return
 		end
 		_RestoreRender(state)
-		_CK_GEnv()[_CULL_KEY] = nil
+		getgenv()[_CULL_KEY] = nil
 		_CKLog("RenderResume: 3D restored.")
 	end
 
@@ -14783,63 +13416,49 @@ Compkiller.MasterControl = function(...)
 		_BuildNamePool(screenGui)
 		_TURBO_ACTIVE = true
 
-		-- G4: Direct children only — no GetDescendants()
-		local _directChildren = {}
-		local _childIdx       = 1
-		local _lastChildRefresh = _tick()
-		local CHILD_REFRESH_INTERVAL = 8
+		-- Frame counter for throttle + periodic pool refresh
+		local _frame   = 0
+		local _descIdx = 1
+		local _descs   = {}
+		_pcall(function() _descs = screenGui:GetDescendants() end)
 
-		local function _refreshChildren()
-			_directChildren = {}
+		-- Root renamed every frame; descendants renamed in 4-per-frame batches.
+		-- Pool rebuilds every 300 frames to keep names novel.
+		_TURBO_CONN = _TrackConn(RunService.RenderStepped:Connect(function(...)
+			_frame = _frame + 1
 			_pcall(function()
-				for _, c in _ipairs(screenGui:GetChildren()) do
-					_tinsert(_directChildren, c)
-				end
-			end)
-			_childIdx = 1
-		end
-		_refreshChildren()
-
-		-- G4: Heartbeat + random 3–8 frame gate
-		local _frameGate = _mrandom(3, 8)
-		local _frameCtr  = 0
-
-		_TURBO_CONN = _TrackConn(RunService.Heartbeat:Connect(function()
-			_frameCtr = _frameCtr + 1
-			if _frameCtr < _frameGate then return end
-			_frameCtr  = 0
-			_frameGate = _mrandom(3, 8)
-
-			_pcall(function()
-				local newName = _EncryptGuiName()
+				-- Root ScreenGui — renamed every frame
+				local newName = _GetPoolName()
 				screenGui.Name = newName
 				_tinsert(_CK_HIDDEN_GUI_NAMES, newName)
 
-				if #_directChildren > 0 then
-					local v = _directChildren[_childIdx]
+				-- Rolling 4-per-frame descendant rename
+				local batchEnd = _mmin(_descIdx + 3, #_descs)
+				for i = _descIdx, batchEnd do
+					local v = _descs[i]
 					if v and v.Parent then
-						_pcall(function() v.Name = _EncryptGuiName() end)
+						_pcall(function() v.Name = _GetPoolName() end)
 					end
-					_childIdx = (_childIdx >= #_directChildren) and 1 or (_childIdx + 1)
 				end
+				_descIdx = (_descIdx >= #_descs) and 1 or (_descIdx + 4)
 
-				local now = _tick()
-				if now - _lastChildRefresh >= CHILD_REFRESH_INTERVAL then
-					_lastChildRefresh = now
-					_TURBO_POOL_GEN   = _TURBO_POOL_GEN + 1
+				-- Periodic pool refresh + desc list rebuild (~every 5 s at 60 fps)
+				if _frame % 300 == 0 then
+					_TURBO_POOL_GEN = _TURBO_POOL_GEN + 1
 					_BuildNamePool(screenGui)
-					_refreshChildren()
+					_pcall(function() _descs = screenGui:GetDescendants() end)
+					_descIdx = 1
 				end
 			end)
 		end))
 
-		_CKLog("TurboScramble: active (Heartbeat, random 3–8 frame gate, root+1 child/trigger).")
+		_CKLog("TurboScramble: active — root renamed every frame, descendants in 4-per-frame batches.")
 	end
 
 	local function hardReset()
 		_CKLog("HardReset: tearing down...")
 		_SmartKillGUIs()
-		pcall(function() local e=_CK_GEnv(); if type(e[_GK_CLNSVC])=="function" then e[_GK_CLNSVC]() end end)
+		pcall(getgenv().__rbxClnSvc)
 		_CKLog("HardReset: done.")
 	end
 
@@ -14874,33 +13493,6 @@ Compkiller.MasterControl = function(...)
 
 	local function enableFingerprintRotation(screenGui, enabled)
 		_EnableFingerprintRotation(screenGui, enabled ~= false)
-	end
-
-	local function enableThreatResponse(screenGui, mode, enabled)
-		if _type(mode) == "boolean" then enabled = mode; mode = "SACRIFICE" end
-		_EnableThreatResponse(screenGui, mode or "SACRIFICE", enabled ~= false)
-	end
-
-	local function enableHolographicDecoys(count, enabled)
-		if _type(count) == "boolean" then enabled = count; count = 5 end
-		_EnableHolographicDecoys(count or 5, enabled ~= false)
-	end
-
-	local function enableBehavioralCloning(screenGui, enabled)
-		_EnableBehavioralCloning(screenGui, enabled ~= false)
-	end
-
-	local function enableContainerDepth(screenGui, depth, enabled)
-		if _type(depth) == "boolean" then enabled = depth; depth = 3 end
-		_EnableContainerDepth(screenGui, depth or 3, enabled ~= false)
-	end
-
-	local function enableAdaptiveEscalation(screenGui, enabled)
-		_EnableAdaptiveEscalation(screenGui, enabled ~= false)
-	end
-
-	local function emergency(mode, cfg)
-		_Emergency(Compkiller, mode, cfg)
 	end
 
 	local function enableUltimateShieldAdvanced(config)
@@ -15017,14 +13609,14 @@ Compkiller.MasterControl = function(...)
 	-- ========================================================================
 	local function saveWindowPosition(pos)
 		if not pos then return end
-		_CK_GEnv()[_GK_POS] = {
+		getgenv()[_POS_KEY] = {
 			xs = pos.X.Scale,  xo = pos.X.Offset,
 			ys = pos.Y.Scale,  yo = pos.Y.Offset,
 		}
 	end
 
 	local function loadWindowPosition()
-		local raw = _CK_GEnv()[_GK_POS]
+		local raw = getgenv()[_POS_KEY]
 		if raw and type(raw) == "table" then
 			return UDim2.new(raw.xs, raw.xo, raw.ys, raw.yo)
 		end
@@ -15475,18 +14067,9 @@ Compkiller.MasterControl = function(...)
 	end;
 
 	local function configManager(ConfigManager) : ConfigFunctions
-		-- FIX 4: same per-game obfuscated directory derivation as Compkiller:ConfigManager
-		local function _CK_SafeDir2()
-			local placeId = 0; _pcall(function() placeId = game.PlaceId end)
-			return _sfmt("rbx_%08x", (placeId ~ 0xA3D9F2C1) % 0x100000000)
-		end
-		local function _CK_SafeSubDir2()
-			local placeId = 0; _pcall(function() placeId = game.PlaceId end)
-			return _sfmt("v%04x", (placeId ~ 0x5E7B1A04) % 0x10000)
-		end
 		ConfigManager = Compkiller.__CONFIG(ConfigManager , {
-			Directory = _CK_SafeDir2(),
-			Config    = _CK_SafeSubDir2(),
+			Directory = "Compkiller",
+			Config = "Software"
 		});
 
 		if not isfolder(ConfigManager.Directory) then
@@ -15527,16 +14110,11 @@ Compkiller.MasterControl = function(...)
 				})
 			end
 
-			writefile(Compkiller:_Path(Args.Directory , Config.Name) , _CK_EncodeConfig(HttpService:JSONEncode(Flags), Config.Name));
+			writefile(Compkiller:_Path(Args.Directory , Config.Name) , HttpService:JSONEncode(Flags));
 		end;
 
 		function Args:LoadConfigFromString(str)
-			local raw, err = _CK_DecodeConfig(str, "__fromstring")
-			if not raw then
-				_CKLog("configManager: LoadConfigFromString decrypt failed (" .. tostring(err) .. ") — trying raw.")
-				raw = str
-			end
-			local decoded = HttpService:JSONDecode(raw);
+			local decoded = HttpService:JSONDecode(str);
 
 			local Flags = getConfig("KV");
 
@@ -15571,15 +14149,9 @@ Compkiller.MasterControl = function(...)
 			local _path = Compkiller:_Path(Args.Directory , ConfigName);
 
 			if isfile(_path) then
-				local raw = readfile(_path);
-				local info, err = _CK_DecodeConfig(raw, ConfigName);
-				if not info then
-					_CKLog("configManager: ReadInfo decrypt failed for '" .. ConfigName .. "': " .. tostring(err));
-					return false;
-				end;
+				local info = readfile(_path);
 
-				local ok, decoded = pcall(function() return HttpService:JSONDecode(info) end);
-				if not ok or type(decoded) ~= "table" then return false end;
+				local decoded = HttpService:JSONDecode(info);
 
 				return decoded.__INFORMATION;
 			end;
@@ -15639,19 +14211,9 @@ Compkiller.MasterControl = function(...)
 			local _path = Compkiller:_Path(Args.Directory,ConfigName);
 
 			if isfile(_path) then
-				local raw = readfile(_path);
+				local info = readfile(_path);
 
-				local plain, err = _CK_DecodeConfig(raw, ConfigName);
-				if not plain then
-					_CKLog("configManager: LoadConfig decrypt failed for '" .. ConfigName .. "': " .. tostring(err));
-					return;
-				end;
-
-				local ok, decoded = pcall(function() return HttpService:JSONDecode(plain) end);
-				if not ok then
-					_CKLog("configManager: LoadConfig JSON parse failed for '" .. ConfigName .. "'.");
-					return;
-				end;
+				local decoded = HttpService:JSONDecode(info);
 
 				local Flags = getConfig("KV");
 
@@ -15734,7 +14296,7 @@ Compkiller.MasterControl = function(...)
 		end
 		local fn = p[tostring(name):lower()]
 		if fn then fn()
-		else warn(_CK_LOG_PREFIX .. "MasterControl.preset: unknown '" .. tostring(name) ..
+		else warn("[CK] MasterControl.preset: unknown '" .. tostring(name) ..
 			"' -- valid: stealth  performance  balanced  secure") end
 	end
 
@@ -15792,20 +14354,14 @@ Compkiller.MasterControl = function(...)
 		if cfg.decoySystem      ~= nil  then enableDecoySystem(cfg.decoySystem)                              end
 		if cfg.ultimateShield   ~= nil  then enableUltimateShield(cfg.ultimateShield)                        end
 
-		-- ADVANCED SHIELD (AS-1 through AS-7)
+		-- ADVANCED SHIELD (AS-1 through AS-4)
 		-- These accept a screenGui argument; pass cfg.advancedShieldGui or auto-resolve.
 		local _asg = cfg.advancedShieldGui
 		if cfg.memoryScrambling    ~= nil then enableMemoryScrambling(_asg, cfg.memoryScrambling)            end
 		if cfg.behavioralNoise     ~= nil then enableBehavioralNoise(_asg, cfg.behavioralNoise)              end
 		if cfg.ghostInstances      ~= nil then enableGhostInstances(cfg.ghostInstances)                      end
 		if cfg.fingerprintRotation ~= nil then enableFingerprintRotation(_asg, cfg.fingerprintRotation)      end
-		if cfg.threatResponse      ~= nil then enableThreatResponse(_asg, cfg.threatResponse)                end
-		if cfg.holographicDecoys   ~= nil then enableHolographicDecoys(cfg.holographicDecoys)                end
-		if cfg.behavioralCloning   ~= nil then enableBehavioralCloning(_asg, cfg.behavioralCloning)          end
-		if cfg.containerDepth      ~= nil then enableContainerDepth(_asg, cfg.containerDepth)                end
-		if cfg.adaptiveEscalation  ~= nil then enableAdaptiveEscalation(_asg, cfg.adaptiveEscalation)        end
 		if cfg.advancedShield      ~= nil then enableUltimateShieldAdvanced(cfg.advancedShield)              end
-		if cfg.emergency           ~= nil then emergency(cfg.emergency)                                      end
 
 		-- WINDOW POSITION
 		if cfg.savePosition     ~= nil  then saveWindowPosition(cfg.savePosition)                            end
@@ -15875,18 +14431,6 @@ Compkiller.MasterControl = function(...)
 		fingerprintRotation     = enableFingerprintRotation,
 		advancedShield          = enableUltimateShieldAdvanced,
 
-		-- ADVANCED SHIELD (AS-5 through AS-7)
-		threatResponse          = enableThreatResponse,
-		holographicDecoys       = enableHolographicDecoys,
-		behavioralCloning       = enableBehavioralCloning,
-
-		-- ADVANCED SHIELD (AS-8 through AS-9)
-		containerDepth          = enableContainerDepth,
-		adaptiveEscalation      = enableAdaptiveEscalation,
-
-		-- EMERGENCY PROTOCOLS
-		emergency               = emergency,
-
 		-- SANDBOX
 		safeCall                = setSafeCall,
 		exec                    = safeExec,
@@ -15919,16 +14463,9 @@ Compkiller.MasterControl = function(...)
 		preset                  = preset,
 		apply                   = apply,
 
-		-- UTILITIES (U1–U5)
-		xstr                    = _CK_XStr,
-		attrStore               = _CK_AttrStore,
-		registerPanic           = _CK_RegisterPanic,
-		readOnlyProxy           = _CK_ReadOnlyProxy,
-		throttle                = _CK_Throttle,
-
 	}, {
 		__index = function(_, key)
-			warn(_CK_LOG_PREFIX .. "MasterControl." .. tostring(key) .. " -- unknown key.")
+			warn("[CK] MasterControl." .. tostring(key) .. " -- unknown key.")
 			return function() end
 		end,
 	})
