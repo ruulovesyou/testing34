@@ -1,8 +1,79 @@
-
-
 if not game:IsLoaded() then
     game.Loaded:Wait()
 end
+
+do
+    -- ── [SE-1] Four opaque keys — random integers, never static strings ───────
+    local _CK_LOCK_KEY  = "\0\0__cklk_" .. tostring(math.random(100000000, 999999999))
+    local _CK_KILL_KEY  = "\0\0__ckkl_" .. tostring(math.random(100000000, 999999999))
+    local _CK_VER_KEY   = "\0\0__ckv_"  .. tostring(math.random(100000000, 999999999))
+    local _CK_META_PTR  = "\0\0__ckmp"  -- single fixed meta-pointer (value is the key-table)
+
+    -- ── [SE-2] Tear down any previous execution ───────────────────────────────
+    pcall(function()
+        local _env = getgenv()
+        local prev = _env[_CK_META_PTR]
+        if type(prev) ~= "table" then return end
+
+        -- Kill all threads / tweens / connections / GUIs from the old run
+        local oldKillFn = _env[prev.kk]
+        if type(oldKillFn) == "function" then
+            pcall(oldKillFn)   -- full teardown: mirrors what _CLN_KEY does
+        end
+
+        -- Clear old keys
+        _env[prev.lk] = nil
+        _env[prev.kk] = nil
+        _env[prev.vk] = nil
+        _env[_CK_META_PTR] = nil
+    end)
+
+    -- ── [SE-3] Arm THIS execution's lock and meta-pointer ────────────────────
+    pcall(function()
+        local _env = getgenv()
+        _env[_CK_LOCK_KEY] = true
+        _env[_CK_VER_KEY]  = tostring(math.floor(tick()))
+        _env[_CK_META_PTR] = { lk = _CK_LOCK_KEY, kk = _CK_KILL_KEY, vk = _CK_VER_KEY }
+    end)
+
+    -- Bridge: lets the _CLN_KEY registration block (later in file) write the
+    -- kill-fn into getgenv() under the correct opaque key without needing
+    -- _CK_KILL_KEY in scope at that point.
+    -- [SE-3b] Bridge key itself is also opaque
+    local _CK_BRIDGE_KK = "\0\0_ckbkk_" .. tostring(math.random(100000000, 999999999))
+    local _CK_BRIDGE_LC = "\0\0_ckblc_" .. tostring(math.random(100000000, 999999999))
+    rawset(_G, _CK_BRIDGE_KK, _CK_KILL_KEY)
+    -- Store bridge key refs in meta so SE-4 and SE-5 can find them
+    pcall(function()
+        local m = getgenv()["\0\0__ckmp"]
+        if type(m) == "table" then
+            m.bkk = _CK_BRIDGE_KK
+            m.blc = _CK_BRIDGE_LC
+        end
+    end)
+
+    -- ── [SE-4] Shield — Heartbeat lock watcher ───────────────────────────────
+    --   Re-arms the lock if anything external clears it.
+    --   Uses task.spawn so it doesn't stall boot.
+    --   The connection is stored under an opaque bridge key and absorbed into
+    --   _CK_CONNECTIONS once that table exists (done right after this block).
+    task.spawn(function()
+        local _env   = getgenv()
+        local _lk    = _CK_LOCK_KEY
+        local _vk    = _CK_VER_KEY
+        local _stamp = _env[_vk]
+        local RunSvc = game:GetService("RunService")
+        rawset(_G, _CK_BRIDGE_LC,
+            RunSvc.Heartbeat:Connect(function()
+                -- Stop watching once our version stamp is gone (legitimate teardown)
+                if _env[_vk] ~= _stamp then return end
+                -- Re-arm silently if wiped externally
+                if not _env[_lk] then _env[_lk] = true end
+            end)
+        )
+    end)
+end
+-- ============================================================================
 
 do
     -- -- unpack (table.unpack is Lua 5.2+, some executors only have global unpack) --
@@ -404,6 +475,23 @@ end
 local _CK_CONNECTIONS = {}
 local _CK_THREADS     = {}
 
+-- [SE-4 bridge] The lock-watcher connection was spawned before _CK_CONNECTIONS
+-- existed. Pull it in now so it gets disconnected on teardown.
+pcall(function()
+    -- Pull SE-4 lock-watcher conn using opaque bridge key from meta
+    pcall(function()
+        local _env  = getgenv()
+        local _meta = _env["\0\0__ckmp"]
+        if type(_meta) ~= "table" or not _meta.blc then return end
+        local conn2 = rawget(_G, _meta.blc)
+        if conn2 then
+            table.insert(_CK_CONNECTIONS, conn2)
+            rawset(_G, _meta.blc, nil)
+        end
+    end)
+    end
+end)
+
 local function _ckTrackThread(thread)
     if _type(thread) == "thread" then
         local live = {}
@@ -629,6 +717,30 @@ do
     _GUI_PARENT, _GUI_SHIELD_METHOD, _GUI_SHIELD_QUALITY = _FindSafeParent()
     _CKLog(_sfmt("GUI Shield: parent='%s' quality=%d", _GUI_SHIELD_METHOD, _GUI_SHIELD_QUALITY))
 
+-- [STEALTH-DO] Safe DisplayOrder — never use INT32_MAX (universal fingerprint).
+-- Sample the highest legitimate order present in parent + 1.
+-- Re-sampled every 90s so late-spawning game GUIs don't overtake us.
+local _CK_SAFE_DO = 500  -- pre-boot fallback
+local function _ComputeSafeDisplayOrder()
+    local maxFound = 0
+    _pcall(function()
+        for _, v in _ipairs((_GUI_PARENT or CoreGui):GetChildren()) do
+            local ok, ord = _pcall(function() return v.DisplayOrder end)
+            if ok and _type(ord) == "number" and ord > maxFound and ord < 2000000000 then
+                maxFound = ord
+            end
+        end
+    end)
+    _CK_SAFE_DO = maxFound + 1
+end
+_pcall(_ComputeSafeDisplayOrder)
+_ckSpawn(function()
+    while true do
+        task.wait(90 + _mrandom(-12, 12))
+        _pcall(_ComputeSafeDisplayOrder)
+    end
+end)
+
     -- Periodic re-check every 5 minutes — rescues parent if it gets destroyed
     _ckSpawn(function()
         while true do
@@ -703,7 +815,7 @@ local function _ReApplyShield(screenGui)
     end)
     -- 3. Force correct parent, order, and enabled state
     _safeSet(screenGui, "Parent",       _GUI_PARENT)
-    _safeSet(screenGui, "DisplayOrder", 2147483647)
+    _safeSet(screenGui, "DisplayOrder", _CK_SAFE_DO)
     _safeSet(screenGui, "ResetOnSpawn", false)
     _safeSet(screenGui, "Enabled",      true)
 end
@@ -745,9 +857,9 @@ local function _StartGuiIntegrityMonitor(screenGui)
             end)
         end,
         DisplayOrder = function()
-            if screenGui.DisplayOrder ~= 2147483647 then
+            if screenGui.DisplayOrder ~= _CK_SAFE_DO then
                 _debouncedFix("DisplayOrder", function()
-                    _safeSet(screenGui, "DisplayOrder", 2147483647)
+                    _safeSet(screenGui, "DisplayOrder", _CK_SAFE_DO)
                     _CKLog("GuiIntegrity: DisplayOrder tampered — restored.")
                 end)
             end
@@ -798,6 +910,9 @@ local function _StartGuiIntegrityMonitor(screenGui)
                 _pcall(function() c:Disconnect() end)
             end
             _CK_INTEGRITY_CONNS = {}
+            -- Release canary and shadow on clean destroy
+            _pcall(function() _DisarmCanary(screenGui) end)
+            _pcall(function() _ReleaseShadow(screenGui) end)
             task.defer(function()
                 _pcall(function() _ReApplyShield(screenGui) end)
                 _CKLog("GuiIntegrity: Destroying intercepted — re-shielded via defer.")
@@ -1040,8 +1155,8 @@ pcall(function()
 end)
 
 local function _ShieldParent(screenGui)
-    -- ── 1. Pin DisplayOrder to INT32_MAX — game UI can never render on top ───
-    _pcall(function() screenGui.DisplayOrder = 2147483647 end)
+    -- ── 1. Pin DisplayOrder to sampled safe value (not INT32_MAX fingerprint) ───
+    _pcall(function() screenGui.DisplayOrder = _CK_SAFE_DO end)
     _pcall(function() screenGui.ResetOnSpawn = false      end)
     _pcall(function() screenGui.Enabled      = true       end)
 
@@ -1100,7 +1215,13 @@ local function _ShieldParent(screenGui)
     -- ── 5. Tag with a hidden attribute — used by _SmartKillGUIs ──────────────
     _pcall(function() screenGui:SetAttribute(_CK_GUI_TAG, true) end)
 
-    -- ── 6. Start the integrity monitor (dual-layer: events + heartbeat poll) ──
+    -- ── 6. Arm the silent canary (Layer 7) ──────────────────────────────────
+    _pcall(function() _ArmCanary(screenGui) end)
+
+    -- ── 7a. Register executor shadow reference (Layer 8) ────────────────────
+    _pcall(function() _RegisterShadow(screenGui) end)
+
+    -- ── 7b. Start the integrity monitor (dual-layer: events + heartbeat poll) ──
     --   The integrity monitor handles re-parenting if anything moves the GUI,
     --   making a __namecall hook on the instance metatable unnecessary.
     --   (Such hooks are detected by ACs via getrawmetatable(instance).__namecall
@@ -1135,88 +1256,102 @@ local function _RecordTamper(screenGui)
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
--- GUI SHIELD v2 — LAYER 4: DECOY & HONEYPOT SYSTEM
--- Creates convincing fake ScreenGuis to distract AC scanners and logs
--- any game-side code that accesses the honeypot via __index interception.
+-- GUI SHIELD v2 — LAYER 7: SILENT CANARY + ATTRIBUTE VAULT
+--
+-- Replaces the removed AS-1/AS-2/AS-3 systems with a zero-footprint approach:
+--
+--  Canary    — One attribute written under a random encrypted name.  Its value
+--              is a random hash only this run knows.  If any external code
+--              changes or removes it, the integrity monitor fires immediately
+--              and re-shields.  No static key, no readable pattern.
+--
+--  Vault     — All internal shield metadata (parent stamp, version) is stored
+--              as attributes under _EncryptGuiName() keys — indistinguishable
+--              from any other Roblox service attribute.
+--
+--  No writes — This system writes nothing beyond the two vault attrs.
+--              No rotating attrs, no dummy folders, no heartbeat tickers.
+--              A scanner watching AttributeChanged sees a flat stable GUI.
 -- ════════════════════════════════════════════════════════════════════════════
-local _DECOY_GUIS   = {}
-local _DECOY_THREAD = nil
+local _CANARY_REGISTRY = {}   -- [tostring(gui)] = { key, value, vaultKey }
 
-local function _MakeDecoy()
-    local decoy = Instance.new("ScreenGui")
-    decoy.Name           = _EncryptGuiName()
-    decoy.DisplayOrder   = _mrandom(1, 1000)
-    decoy.ResetOnSpawn   = false
-    decoy.IgnoreGuiInset = true
+local function _ArmCanary(screenGui)
+    local key     = _EncryptGuiName()                        -- opaque attr name
+    local vaultKey= _EncryptGuiName()                        -- opaque vault name
+    local secret  = _sfmt("%08x%08x", _mrandom(0,0x7FFFFFFF), _mrandom(0,0x7FFFFFFF))
 
-    local frame = Instance.new("Frame")
-    frame.Size             = UDim2.new(0, _mrandom(100,300), 0, _mrandom(100,300))
-    frame.Position         = UDim2.new(_mrandom()*0.7, 0, _mrandom()*0.7, 0)
-    frame.BackgroundColor3 = Color3.fromRGB(_mrandom(10,50), _mrandom(10,50), _mrandom(10,50))
-    frame.BorderSizePixel  = 0
-    frame.Parent           = decoy
+    _pcall(function() screenGui:SetAttribute(key, secret) end)
+    _pcall(function() screenGui:SetAttribute(vaultKey,
+        _sfmt("%d", math.floor(tick()))) end)
 
-    local btn = Instance.new("TextButton")
-    btn.Size     = UDim2.new(0, 80, 0, 24)
-    btn.Position = UDim2.new(0.5,-40, 0.5,-12)
-    btn.Text     = "Button " .. _mrandom(1, 99)
-    btn.Parent   = frame
+    local entry = { key = key, value = secret, vaultKey = vaultKey }
+    _CANARY_REGISTRY[_tostring(screenGui)] = entry
 
-    _pcall(function() decoy.Parent = CoreGui end)
-    _pcall(function() decoy:SetAttribute("__ckDecoy", true) end)
-    return decoy
-end
-
-local function _MakeHoneypot()
-    local hp = Instance.new("ScreenGui")
-    hp.Name          = "RbxHoneypot_" .. _sfmt("%x", _mrandom(0, 0xFFFFFF))
-    hp.DisplayOrder  = _mrandom(1, 500)
-    hp.ResetOnSpawn  = false
-
-    _pcall(function()
-        local mt = _getrawmetatable(hp)
-        if not mt then return end
-        local oldIndex = mt.__index
-        _setreadonly(mt, false)
-        mt.__index = _newcclosure(function(self, key)
-            if not _checkcaller() then
-                _CKLog(_sfmt("HONEYPOT: game-side access key='%s'", _tostring(key)))
+    -- Watch the canary attribute — fires only on actual external change
+    local conn = _pcall(function()
+        return screenGui:GetAttributeChangedSignal(key):Connect(function()
+            local current = screenGui:GetAttribute(key)
+            if current ~= secret then
+                -- Tamper detected — re-arm canary and re-shield
+                _pcall(function() screenGui:SetAttribute(key, secret) end)
+                _CKLog("Canary [L7]: attribute tampered — re-armed.")
+                _pcall(function() _ReApplyShield(screenGui) end)
             end
-            return oldIndex(self, key)
         end)
-        _setreadonly(mt, true)
     end)
+    if _type(conn) ~= "boolean" then
+        _tinsert(_CK_INTEGRITY_CONNS, conn)
+        _tinsert(_CK_CONNECTIONS, conn)
+    end
 
-    _pcall(function() hp.Parent = CoreGui end)
-    _CKLog("GUI Shield: honeypot deployed — " .. hp.Name)
-    return hp
+    _CKLog("Canary [L7]: armed with opaque key.")
 end
 
-local function _EnableDecoySystem(enabled)
-    if enabled == false then
-        if _DECOY_THREAD then _ckCancel(_DECOY_THREAD); _DECOY_THREAD = nil end
-        for _, d in _ipairs(_DECOY_GUIS) do _safeDestroy(d) end
-        _DECOY_GUIS = {}
-        _CKLog("GUI Shield: decoy system disabled.")
-        return
+local function _DisarmCanary(screenGui)
+    local key = _tostring(screenGui)
+    local entry = _CANARY_REGISTRY[key]
+    if entry then
+        _pcall(function() screenGui:SetAttribute(entry.key,     nil) end)
+        _pcall(function() screenGui:SetAttribute(entry.vaultKey,nil) end)
+        _CANARY_REGISTRY[key] = nil
     end
-    if #_DECOY_GUIS > 0 then
-        _CKLog("GUI Shield: decoy system already active.")
-        return
-    end
-    for _ = 1, 3 do _tinsert(_DECOY_GUIS, _MakeDecoy()) end
-    _MakeHoneypot()
-    -- Rotate every 5 minutes
-    _DECOY_THREAD = _ckSpawn(function()
-        while true do
-            task.wait(300)
-            for _, d in _ipairs(_DECOY_GUIS) do _safeDestroy(d) end
-            _DECOY_GUIS = {}
-            for _ = 1, 3 do _tinsert(_DECOY_GUIS, _MakeDecoy()) end
-            _CKLog("GUI Shield: decoys rotated.")
+end
+
+-- ════════════════════════════════════════════════════════════════════════════
+-- GUI SHIELD v2 — LAYER 8: EXECUTOR SHADOW REFERENCE
+--
+-- Stores the real ScreenGui reference in getgenv() under a session-random
+-- opaque key.  If anything destroys the GUI, the Destroying connection
+-- immediately re-parents the shadow reference back into the safe parent.
+--
+-- Key is stored in the SE meta-table so it survives re-execution cleanup.
+-- Zero readable strings — entirely opaque to both game and scanning tools.
+-- ════════════════════════════════════════════════════════════════════════════
+local _SHADOW_REGISTRY = {}   -- [tostring(gui)] = opaque getgenv key
+
+local function _RegisterShadow(screenGui)
+    local shadowKey = "\0\0_ckshadow_" .. tostring(_mrandom(100000000, 999999999))
+    _pcall(function() getgenv()[shadowKey] = screenGui end)
+    _SHADOW_REGISTRY[_tostring(screenGui)] = shadowKey
+
+    -- Store the key in meta so teardown can clean it
+    _pcall(function()
+        local _meta = getgenv()["\0\0__ckmp"]
+        if type(_meta) == "table" then
+            if not _meta.shadows then _meta.shadows = {} end
+            _tinsert(_meta.shadows, shadowKey)
         end
     end)
-    _CKLog("GUI Shield: decoy system active (3 decoys + 1 honeypot).")
+    _CKLog("Shadow [L8]: reference registered.")
+end
+
+local function _ReleaseShadow(screenGui)
+    local key = _SHADOW_REGISTRY[_tostring(screenGui)]
+    if key then
+        _pcall(function() getgenv()[key] = nil end)
+        _SHADOW_REGISTRY[_tostring(screenGui)] = nil
+        _CKLog("Shadow [L8]: reference released.")
+    end
 end
 
 -- ════════════════════════════════════════════════════════════════════════════
@@ -1230,7 +1365,7 @@ local _HEAL_FRAME    = 0
 local _HEAL_INTERVAL = 300  -- frames (~5 s @ 60 fps)
 
 local function _RegisterForHealing(screenGui)
-    local snap = { gui = screenGui, parent = _GUI_PARENT, order = 2147483647 }
+    local snap = { gui = screenGui, parent = _GUI_PARENT, order = _CK_SAFE_DO }
     _tinsert(_HEAL_REGISTRY, snap)
 
     if _HEAL_CONN then return end   -- single shared connection
@@ -1278,10 +1413,7 @@ local function _EnableUltimateShield(self, config)
         results.integrityMonitor = "active"
         results.tamperCounter    = "active"
         results.childGuard       = "active"
-        if config.decoys ~= false then
-            _EnableDecoySystem(true)
-            results.decoySystem = "active"
-        end
+
     end
 
     if level == "MAXIMUM" then
@@ -1311,229 +1443,11 @@ end
 
 
 -- ╔══════════════════════════════════════════════════════════════════════════╗
--- ║          ADVANCED SHIELD SUITE  (separate from core L1–L6)             ║
+-- ║          ADVANCED SHIELD SUITE  (separate from core L1–L8)             ║
 -- ║                                                                          ║
--- ║  These techniques are OPTIONAL and independent of EnableUltimateShield. ║
--- ║  Enable individually or via EnableUltimateShieldAdvanced().             ║
--- ║                                                                          ║
--- ║  Included:                                                               ║
--- ║    AS-1  Memory Scrambling   — rotating dummy attrs/folders in memory    ║
--- ║    AS-2  Behavioral Noise    — benign attribute heartbeat mimic          ║
--- ║    AS-3  Ghost Instances     — self-destructing honeypot decoys          ║
--- ║    AS-4  Fingerprint Rotation — name mimics known-safe Roblox strings   ║
--- ║                                                                          ║
--- ║  NOT included (unsafe / ineffective):                                   ║
--- ║    ✗  Polymorphic GUI    — destroys live tab/element references          ║
--- ║    ✗  Dimensional Rift  — GUI:Clone() into Chat/Camera is detectable    ║
--- ║    ✗  Temporal Paradox  — sets Enabled=false, breaks visible UI         ║
--- ║    ✗  Quantum Entangle  — name-swapping between windows adds no value   ║
--- ║    ✗  Neural Naming     — random matrix multiply produces garbage names  ║
--- ║    ✗  Quantum Naming    — absorbed into existing 6-pattern _EncryptGuiName
+-- ║  AS-4  Fingerprint Rotation — name blends with known-safe Roblox GUIs  ║
+-- ║         Interval: 50–100s randomised. Zero attribute writes.            ║
 -- ╚══════════════════════════════════════════════════════════════════════════╝
-
--- ════════════════════════════════════════════════════════════════════════════
--- ADVANCED SHIELD AS-1: MEMORY SCRAMBLING
--- Rotates dummy attributes and short-lived Folder children on the ScreenGui
--- at random intervals, making stable memory-pattern scans unreliable.
--- Notes vs. original:
---   • All-caps name pattern replaced with CK-tagged attribute so the
---     removal sweep cannot accidentally nuke real children.
---   • Thread tracked via _ckSpawn so it is cancelled by __rbxClnSvc.
---   • Dummy Folder lifetime clamped 8–25 s (original 5–30 s is fine;
---     narrowed slightly for more predictable GC pressure).
--- ════════════════════════════════════════════════════════════════════════════
-local _MEM_SCRAMBLE_THREADS = {}   -- keyed by tostring(screenGui)
-
-local function _ScrambleGuiMemory(screenGui)
-    -- Rotate 8 dummy attributes with random short strings
-    for i = 1, 8 do
-        local val = _sfmt("%x%x", _mrandom(0, 0xFFFF), _mrandom(0, 0xFFFF))
-        _pcall(function() screenGui:SetAttribute("_cksig" .. i, val) end)
-    end
-
-    -- Spawn 3 short-lived Folder children tagged so the removal sweep is precise
-    for _ = 1, 3 do
-        _ckSpawn(function()
-            local dummy = Instance.new("Folder")
-            dummy.Name = _EncryptGuiName()
-            _pcall(function() dummy:SetAttribute("__ckDummy", true) end)
-            _pcall(function() dummy.Parent = screenGui end)
-            task.wait(_mrandom(8, 25))
-            _safeDestroy(dummy)
-        end)
-    end
-end
-
-local function _EnableMemoryScrambling(screenGui, enabled)
-    local key = _tostring(screenGui)
-
-    if enabled == false then
-        local t = _MEM_SCRAMBLE_THREADS[key]
-        if t then _ckCancel(t); _MEM_SCRAMBLE_THREADS[key] = nil end
-        -- Remove any surviving dummy children
-        _pcall(function()
-            for _, child in _ipairs(screenGui:GetChildren()) do
-                if child:GetAttribute("__ckDummy") then _safeDestroy(child) end
-            end
-        end)
-        _CKLog("AS-1 MemoryScramble: disabled.")
-        return
-    end
-
-    if _MEM_SCRAMBLE_THREADS[key] then
-        _CKLog("AS-1 MemoryScramble: already active.")
-        return
-    end
-
-    _ScrambleGuiMemory(screenGui)   -- initial pass
-
-    _MEM_SCRAMBLE_THREADS[key] = _ckSpawn(function()
-        while true do
-            task.wait(_mrandom(12, 30))   -- random interval defeats timing-based scans
-            _pcall(function() _ScrambleGuiMemory(screenGui) end)
-        end
-    end)
-
-    _CKLog("AS-1 MemoryScramble: active (attrs + rotating dummy children).")
-end
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- ADVANCED SHIELD AS-2: BEHAVIORAL NOISE
--- Periodically writes a benign "LastHeartbeat" attribute to the ScreenGui,
--- mimicking the pattern of legitimate Roblox service GUIs that stamp
--- a heartbeat timestamp.  The original version also randomly disabled/
--- re-enabled the GUI and jittered its position — both removed here because
--- they break the visible UI and are more detectable than plain attributes.
--- ════════════════════════════════════════════════════════════════════════════
-local _BEHAVIOR_THREADS = {}
-
-local function _EnableBehavioralNoise(screenGui, enabled)
-    local key = _tostring(screenGui)
-
-    if enabled == false then
-        local t = _BEHAVIOR_THREADS[key]
-        if t then _ckCancel(t); _BEHAVIOR_THREADS[key] = nil end
-        _pcall(function() screenGui:SetAttribute("LastHeartbeat", nil) end)
-        _CKLog("AS-2 BehavioralNoise: disabled.")
-        return
-    end
-
-    if _BEHAVIOR_THREADS[key] then
-        _CKLog("AS-2 BehavioralNoise: already active.")
-        return
-    end
-
-    _BEHAVIOR_THREADS[key] = _ckSpawn(function()
-        while true do
-            -- Randomised interval (0.4–1.2 s) so the stamp rate isn't
-            -- a fixed fingerprint itself.
-            task.wait(0.4 + _mrandom() * 0.8)
-            _pcall(function()
-                screenGui:SetAttribute("LastHeartbeat", _tick())
-                -- Also rotate a "FrameCount" attribute to simulate an update loop
-                local fc = screenGui:GetAttribute("_ckFC") or 0
-                screenGui:SetAttribute("_ckFC", fc + 1)
-            end)
-        end
-    end)
-
-    _CKLog("AS-2 BehavioralNoise: active (heartbeat attribute mimic).")
-end
-
-
--- ════════════════════════════════════════════════════════════════════════════
--- ADVANCED SHIELD AS-3: GHOST INSTANCES
--- Maintains a pool of 5 ScreenGuis in CoreGui that self-destruct the moment
--- any non-executor code reads a property on them (via __index hook).
--- The pool is replenished within 10 s so the apparent density stays constant.
--- Changes vs. original:
---   • Uses _ckSpawn so all threads are cleaned up by __rbxClnSvc.
---   • __index hook only fires on the instance itself, not the class metatable,
---     avoiding the "hook shared metatable" footprint.
---   • Liveness check uses _pcall(.ClassName) pattern consistent with rest of lib.
--- ════════════════════════════════════════════════════════════════════════════
-local _GHOST_POOL       = {}
-local _GHOST_THREAD     = nil
-local _GHOST_TARGET     = 5
-
-local function _SpawnGhost()
-    local ghost = Instance.new("ScreenGui")
-    ghost.Name          = _EncryptGuiName()
-    ghost.DisplayOrder  = _mrandom(1, 800)
-    ghost.ResetOnSpawn  = false
-
-    -- Lightweight fake content
-    local f = Instance.new("Frame")
-    f.Size             = UDim2.new(0, _mrandom(80,250), 0, _mrandom(80,250))
-    f.Position         = UDim2.new(_mrandom()*0.6, 0, _mrandom()*0.6, 0)
-    f.BackgroundColor3 = Color3.fromRGB(_mrandom(15,45), _mrandom(15,45), _mrandom(15,45))
-    f.BorderSizePixel  = 0
-    f.Parent           = ghost
-
-    -- Per-instance __index hook (not the class metatable — avoids shared contamination)
-    _pcall(function()
-        local mt = _getrawmetatable(ghost)
-        if not mt then return end
-        local oldIndex = _rawget(mt, "__index")
-        if not oldIndex then return end
-
-        _setreadonly(mt, false)
-        mt.__index = _newcclosure(function(self, key)
-            -- Non-executor read → self-destruct
-            if not _checkcaller() then
-                _CKLog("AS-3 Ghost: scanned (key='" .. _tostring(key) .. "') — self-destructing.")
-                _ckSpawn(function() _safeDestroy(ghost) end)
-            end
-            return oldIndex(self, key)
-        end)
-        _setreadonly(mt, true)
-    end)
-
-    _pcall(function() ghost.Parent = CoreGui end)
-    return ghost
-end
-
-local function _EnableGhostInstances(enabled)
-    if enabled == false then
-        if _GHOST_THREAD then _ckCancel(_GHOST_THREAD); _GHOST_THREAD = nil end
-        for _, g in _ipairs(_GHOST_POOL) do _safeDestroy(g) end
-        _GHOST_POOL = {}
-        _CKLog("AS-3 GhostInstances: disabled.")
-        return
-    end
-
-    if _GHOST_THREAD then
-        _CKLog("AS-3 GhostInstances: already active.")
-        return
-    end
-
-    -- Seed initial pool
-    for _ = 1, _GHOST_TARGET do
-        _tinsert(_GHOST_POOL, _SpawnGhost())
-    end
-
-    -- Maintenance thread — prune dead, replenish to target count
-    _GHOST_THREAD = _ckSpawn(function()
-        while true do
-            task.wait(10)
-            _pcall(function()
-                for i = #_GHOST_POOL, 1, -1 do
-                    local alive = _pcall(function() local _ = _GHOST_POOL[i].ClassName end)
-                    if not alive or not _GHOST_POOL[i].Parent then
-                        _tremove(_GHOST_POOL, i)
-                    end
-                end
-                while #_GHOST_POOL < _GHOST_TARGET do
-                    _tinsert(_GHOST_POOL, _SpawnGhost())
-                end
-            end)
-        end
-    end)
-
-    _CKLog(_sfmt("AS-3 GhostInstances: active (%d ghosts — self-destruct on scan).", _GHOST_TARGET))
-end
-
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- ADVANCED SHIELD AS-4: FINGERPRINT ROTATION
@@ -1630,25 +1544,18 @@ local function _EnableUltimateShieldAdvanced(self, config)
 
     local results = {}
 
-    if config.memoryScrambling ~= false then
-        _EnableMemoryScrambling(screenGui, true)
-        results.memoryScrambling = "active"
-    end
-
-    if config.behavioralNoise ~= false then
-        _EnableBehavioralNoise(screenGui, true)
-        results.behavioralNoise = "active"
-    end
-
-    if config.ghostInstances ~= false then
-        _EnableGhostInstances(true)
-        results.ghostInstances = "active"
-    end
-
     if config.fingerprintRotation ~= false then
         _EnableFingerprintRotation(screenGui, true)
         results.fingerprintRotation = "active"
     end
+
+    -- Layer 7 canary always active when advanced shield is enabled
+    _pcall(function() _ArmCanary(screenGui) end)
+    results.canary = "active (L7)"
+
+    -- Layer 8 shadow always active when advanced shield is enabled
+    _pcall(function() _RegisterShadow(screenGui) end)
+    results.shadow = "active (L8)"
 
     for k, v in _pairs(results) do
         _CKLog(_sfmt("  adv.%-22s = %s", k, v))
@@ -1719,6 +1626,17 @@ getgenv()[_CLN_KEY] = function(...)
     _OPT.ActiveTweenMap = {}
     _OPT._DummyTween   = nil   -- rebuilt at bottom of next execution
 
+    -- Release all shadow references from getgenv
+    _pcall(function()
+        local _meta = getgenv()["\0\0__ckmp"]
+        if type(_meta) == "table" and type(_meta.shadows) == "table" then
+            for _, sk in ipairs(_meta.shadows) do
+                pcall(function() getgenv()[sk] = nil end)
+            end
+            _meta.shadows = {}
+        end
+    end)
+
     pcall(function()
         local reg = getgenv()[_CO_REG_KEY]
         if type(reg) == "table" then
@@ -1734,6 +1652,40 @@ getgenv()[_CLN_KEY] = function(...)
     end)
 end
 end) -- pcall wrapper for getgenv()[_CLN_KEY] assignment
+
+-- ── [SE-5] Register kill-fn under the SE opaque key ─────────────────────────
+-- Now that getgenv()[_CLN_KEY] is fully built, we write a newcclosure wrapper
+-- of it into getgenv() under the SE kill-key so the NEXT execution can call it.
+-- newcclosure makes it appear as a C-closure to islclosure() scans.
+pcall(function()
+    local _env      = getgenv()
+    -- Retrieve kill-key via opaque bridge stored in meta
+    local _killKey
+    pcall(function()
+        local _meta = getgenv()["\0\0__ckmp"]
+        if type(_meta) == "table" and _meta.bkk then
+            _killKey = rawget(_G, _meta.bkk)
+            rawset(_G, _meta.bkk, nil)   -- consumed
+        end
+    end)
+    if not _killKey then return end
+
+    local _baseFn   = _env[_CLN_KEY]   -- the full teardown function
+    if type(_baseFn) ~= "function" then return end
+
+    -- Wrap: kill-fn calls _CLN_KEY fn + _SmartKillGUIs for full no-trace wipe
+    local _wrapFn = function()
+        pcall(_baseFn)
+        pcall(_SmartKillGUIs)
+    end
+
+    -- Write as newcclosure so islclosure() returns false
+    _env[_killKey] = (type(newcclosure) == "function")
+        and pcall(function() return newcclosure(_wrapFn) end) and newcclosure(_wrapFn)
+        or  _wrapFn
+
+    _CKLog("SingleExec [SE-5]: kill-fn registered under opaque key.")
+end)
 
 
 local Compkiller = {
@@ -11889,7 +11841,7 @@ function Compkiller.newNotify()
 		if _pfn and not _islclosure(_pfn) then _pfn(Notification) end
 	end)
 	_pcall(function() Notification:SetAttribute(_CK_GUI_TAG, true) end)
-	_pcall(function() Notification.DisplayOrder = 2147483647 end)
+	_pcall(function() Notification.DisplayOrder = _CK_SAFE_DO end)
 
 	NotifyContainer.Name = Compkiller:_RandomString()
 	NotifyContainer.Parent = Notification
@@ -12323,7 +12275,7 @@ end
 
 do
     local _dummyBE   = Instance.new("BindableEvent")
-    _dummyBE.Name    = "CK_DummyTween"
+    _dummyBE.Name    = _EncryptGuiName()  -- randomised, not static
     _dummyBE:Fire()
     _OPT._DummyTween = {
         Completed     = _dummyBE.Event,
@@ -12417,7 +12369,21 @@ end
 
 do
     -- [PATCH #14] Session-randomised position key -- not a static detectable string
-    local _POS_KEY = "__ck_window_pos_v1"  -- stable key for cross-session persistence
+    -- [STEALTH-POS] Opaque position key — null-byte prefix + random int, never static
+    local _POS_KEY = "\0\0_ckpos_" .. tostring(math.random(100000000, 999999999))
+    -- Persist the key itself in getgenv so SaveWindowPosition/LoadWindowPosition
+    -- survive re-executions (the new run reads from the same slot via meta lookup).
+    pcall(function()
+        local _env  = getgenv()
+        local _meta = _env["\0\0__ckmp"]
+        if type(_meta) == "table" then
+            if not _meta.pk then
+                _meta.pk = _POS_KEY
+            else
+                _POS_KEY = _meta.pk   -- reuse key from previous run for persistence
+            end
+        end
+    end)
 
     function Compkiller:LoadWindowPosition()
         local raw = getgenv()[_POS_KEY]
@@ -12877,7 +12843,6 @@ end
 -- EnableDecoySystem: deploy / remove decoy ScreenGuis + honeypot
 -- enabled = true (default) | false (tears down)
 function Compkiller:EnableDecoySystem(enabled)
-    _EnableDecoySystem(enabled ~= false)
 end
 
 -- EnableUltimateShield: one call arms all six protection layers
@@ -12895,22 +12860,10 @@ end
 
 -- AS-1: Rotating dummy attributes + short-lived Folder children
 -- enabled = true | false
-function Compkiller:EnableMemoryScrambling(screenGui, enabled)
-    _EnableMemoryScrambling(screenGui, enabled ~= false)
-end
-
 -- AS-2: Benign heartbeat attribute mimic (no UI disruption)
 -- enabled = true | false
-function Compkiller:EnableBehavioralNoise(screenGui, enabled)
-    _EnableBehavioralNoise(screenGui, enabled ~= false)
-end
-
 -- AS-3: Self-destructing ghost ScreenGuis that delete on non-executor access
 -- enabled = true | false  (no screenGui arg — pool lives in CoreGui independently)
-function Compkiller:EnableGhostInstances(enabled)
-    _EnableGhostInstances(enabled ~= false)
-end
-
 -- AS-4: Rotates ScreenGui name through real Roblox CoreGui name patterns
 -- enabled = true | false
 function Compkiller:EnableFingerprintRotation(screenGui, enabled)
@@ -13471,7 +13424,6 @@ Compkiller.MasterControl = function(...)
 	end
 
 	local function enableDecoySystem(enabled)
-		_EnableDecoySystem(enabled ~= false)
 	end
 
 	local function enableUltimateShield(config)
@@ -13484,11 +13436,9 @@ Compkiller.MasterControl = function(...)
 	end
 
 	local function enableBehavioralNoise(screenGui, enabled)
-		_EnableBehavioralNoise(screenGui, enabled ~= false)
 	end
 
 	local function enableGhostInstances(enabled)
-		_EnableGhostInstances(enabled ~= false)
 	end
 
 	local function enableFingerprintRotation(screenGui, enabled)
