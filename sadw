@@ -8179,6 +8179,19 @@ function Compkiller.new(Config)
 				TextTransparency = 0.5
 			})
 
+			-- Restore status pill when window opens
+			pcall(function()
+				if WindowArgs._PremiumBadge and WindowArgs._PremiumBadge.Visible then
+					Compkiller:_Animation(WindowArgs._PremiumBadge, TweenInfo.new(0.2), { BackgroundTransparency = 0 })
+				end
+				if WindowArgs._PBIcon then
+					Compkiller:_Animation(WindowArgs._PBIcon, TweenInfo.new(0.2), { TextTransparency = 0 })
+				end
+				if WindowArgs._PBLabel then
+					Compkiller:_Animation(WindowArgs._PBLabel, TweenInfo.new(0.2), { TextTransparency = 0 })
+				end
+			end)
+
 			Compkiller:_Animation(MainFrame,TweenInfo.new(0.2),{
 				BackgroundTransparency = 0
 			})
@@ -8225,6 +8238,19 @@ function Compkiller.new(Config)
 				TextTransparency = 1
 			})
 
+			-- Hide status pill with the rest of the user card
+			pcall(function()
+				if WindowArgs._PremiumBadge then
+					Compkiller:_Animation(WindowArgs._PremiumBadge, TweenInfo.new(0.2), { BackgroundTransparency = 1 })
+				end
+				if WindowArgs._PBIcon then
+					Compkiller:_Animation(WindowArgs._PBIcon, TweenInfo.new(0.2), { TextTransparency = 1 })
+				end
+				if WindowArgs._PBLabel then
+					Compkiller:_Animation(WindowArgs._PBLabel, TweenInfo.new(0.2), { TextTransparency = 1 })
+				end
+			end)
+
 			Compkiller:_Animation(MainFrame,TweenInfo.new(0.2),{
 				BackgroundTransparency = 1
 			})
@@ -8257,6 +8283,14 @@ function Compkiller.new(Config)
 				Position = UDim2.new(0, 55,0, 25),
 				TextTransparency = 0.5
 			});
+			-- Show pill when panel expands
+			pcall(function()
+				if WindowArgs._PremiumBadge and WindowArgs._PremiumBadge.Visible then
+					Compkiller:_Animation(WindowArgs._PremiumBadge, Style, { BackgroundTransparency = 0 })
+					Compkiller:_Animation(WindowArgs._PBIcon,  Style, { TextTransparency = 0 })
+					Compkiller:_Animation(WindowArgs._PBLabel, Style, { TextTransparency = 0 })
+				end
+			end)
 		else
 			Compkiller:_Animation(TabFrame , Style , {
 				Size = UDim2.new(0, 85,1, 0)
@@ -8276,6 +8310,14 @@ function Compkiller.new(Config)
 				Position = UDim2.new(0, 55 + 25,0, 25),
 				TextTransparency = 1
 			});
+			-- Hide pill badge when panel collapses
+			pcall(function()
+				if WindowArgs._PremiumBadge then
+					Compkiller:_Animation(WindowArgs._PremiumBadge, Style, { BackgroundTransparency = 1 })
+					Compkiller:_Animation(WindowArgs._PBIcon,  Style, { TextTransparency = 1 })
+					Compkiller:_Animation(WindowArgs._PBLabel, Style, { TextTransparency = 1 })
+				end
+			end)
 		end;
 	end);
 
