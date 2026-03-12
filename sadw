@@ -7796,6 +7796,7 @@ function Compkiller.new(Config)
 	WindowArgs._PremiumOverride = nil    -- nil=auto-detect, true/false=forced
 	WindowArgs._RealUsername    = nil    -- always stores the un-obfuscated name
 	WindowArgs._PillActive      = false  -- true when pill should be visible (tab expanded)
+	WindowArgs._PillTweens      = {}     -- running tweens on the pill, cancelled before new ones
 
 	if Compkiller:_IsMobile() then
 		WindowArgs.AlwayShowTab = true;
@@ -8231,8 +8232,12 @@ function Compkiller.new(Config)
 				TextTransparency = 1
 			})
 
-			-- Hide pill immediately — Visible=false is the only reliable hide for Frame+children
+			-- Cancel pill tweens and hide immediately
 			pcall(function()
+				for _, tw in ipairs(WindowArgs._PillTweens) do
+					pcall(function() tw:Cancel() end)
+				end
+				WindowArgs._PillTweens = {}
 				if WindowArgs._PremiumBadge then
 					WindowArgs._PremiumBadge.Visible = false
 				end
@@ -8273,14 +8278,21 @@ function Compkiller.new(Config)
 			-- Show pill when panel expands
 			pcall(function()
 				if WindowArgs._PillActive and WindowArgs._PremiumBadge then
-					-- Must set Visible=true BEFORE tweening, Frame children won't show otherwise
-					WindowArgs._PremiumBadge.Visible = true
+					-- Cancel any running pill tweens first to avoid race conditions
+					for _, tw in ipairs(WindowArgs._PillTweens) do
+						pcall(function() tw:Cancel() end)
+					end
+					WindowArgs._PillTweens = {}
+					-- Set initial state directly (no tween race)
+					WindowArgs._PremiumBadge.Visible              = true
 					WindowArgs._PremiumBadge.BackgroundTransparency = 1
 					if WindowArgs._PBIcon  then WindowArgs._PBIcon.TextTransparency  = 1 end
 					if WindowArgs._PBLabel then WindowArgs._PBLabel.TextTransparency = 1 end
-					Compkiller:_Animation(WindowArgs._PremiumBadge, Style, { BackgroundTransparency = 0 })
-					Compkiller:_Animation(WindowArgs._PBIcon,  Style, { TextTransparency = 0 })
-					Compkiller:_Animation(WindowArgs._PBLabel, Style, { TextTransparency = 0 })
+					-- Tween in and store references so collapse can cancel them
+					local t1 = Compkiller:_Animation(WindowArgs._PremiumBadge, Style, { BackgroundTransparency = 0 })
+					local t2 = Compkiller:_Animation(WindowArgs._PBIcon,  Style, { TextTransparency = 0 })
+					local t3 = Compkiller:_Animation(WindowArgs._PBLabel, Style, { TextTransparency = 0 })
+					WindowArgs._PillTweens = { t1, t2, t3 }
 				end
 			end)
 		else
@@ -8302,8 +8314,12 @@ function Compkiller.new(Config)
 				Position = UDim2.new(0, 55 + 25,0, 25),
 				TextTransparency = 1
 			});
-			-- Hide pill immediately when panel collapses
+			-- Cancel any running pill tweens then hide immediately
 			pcall(function()
+				for _, tw in ipairs(WindowArgs._PillTweens) do
+					pcall(function() tw:Cancel() end)
+				end
+				WindowArgs._PillTweens = {}
 				if WindowArgs._PremiumBadge then
 					WindowArgs._PremiumBadge.Visible = false
 				end
