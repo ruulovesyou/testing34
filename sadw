@@ -8152,7 +8152,12 @@ function Compkiller.new(Config)
 				TextTransparency = 0.5
 			})
 
-			-- Pill stays hidden on open (tab not hovered yet)
+			-- If tab is already hovered when window reopens, show pill immediately
+			if WindowArgs._PillActive and WindowArgs._PremiumBadge and TabHover:GetValue() then
+				Compkiller:_Animation(WindowArgs._PremiumBadge, TweenInfo.new(0.2), {
+					TextTransparency = 0
+				})
+			end
 
 			Compkiller:_Animation(MainFrame,TweenInfo.new(0.2),{
 				BackgroundTransparency = 0
