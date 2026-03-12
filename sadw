@@ -7796,7 +7796,7 @@ function Compkiller.new(Config)
 	WindowArgs._PremiumOverride = nil    -- nil=auto-detect, true/false=forced
 	WindowArgs._RealUsername    = nil    -- always stores the un-obfuscated name
 	WindowArgs._PillActive      = false  -- true when pill should be visible (tab expanded)
-	WindowArgs._PillTweens      = {}     -- running tweens on the pill, cancelled before new ones
+
 
 	if Compkiller:_IsMobile() then
 		WindowArgs.AlwayShowTab = true;
@@ -8044,56 +8044,24 @@ function Compkiller.new(Config)
 	UICorner_4.CornerRadius = UDim.new(1, 0)
 	UICorner_4.Parent = UserProfile
 
-	-- [STATUS PILL] Paid-design tier badge — pill shape, sits left of status text
-	--   Premium: amber  [★ Premium]
-	--   Free:    teal   [◆ Free]
-	local PremiumBadge = Instance.new("Frame")
+	-- [STATUS LABEL] Single TextLabel — syncs exactly like ExpireText
+	local PremiumBadge = Instance.new("TextLabel")
 	PremiumBadge.Name = Compkiller:_RandomString()
 	PremiumBadge.Parent = Userinfo
-	PremiumBadge.AnchorPoint = Vector2.new(0, 0.5)
-	PremiumBadge.BackgroundColor3 = Color3.fromRGB(40, 30, 10)
-	PremiumBadge.BackgroundTransparency = 0
-	PremiumBadge.BorderSizePixel = 0
-	PremiumBadge.Position = UDim2.new(0, 54, 0, 35)
-	PremiumBadge.Size = UDim2.new(0, 62, 0, 16)
-	PremiumBadge.ZIndex = 4
-	PremiumBadge.ClipsDescendants = true
-	local _PBCorner = Instance.new("UICorner")
-	_PBCorner.CornerRadius = UDim.new(1, 0)
-	_PBCorner.Parent = PremiumBadge
-	-- Icon dot inside the pill
-	local _PBIcon = Instance.new("TextLabel")
-	_PBIcon.Name = Compkiller:_RandomString()
-	_PBIcon.Parent = PremiumBadge
-	_PBIcon.BackgroundTransparency = 1
-	_PBIcon.Position = UDim2.new(0, 4, 0, 0)
-	_PBIcon.Size = UDim2.new(0, 12, 1, 0)
-	_PBIcon.ZIndex = 5
-	_PBIcon.Font = Enum.Font.GothamBold
-	_PBIcon.Text = "\226\152\134"  -- ★
-	_PBIcon.TextColor3 = Color3.fromRGB(255, 190, 50)
-	_PBIcon.TextSize = 9
-	_PBIcon.TextXAlignment = Enum.TextXAlignment.Center
-	-- Text label inside the pill
-	local _PBLabel = Instance.new("TextLabel")
-	_PBLabel.Name = Compkiller:_RandomString()
-	_PBLabel.Parent = PremiumBadge
-	_PBLabel.BackgroundTransparency = 1
-	_PBLabel.Position = UDim2.new(0, 17, 0, 0)
-	_PBLabel.Size = UDim2.new(1, -18, 1, 0)
-	_PBLabel.ZIndex = 5
-	_PBLabel.Font = Enum.Font.GothamBold
-	_PBLabel.Text = "Premium"
-	_PBLabel.TextColor3 = Color3.fromRGB(255, 190, 50)
-	_PBLabel.TextSize = 9
-	_PBLabel.TextXAlignment = Enum.TextXAlignment.Left
-	PremiumBadge.Visible = true           -- always in tree; transparency controls visibility
 	PremiumBadge.BackgroundTransparency = 1
-	_PBIcon.TextTransparency = 1
-	_PBLabel.TextTransparency = 1
+	PremiumBadge.BorderSizePixel = 0
+	PremiumBadge.Position = UDim2.new(0, 55, 0, 25)
+	PremiumBadge.Size = UDim2.new(0, 200, 0, 20)
+	PremiumBadge.ZIndex = 2
+	PremiumBadge.Font = Enum.Font.GothamBold
+	PremiumBadge.Text = ""
+	PremiumBadge.TextColor3 = Color3.fromRGB(255, 190, 50)
+	PremiumBadge.TextSize = 12
+	PremiumBadge.TextTransparency = 1
+	PremiumBadge.TextXAlignment = Enum.TextXAlignment.Left
 	WindowArgs._PremiumBadge = PremiumBadge
-	WindowArgs._PBIcon       = _PBIcon
-	WindowArgs._PBLabel      = _PBLabel
+	WindowArgs._PBIcon  = nil  -- not used; single label approach
+	WindowArgs._PBLabel = nil  -- not used; single label approach
 
 	UserText.Name = Compkiller:_RandomString()
 	UserText.Parent = Userinfo
@@ -8184,7 +8152,7 @@ function Compkiller.new(Config)
 				TextTransparency = 0.5
 			})
 
-			-- Pill stays hidden on open; TabHover=true will reveal it if _PillActive
+			-- Pill stays hidden on open (tab not hovered yet)
 
 			Compkiller:_Animation(MainFrame,TweenInfo.new(0.2),{
 				BackgroundTransparency = 0
@@ -8232,16 +8200,11 @@ function Compkiller.new(Config)
 				TextTransparency = 1
 			})
 
-			-- Cancel pill tweens and hide immediately
-			pcall(function()
-				for _, tw in ipairs(WindowArgs._PillTweens) do
-					pcall(function() tw:Cancel() end)
-				end
-				WindowArgs._PillTweens = {}
-				if WindowArgs._PremiumBadge then
-					WindowArgs._PremiumBadge.Visible = false
-				end
-			end)
+			if WindowArgs._PremiumBadge then
+				Compkiller:_Animation(WindowArgs._PremiumBadge,TweenInfo.new(0.2),{
+					TextTransparency = 1
+				})
+			end
 
 			Compkiller:_Animation(MainFrame,TweenInfo.new(0.2),{
 				BackgroundTransparency = 1
@@ -8275,26 +8238,11 @@ function Compkiller.new(Config)
 				Position = UDim2.new(0, 55,0, 25),
 				TextTransparency = 0.5
 			});
-			-- Show pill when panel expands
-			pcall(function()
-				if WindowArgs._PillActive and WindowArgs._PremiumBadge then
-					-- Cancel any running pill tweens first to avoid race conditions
-					for _, tw in ipairs(WindowArgs._PillTweens) do
-						pcall(function() tw:Cancel() end)
-					end
-					WindowArgs._PillTweens = {}
-					-- Set initial state directly (no tween race)
-					WindowArgs._PremiumBadge.Visible              = true
-					WindowArgs._PremiumBadge.BackgroundTransparency = 1
-					if WindowArgs._PBIcon  then WindowArgs._PBIcon.TextTransparency  = 1 end
-					if WindowArgs._PBLabel then WindowArgs._PBLabel.TextTransparency = 1 end
-					-- Tween in and store references so collapse can cancel them
-					local t1 = Compkiller:_Animation(WindowArgs._PremiumBadge, Style, { BackgroundTransparency = 0 })
-					local t2 = Compkiller:_Animation(WindowArgs._PBIcon,  Style, { TextTransparency = 0 })
-					local t3 = Compkiller:_Animation(WindowArgs._PBLabel, Style, { TextTransparency = 0 })
-					WindowArgs._PillTweens = { t1, t2, t3 }
-				end
-			end)
+			if WindowArgs._PillActive and WindowArgs._PremiumBadge then
+				Compkiller:_Animation(WindowArgs._PremiumBadge , Style , {
+					TextTransparency = 0
+				})
+			end
 		else
 			Compkiller:_Animation(TabFrame , Style , {
 				Size = UDim2.new(0, 85,1, 0)
@@ -8314,16 +8262,11 @@ function Compkiller.new(Config)
 				Position = UDim2.new(0, 55 + 25,0, 25),
 				TextTransparency = 1
 			});
-			-- Cancel any running pill tweens then hide immediately
-			pcall(function()
-				for _, tw in ipairs(WindowArgs._PillTweens) do
-					pcall(function() tw:Cancel() end)
-				end
-				WindowArgs._PillTweens = {}
-				if WindowArgs._PremiumBadge then
-					WindowArgs._PremiumBadge.Visible = false
-				end
-			end)
+			if WindowArgs._PremiumBadge then
+				Compkiller:_Animation(WindowArgs._PremiumBadge , Style , {
+					TextTransparency = 1
+				})
+			end
 		end;
 	end);
 
@@ -11501,45 +11444,26 @@ function Compkiller.new(Config)
 			_expireDisplay = config.ExpireDate
 			ExpireText.TextColor3 = Compkiller.Colors.SwitchColor
 			ExpireText.TextTransparency = 0.500
-			-- Hide status pill when showing a custom date
 			WindowArgs._PillActive = false
 			ExpireText.TextTransparency = 0.500
 		elseif _isPremium then
-			-- ★ Premium pill — amber on dark amber bg
-			_expireDisplay = ""   -- pill replaces text entirely
-			ExpireText.TextTransparency = 1  -- hide raw text, pill shows it
-			WindowArgs._PillActive = true  -- mark as active; hover anim will reveal it
-			pcall(function()
-				if WindowArgs._PremiumBadge then
-					WindowArgs._PremiumBadge.BackgroundColor3 = Color3.fromRGB(38, 26, 5)
-				end
-				if WindowArgs._PBIcon then
-					WindowArgs._PBIcon.Text = "\226\152\134"  -- ★
-					WindowArgs._PBIcon.TextColor3 = Color3.fromRGB(255, 190, 50)
-				end
-				if WindowArgs._PBLabel then
-					WindowArgs._PBLabel.Text = "Premium"
-					WindowArgs._PBLabel.TextColor3 = Color3.fromRGB(255, 190, 50)
-				end
-			end)
-		else
-			-- ◆ Free pill — teal on dark teal bg
+			-- ★ Premium — amber text, syncs with ExpireText animations
 			_expireDisplay = ""
 			ExpireText.TextTransparency = 1
-			WindowArgs._PillActive = true  -- mark as active; hover anim will reveal it
-			pcall(function()
-				if WindowArgs._PremiumBadge then
-					WindowArgs._PremiumBadge.BackgroundColor3 = Color3.fromRGB(5, 28, 26)
-				end
-				if WindowArgs._PBIcon then
-					WindowArgs._PBIcon.Text = "\226\151\134"  -- ◆
-					WindowArgs._PBIcon.TextColor3 = Color3.fromRGB(60, 210, 180)
-				end
-				if WindowArgs._PBLabel then
-					WindowArgs._PBLabel.Text = "Free"
-					WindowArgs._PBLabel.TextColor3 = Color3.fromRGB(60, 210, 180)
-				end
-			end)
+			WindowArgs._PillActive = true
+			if WindowArgs._PremiumBadge then
+				WindowArgs._PremiumBadge.Text = "\226\152\134 Premium"
+				WindowArgs._PremiumBadge.TextColor3 = Color3.fromRGB(255, 190, 50)
+			end
+		else
+			-- ◆ Free — teal text, syncs with ExpireText animations
+			_expireDisplay = ""
+			ExpireText.TextTransparency = 1
+			WindowArgs._PillActive = true
+			if WindowArgs._PremiumBadge then
+				WindowArgs._PremiumBadge.Text = "\226\151\134 Free"
+				WindowArgs._PremiumBadge.TextColor3 = Color3.fromRGB(60, 210, 180)
+			end
 		end
 		ExpireText.Text = _expireDisplay;
 
