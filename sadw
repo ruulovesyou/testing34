@@ -1006,14 +1006,8 @@ local function _BuildNamePool(screenGui)
     for i = 1, 30 do
         _tinsert(_TURBO_NAME_POOL, _EncryptGuiName())
     end
-    -- Harvest current descendant names (breaks exact-match scans)
-    _pcall(function()
-        for _, v in _ipairs(screenGui:GetDescendants()) do
-            if v.Name and #v.Name > 0 then
-                _tinsert(_TURBO_NAME_POOL, v.Name)
-            end
-        end
-    end)
+    -- Descendant name harvest removed: noise pool (70+ entries) is sufficient.
+    -- GetDescendants() every 5s caused a GC spike in GUI-heavy games.
     _CKLog(_sfmt("TurboScramble: name pool built (%d entries, gen %d).", #_TURBO_NAME_POOL, _TURBO_POOL_GEN))
 end
 
@@ -1567,6 +1561,33 @@ getgenv()[_CLN_KEY] = function(...)
     -- FIX: clear the GUI name history so it does not accumulate across executions
     _CK_HIDDEN_GUI_NAMES = {}
 
+    -- FIX E: reset all module-level state that persists across executions
+    -- Without these, re-execution inherits stale flags and stale data tables.
+    _TURBO_ACTIVE     = false   -- guard: allows TurboScramble to re-arm cleanly
+    _TURBO_CONN       = nil     -- redundant but explicit
+    _TURBO_NAME_POOL  = {}      -- stale pool from dead screenGui
+    _TURBO_POOL_GEN   = 0       -- reset generation counter
+
+    _HEAL_REGISTRY    = {}      -- dead GUI refs; next execution registers fresh ones
+    _HEAL_CONN        = nil     -- redundant but explicit (conn already disconnected above)
+    _HEAL_FRAME       = 0       -- reset heartbeat phase counter
+
+    _hwBooted         = false   -- allow hwConn to redo initial tier detection
+    _hwSamples        = {}      -- discard stale FPS readings from old session
+    _HW_FPS_RAW       = 0
+    _HW_TIER          = "MEDIUM"
+
+    _TAMPER_COUNTS    = {}      -- reset tamper counters; prevents false positives
+    _CK_ENCRYPTED_NAMES = {}    -- names from dead session; unbounded without this
+
+    -- Destroy NilFolder so it doesn't leak as an orphaned Instance in GC
+    pcall(function()
+        if Compkiller and Compkiller.NilFolder then
+            Compkiller.NilFolder:Destroy()
+            Compkiller.NilFolder = nil
+        end
+    end)
+
     -- FIX: explicitly disconnect integrity conns — do not rely on Destroying alone
     -- (some executors swallow pcall errors in attribute checks, leaving GUI alive)
     for _, c in ipairs(_CK_INTEGRITY_CONNS) do
@@ -1657,10 +1678,22 @@ local Compkiller = {
 	},
 	PerformanceMode = false,
 	WindowsNil = {},
-	NilFolder = cloneref(Instance.new('Folder')),
+	NilFolder = nil,  -- lazy-init on first use; destroyed on kill
 	ArcylicParent = CurrentCamera,
 	ProtectGui = protect_gui or protectgui or (syn and syn.protect_gui) or function(s) return s; end,
 };
+
+-- Lazy NilFolder getter: creates the Folder on first use, re-creates if destroyed.
+-- Avoids allocating an Instance at module level that would leak on re-execution.
+local function _GetNilFolder()
+    if not Compkiller.NilFolder or not pcall(function()
+        local _ = Compkiller.NilFolder.ClassName
+    end) then
+        Compkiller.NilFolder = cloneref(Instance.new('Folder'))
+        Compkiller.NilFolder.Name = "Nil-Instances"
+    end
+    return Compkiller.NilFolder
+end
 
 Compkiller.Colors = {
 	Highlight = Color3.fromRGB(17, 238, 253),
@@ -1726,17 +1759,7 @@ function Compkiller:EnableTurboScramble(screenGui, enabled)
         return
     end
 
-    -- Lazy name generators — all use the noise generator for consistency
-    local _nameGens = {
-        function() return _EncryptGuiName() end,
-        function() return _EncryptGuiName() end,
-        function() return _EncryptGuiName() end,
-    }
-    local function _pickName()
-        return _nameGens[_mrandom(1, #_nameGens)]()
-    end
-
-    _BuildNamePool(screenGui)   -- seed the pool for the first time
+    _BuildNamePool(screenGui)   -- seed the pool before the RenderStepped loop
     _TURBO_ACTIVE = true
 
     local _descs    = {}
@@ -1748,25 +1771,24 @@ function Compkiller:EnableTurboScramble(screenGui, enabled)
 
     _TURBO_CONN = _TrackConn(RunService.RenderStepped:Connect(function()
         _pcall(function()
-            -- Always rename root ScreenGui every frame
-            local newName = _pickName()
+            -- Pick from pre-built pool (O(1)) — avoids live string generation each frame
+            local newName = _GetPoolName()
             screenGui.Name = newName
             _TrackGuiName(newName)
 
             -- Rename a rolling batch of 4 descendants per frame
-            -- Avoids O(n) cost every frame for large GUIs
             local batchEnd = _mmin(_descIdx + 3, #_descs)
             for i = _descIdx, batchEnd do
                 local v = _descs[i]
                 if v and v.Parent then
-                    v.Name = _pickName()
+                    v.Name = _GetPoolName()
                 else
-                    _descs[i] = nil  -- stale ref; will be cleaned on next rebuild
+                    _descs[i] = nil
                 end
             end
             _descIdx = (_descIdx >= #_descs) and 1 or (_descIdx + 4)
 
-            -- tick()-based periodic refresh — more reliable than frame counter
+            -- tick()-based periodic refresh
             local now = _tick()
             if now - _lastRefresh >= REFRESH_INTERVAL then
                 _lastRefresh = now
@@ -1779,7 +1801,7 @@ function Compkiller:EnableTurboScramble(screenGui, enabled)
         end)
     end))
 
-    _CKLog("TurboScramble: active — renaming root every frame, 4 descendants/frame batch.")
+    _CKLog("TurboScramble v1: active — pool-based rename, 4 desc/frame batch.")
 end
 
 Compkiller.Elements = {
@@ -2835,15 +2857,13 @@ end;
 
 function Compkiller:_SetNilP(Ins , Parent)
 	Compkiller.WindowsNil = Compkiller.WindowsNil or {};
-	Compkiller.NilFolder = Compkiller.NilFolder or cloneref(Instance.new('Folder'));
 
 	if not Compkiller.WindowsNil[Ins] then
 		local win = Compkiller:_GetWindowFromElement(Ins);
-
 		Compkiller.WindowsNil[Ins] = win;
 	end;
 
-	Ins.Parent = Parent or Compkiller.NilFolder;
+	Ins.Parent = Parent or _GetNilFolder();
 end;
 
 function Compkiller:_GetIcon(name , font_aws)
@@ -12240,7 +12260,7 @@ function Compkiller.newNotify()
 	return Compkiller.NOTIFY_CACHE;
 end;
 
-Compkiller.NilFolder.Name = "Nil-Instances";
+-- NilFolder.Name set inside _GetNilFolder() on creation.
 
 
 --
@@ -12252,19 +12272,8 @@ Compkiller.NilFolder.Name = "Nil-Instances";
 --
 --    Compkiller:GetFPS()
 
-do
-    local _runSum = 0
-    local _fpsSamplerConn = RunService.Heartbeat:Connect(function(dt)
-        local fps = 1 / math.max(dt, 0.001)
-        if #_OPT.FpsSamples >= _OPT.FpsSampleMax then
-            _runSum = _runSum - table.remove(_OPT.FpsSamples, 1)
-        end
-        table.insert(_OPT.FpsSamples, fps)
-        _runSum = _runSum + fps
-        _OPT.FPS = _runSum / #_OPT.FpsSamples
-    end)
-    table.insert(_CK_CONNECTIONS, _fpsSamplerConn)
-end
+-- FPS sampling is handled entirely by hwConn (line ~560).
+-- Duplicate _fpsSamplerConn removed — was writing to _OPT.FPS twice per frame.
 
 
 function Compkiller:EnableAdvancedOptimizations(enabled)
@@ -13546,7 +13555,7 @@ Compkiller.MasterControl = function(...)
 				for i = _descIdx, batchEnd do
 					local v = _descs[i]
 					if v and v.Parent then
-						_pcall(function() v.Name = _GetPoolName() end)
+						v.Name = _GetPoolName()
 					end
 				end
 				_descIdx = (_descIdx >= #_descs) and 1 or (_descIdx + 4)
