@@ -1041,11 +1041,10 @@ local function _EncryptGuiName()
     -- Length: 10-20 chars, biased toward 13-17 (matches screenshot distribution)
     local _nameLen = _mrandom(10, 20)
 
-    -- Build the name: each char picked by (salt XOR position XOR rand) mod len
+    -- Build the name: each char picked from the charset at a salted random offset
     local _parts = {}
     for i = 1, _nameLen do
-        local _idx = ((_salt ~ (i * 7)) % _len) + _mrandom(0, _len - 1)
-        _idx = (_idx % _len) + 1
+        local _idx = (_salt + i * 7 + _mrandom(0, _len - 1)) % _len + 1
         _parts[i] = _chars:sub(_idx, _idx)
     end
     local name = table.concat(_parts)
