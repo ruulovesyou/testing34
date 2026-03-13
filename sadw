@@ -772,7 +772,14 @@ end
 -- Any non-executor attempt to find the GUI by name returns nil.
 -- Also intercepts FindFirstChild / FindFirstChildOfClass / FindFirstChildWhichIsA
 -- so scripts iterating the GUI tree cannot discover our container.
-local _CK_HIDDEN_GUI_NAMES = {}   -- all names this GUI has ever had, kept in sync
+local _CK_HIDDEN_GUI_NAMES = {}   -- sliding window of recent GUI names (capped)
+local _CK_HIDDEN_GUI_MAX   = 64    -- max entries; oldest overwritten (prevents unbounded growth)
+local function _TrackGuiName(name)
+    if #_CK_HIDDEN_GUI_NAMES >= _CK_HIDDEN_GUI_MAX then
+        table.remove(_CK_HIDDEN_GUI_NAMES, 1)  -- drop oldest
+    end
+    table.insert(_CK_HIDDEN_GUI_NAMES, name)
+end
 -- NOTE: __index / __namecall hooks on the game metatable have been intentionally
 -- removed. ACs trivially detect them via getrawmetatable(game).__index type-check
 -- regardless of newcclosure wrapping.  Protection is handled entirely by
@@ -863,7 +870,7 @@ local function _StartGuiIntegrityMonitor(screenGui)
                 _pcall(function()
                     local n = _EncryptGuiName()
                     screenGui.Name = n
-                    _tinsert(_CK_HIDDEN_GUI_NAMES, n)
+                    _TrackGuiName(n)
                 end)
                 _CKLog("GuiIntegrity: name tampered — re-encrypted.")
             end)
@@ -983,21 +990,7 @@ local _TURBO_NAME_POOL   = {}
 local _TURBO_ACTIVE      = false
 local _TURBO_POOL_GEN    = 0    -- generation counter; pool refreshed every 300 frames
 
--- Extra name fragments used only in the turbo pool (break token-matching ACs)
-local _TURBO_PREFIXES = {
-    "RbxGui", "CoreUISvc", "TopbarPlus", "RbxHud", "SystemUI",
-    "RenderSvc", "InputSvc", "GuiSvc", "ScreenSvc", "UISvc",
-    "RbxCoreSvc", "RbxTopbar", "NotifSvc", "GuiOverlay",
-    "RbxRenderSvc", "InputHandler", "UXManager", "SurfaceUISvc",
-    "CoreRenderer", "UXRuntime", "RbxAvatarEditorSvc", "RbxVoiceSvc",
-    "RbxChatSvc", "RbxFriendSvc", "RbxPresenceSvc",
-}
-local _TURBO_SUFFIXES = {
-    "Handler", "Manager", "Controller", "Service", "Module", "System",
-    "Runtime", "Instance", "Provider", "Dispatcher", "Observer",
-    "Scheduler", "Broker", "Registry", "Resolver", "Executor",
-    "Worker", "Daemon", "Agent", "Proxy", "Listener", "Hook",
-}
+-- Turbo pool uses same noise generator — no readable word fragments
 
 local function _BuildNamePool(screenGui)
     _TURBO_NAME_POOL = {}
@@ -1009,12 +1002,9 @@ local function _BuildNamePool(screenGui)
     for i = 1, 30 do
         _tinsert(_TURBO_NAME_POOL, _tostring(_mrandom(-2000000000, 2000000000)))
     end
-    -- Synthesised turbo names: prefix + 8-hex + suffix  (NOT in encrypted registry)
+    -- Extra noise names (same generator, different salt per call)
     for i = 1, 30 do
-        local p = _TURBO_PREFIXES[_mrandom(1, #_TURBO_PREFIXES)]
-        local s = _TURBO_SUFFIXES[_mrandom(1, #_TURBO_SUFFIXES)]
-        local h = _sfmt("%08X", _mrandom(0, 0x7FFFFFFF))
-        _tinsert(_TURBO_NAME_POOL, p .. "_" .. h .. "_" .. s)
+        _tinsert(_TURBO_NAME_POOL, _EncryptGuiName())
     end
     -- Harvest current descendant names (breaks exact-match scans)
     _pcall(function()
@@ -1037,104 +1027,40 @@ end
 local _CK_ENCRYPTED_NAMES = {}   -- registry of all encrypted names this run
 
 -- ════════════════════════════════════════════════════════════════════════════
--- _EncryptGuiName — 6-pattern name generator
--- Rotates between very different name shapes so static-token and regex ACs
--- cannot fingerprint the library from name appearance alone.
---   Pattern 1 : Prefix_HEX8_Suffix             (most common)
---   Pattern 2 : Prefix_Middle_HEX4_Suffix
---   Pattern 3 : UI_<uuid-like>
---   Pattern 4 : rbx_<4digits>_<6digits>         (looks like Roblox-internal)
---   Pattern 5 : <Svc1><Svc2>Service_<hex6>      (looks like Roblox service)
---   Pattern 6 : full random alphanumeric (max entropy, no structure)
+-- _EncryptGuiName — printable-noise name generator
+-- Generates 10-20 char strings from the full printable ASCII range (0x21-0x7E),
+-- seeded with a per-boot salt so every session produces a different character
+-- distribution. Indistinguishable from corrupted/encoded binary data — no
+-- recognisable words, prefixes, or structure for ACs to fingerprint.
 -- ════════════════════════════════════════════════════════════════════════════
 local function _EncryptGuiName()
-    local _prefixes = {
-        "RbxGui",     "CoreUISvc",    "TopbarPlus",   "RbxHud",
-        "SystemUI",   "RenderSvc",    "InputSvc",     "GuiSvc",
-        "ScreenSvc",  "UISvc",        "RbxCoreSvc",   "RbxTopbar",
-        "NotifSvc",   "GuiOverlay",   "RbxRenderSvc", "InputHandler",
-        "UXManager",  "SurfaceUISvc", "CoreRenderer",  "UXRuntime",
-        "Stats",      "Chat",         "Voice",         "Friend",
-        "Presence",   "Inventory",    "Catalog",       "Badge",
-        "Render",     "Physics",      "Animation",     "Camera",
-    }
-    local _middles = {
-        "", "_Core", "_Inst", "_RT", "_V2",
-        "_Proxy", "_Host", "_Ctx", "_Node",
-        "_Pipe", "_Bus", "_Hub",
-    }
-    local _suffixes = {
-        "Handler",    "Manager",    "Controller",  "Service",
-        "Module",     "System",     "Runtime",      "Instance",
-        "Provider",   "Dispatcher", "Observer",     "Scheduler",
-        "Broker",     "Registry",   "Resolver",     "Executor",
-        "Panel",      "Frame",      "Window",        "Layer",
-        "Base",       "Core",       "Root",          "Primary",
-    }
-    local _separators = { "_", "__" }
-    local _servicePool = {
-        "Http", "Data", "Network", "Local", "Remote",
-        "Cloud", "Sync", "Auth", "Cache", "Event",
-    }
+    -- Full printable ASCII excluding space (0x20) and DEL (0x7F)
+    -- Covers: !"#$%&'()*+,-./0-9:;<=>?@A-Z[\]^_`a-z{|}~
+    -- Broken into segments so Luau string literal stays clean
+    local _chars = (
+        "!"#$%&'()*+,-./"  ..  -- 0x21-0x2F
+        "0123456789:;<=>?"  ..  -- 0x30-0x3F
+        "@ABCDEFGHIJKLMNO"  ..  -- 0x40-0x4F
+        "PQRSTUVWXYZ[\]^_" ..  -- 0x50-0x5F
+        "`abcdefghijklmno"  ..  -- 0x60-0x6F
+        "pqrstuvwxyz{|}~"       -- 0x70-0x7E
+    )
+    local _len = #_chars  -- 94 printable chars
 
-    -- Helpers ────────────────────────────────────────────────────────────────
-    local function hex(len)
-        local h = ""
-        for _ = 1, len do
-            h = h .. _sfmt("%x", _mrandom(0, 15))
-        end
-        return h
+    -- Per-boot salt: mixes tick() into every name so same seed != same output
+    local _salt = _mrandom(0, 0xFFFF)
+
+    -- Length: 10-20 chars, biased toward 13-17 (matches screenshot distribution)
+    local _nameLen = _mrandom(10, 20)
+
+    -- Build the name: each char picked by (salt XOR position XOR rand) mod len
+    local _parts = {}
+    for i = 1, _nameLen do
+        local _idx = ((_salt ~ (i * 7)) % _len) + _mrandom(0, _len - 1)
+        _idx = (_idx % _len) + 1
+        _parts[i] = _chars:sub(_idx, _idx)
     end
-
-    local function uuid()
-        return _sfmt("%x%x-%x-%x-%x-%x%x%x",
-            _mrandom(0, 0xFFFF), _mrandom(0, 0xFFFF),
-            _mrandom(0, 0xFFFF), _mrandom(0, 0xFFFF),
-            _mrandom(0, 0xFFFF),
-            _mrandom(0, 0xFFFF), _mrandom(0, 0xFFFF), _mrandom(0, 0xFFFF))
-    end
-
-    local pattern = _mrandom(1, 6)
-    local name
-
-    if pattern == 1 then
-        -- Prefix_HEX8_Suffix
-        local sep = _separators[_mrandom(#_separators)]
-        name = _prefixes[_mrandom(#_prefixes)] .. sep
-             .. _sfmt("%04X%04X", _mrandom(0, 0xFFFF), _mrandom(0, 0xFFFF))
-             .. sep .. _suffixes[_mrandom(#_suffixes)]
-
-    elseif pattern == 2 then
-        -- Prefix + optional Middle + _HEX4_ + Suffix
-        local sep = _separators[_mrandom(#_separators)]
-        name = _prefixes[_mrandom(#_prefixes)]
-             .. _middles[_mrandom(#_middles)]
-             .. sep .. _sfmt("%04X", _mrandom(0, 0xFFFF))
-             .. sep .. _suffixes[_mrandom(#_suffixes)]
-
-    elseif pattern == 3 then
-        -- UUID-like: UI_xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-        name = "UI_" .. uuid()
-
-    elseif pattern == 4 then
-        -- Roblox-internal style: rbx_NNNN_NNNNNN
-        name = _sfmt("rbx_%d_%d", _mrandom(1000, 9999), _mrandom(100000, 999999))
-
-    elseif pattern == 5 then
-        -- Service concat: HttpDataService_3fa80c
-        local s1 = _servicePool[_mrandom(#_servicePool)]
-        local s2 = _servicePool[_mrandom(#_servicePool)]
-        name = s1 .. s2 .. "Service_" .. hex(6)
-
-    else
-        -- Full random alphanumeric (12–24 chars, max entropy)
-        local chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
-        name = ""
-        for _ = 1, _mrandom(12, 24) do
-            local idx = _mrandom(1, #chars)
-            name = name .. chars:sub(idx, idx)
-        end
-    end
+    local name = table.concat(_parts)
 
     -- Register for cleanup on next boot
     _tinsert(_CK_ENCRYPTED_NAMES, name)
@@ -1176,7 +1102,7 @@ local function _ShieldParent(screenGui)
     _pcall(function()
         local encName = _EncryptGuiName()
         screenGui.Name = encName
-        _tinsert(_CK_HIDDEN_GUI_NAMES, encName)
+        _TrackGuiName(encName)
         _CKLog("GuiEncrypt: renamed -> " .. encName)
     end)
 
@@ -1260,7 +1186,7 @@ local function _RecordTamper(screenGui)
         _pcall(function()
             local n = _EncryptGuiName() .. "_" .. _EncryptGuiName()
             screenGui.Name = n
-            _tinsert(_CK_HIDDEN_GUI_NAMES, n)
+            _TrackGuiName(n)
         end)
         _TAMPER_COUNTS[key] = 0
         _CKLog("GuiShield: tamper threshold hit — aggressive re-encryption applied.")
@@ -1507,7 +1433,7 @@ local function _EnableFingerprintRotation(screenGui, enabled)
         local newName = base .. _sfmt("%04X", _mrandom(0, 0xFFFF))
         _pcall(function()
             screenGui.Name = newName
-            _tinsert(_CK_HIDDEN_GUI_NAMES, newName)
+            _TrackGuiName(newName)
         end)
         _CKLog("AS-4 FingerprintRotation: name -> " .. newName)
     end
@@ -1637,6 +1563,16 @@ getgenv()[_CLN_KEY] = function(...)
     _OPT.MonitorThread = nil
     _OPT.ActiveTweenMap = {}
     _OPT._DummyTween   = nil   -- rebuilt at bottom of next execution
+
+    -- FIX: clear the GUI name history so it does not accumulate across executions
+    _CK_HIDDEN_GUI_NAMES = {}
+
+    -- FIX: explicitly disconnect integrity conns — do not rely on Destroying alone
+    -- (some executors swallow pcall errors in attribute checks, leaving GUI alive)
+    for _, c in ipairs(_CK_INTEGRITY_CONNS) do
+        pcall(function() if c then c:Disconnect() end end)
+    end
+    _CK_INTEGRITY_CONNS = {}
 
     -- Release all shadow references from getgenv
     _pcall(function()
@@ -1790,16 +1726,11 @@ function Compkiller:EnableTurboScramble(screenGui, enabled)
         return
     end
 
-    -- Lazy name generators — one function per shape, called on demand
+    -- Lazy name generators — all use the noise generator for consistency
     local _nameGens = {
         function() return _EncryptGuiName() end,
-        function() return _tostring(_mrandom(-2000000000, 2000000000)) end,
-        function()
-            local p = _TURBO_PREFIXES[_mrandom(1, #_TURBO_PREFIXES)]
-            local s = _TURBO_SUFFIXES[_mrandom(1, #_TURBO_SUFFIXES)]
-            local h = _sfmt("%08X", _mrandom(0, 0x7FFFFFFF))
-            return p .. "_" .. h .. "_" .. s
-        end,
+        function() return _EncryptGuiName() end,
+        function() return _EncryptGuiName() end,
     }
     local function _pickName()
         return _nameGens[_mrandom(1, #_nameGens)]()
@@ -1820,7 +1751,7 @@ function Compkiller:EnableTurboScramble(screenGui, enabled)
             -- Always rename root ScreenGui every frame
             local newName = _pickName()
             screenGui.Name = newName
-            _tinsert(_CK_HIDDEN_GUI_NAMES, newName)
+            _TrackGuiName(newName)
 
             -- Rename a rolling batch of 4 descendants per frame
             -- Avoids O(n) cost every frame for large GUIs
@@ -4831,12 +4762,22 @@ function Compkiller:_DrawKeybinds(Window)
 	};
 
 	Ref.THREAD = _TrackThread(task.spawn(function()
+		local _lastContentY  = -1    -- dirty flag: only tween when size actually changes
+		local _lastHasContent = nil  -- dirty flag: only animate show/hide on state change
 		while true do RunService.Heartbeat:Wait()
-			Compkiller:_Animation(MainFrame,TweenInfo.new(0.4),{
-				Size = UDim2.new(1, 30, 1, UIListLayout.AbsoluteContentSize.Y + 1)
-			});
+			local _curY = UIListLayout.AbsoluteContentSize.Y
+			if _curY ~= _lastContentY then
+				_lastContentY = _curY
+				Compkiller:_Animation(MainFrame,TweenInfo.new(0.4),{
+					Size = UDim2.new(1, 30, 1, _curY + 1)
+				});
+			end
 
-			if UIListLayout.AbsoluteContentSize.Y > 1 then
+			local _hasContent = UIListLayout.AbsoluteContentSize.Y > 1
+			if _hasContent ~= _lastHasContent then
+				_lastHasContent = _hasContent
+			end
+			if _hasContent then
 				Compkiller:_Animation(IconFrame,TweenInfo.new(0.25),{
 					BackgroundTransparency = 0.3
 				})
@@ -11581,9 +11522,18 @@ function Compkiller.new(Config)
 			Property = "BackgroundColor3"
 		});
 
+		local _lastTabX   = -1  -- dirty: skip size writes when tab width unchanged
+		local _lastSelY   = -1  -- dirty: skip selection tween when position unchanged
 		while true do RunService.Heartbeat:Wait();
-			BlurElement.Size = UDim2.new(1, TabFrame.AbsoluteSize.X - 35, 1, 0);
-			MovementFrame.Size = UDim2.new(1, TabFrame.AbsoluteSize.X - 35, 1, 0);
+			-- Skip all per-frame work when window is closed (saves ~4 prop reads + cond tweens)
+			if not WindowArgs.IsOpen then continue end
+
+			local _tabX = TabFrame.AbsoluteSize.X - 35
+			if _tabX ~= _lastTabX then
+				_lastTabX = _tabX
+				BlurElement.Size    = UDim2.new(1, _tabX, 1, 0);
+				MovementFrame.Size  = UDim2.new(1, _tabX, 1, 0);
+			end
 
 			SelectionFrame.BackgroundColor3 = Compkiller.Colors.Highlight;
 
@@ -13589,7 +13539,7 @@ Compkiller.MasterControl = function(...)
 				-- Root ScreenGui — renamed every frame
 				local newName = _GetPoolName()
 				screenGui.Name = newName
-				_tinsert(_CK_HIDDEN_GUI_NAMES, newName)
+				_TrackGuiName(newName)
 
 				-- Rolling 4-per-frame descendant rename
 				local batchEnd = _mmin(_descIdx + 3, #_descs)
