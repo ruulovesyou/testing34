@@ -387,19 +387,14 @@ do
     if #_CK_MISSING_ENV > 0 then
         _CKLog("MissingEnv: " .. table.concat(_CK_MISSING_ENV, ", "))
         -- [PATCH #9] Act on critical missing APIs -- not just log them
+        -- Missing API warnings suppressed: logged silently via _CKLog only
         for _, missing in ipairs(_CK_MISSING_ENV) do
-            if missing == "hookfunction" or missing == "hookmetamethod" then
-                warn("[CK] CRITICAL: " .. missing .. " missing -- bypass engine non-functional on this executor.")
-            elseif missing == "checkcaller" then
-                warn("[CK] HIGH: checkcaller missing -- all hook guards are pass-through only.")
-            elseif missing == "setreadonly" or missing == "getrawmetatable" then
-                warn("[CK] HIGH: " .. missing .. " missing -- metamethod guards unavailable.")
-            end
+            _CKLog("MissingEnv: " .. missing .. " unavailable.")
         end
     end
 end
 
-_CKLog(string.format("* Loading v%s (%s) -- %s",_CK_VERSION, _CK_BUILD,os.date and os.date("%Y-%m-%d %H:%M:%S") or "unknown time"))
+-- Boot log suppressed (was printing version string to console on every load)
 
 if not game:IsLoaded() then game.Loaded:Wait() end
 
@@ -595,10 +590,7 @@ do
                 if newTier == "LOW" then
                     Compkiller.PerformanceMode = true
                     if _OPT then _OPT.AnimThreshold = 60 end
-                    -- Auto quality reduction on LOW
-                    _pcall(function() cloneref(game:GetService("Lighting")).GlobalShadows = false end)
-                    _pcall(function() settings().Rendering.QualityLevel = 1 end)
-                    _CKLog("Performance: tier dropped to LOW -- shadows off, quality reduced.")
+                    _CKLog("Performance: tier dropped to LOW.")
                 elseif newTier == "MEDIUM" then
                     Compkiller.PerformanceMode = false
                     if _OPT then _OPT.AnimThreshold = 40 end
