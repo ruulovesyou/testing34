@@ -1399,6 +1399,9 @@ getgenv()[_CLN_KEY] = function(...)
     -- FIX: clear the GUI name history so it does not accumulate across executions
     _CK_HIDDEN_GUI_NAMES = {}
 
+    -- Clear tween cache to prevent stale references from old GUI instances
+    _TW_CACHE = {}
+
     -- FIX E: reset all module-level state that persists across executions
     -- Without these, re-execution inherits stale flags and stale data tables.
     _TURBO_ACTIVE     = false   -- guard: allows TurboScramble to re-arm cleanly
@@ -2691,6 +2694,26 @@ end;
 -- Prevents dozens of conflicting Tweens piling up during spam tab switches.
 local _TW_CACHE = {}
 
+-- Shared TweenInfo constants: defined once at module level, used everywhere.
+-- Eliminates hundreds of TweenInfo.new() allocations across element hover/click handlers.
+local _TI = {
+    t010 = TweenInfo.new(0.10),
+    t015 = TweenInfo.new(0.15),
+    t020 = TweenInfo.new(0.20),
+    t025 = TweenInfo.new(0.25),
+    t030 = TweenInfo.new(0.30),
+    t035 = TweenInfo.new(0.35),
+    t040 = TweenInfo.new(0.40),
+    t045q = TweenInfo.new(0.45, Enum.EasingStyle.Quint),
+    t035q = TweenInfo.new(0.35, Enum.EasingStyle.Quint),
+    t020q = TweenInfo.new(0.20, Enum.EasingStyle.Quad),
+    t027q = TweenInfo.new(0.275, Enum.EasingStyle.Quad),
+    t040q = TweenInfo.new(0.40, Enum.EasingStyle.Quint),
+    t021  = _TI.t021,
+    t032  = _TI.t032,
+    t100  = TweenInfo.new(1.0,  Enum.EasingStyle.Quint, Enum.EasingDirection.InOut),
+}
+
 function Compkiller:_Animation(Self , Info , Property)
 	if _OPT and _OPT._AnimPaused then
 		for prop, val in pairs(Property) do
@@ -2711,14 +2734,13 @@ function Compkiller:_Animation(Self , Info , Property)
 			_TW_CACHE[_k] = nil
 		end
 	end
-	local Tween = TweenService:Create(Self , Info or TweenInfo.new(0.25) , Property);
+	local Tween = TweenService:Create(Self , Info or _TI.t025 , Property);
 	Tween:Play();
-	-- Cache the tween; auto-clear on completion to prevent table growth
+	-- Cache; auto-clear via shared handler (no per-tween closure allocation)
 	for prop in pairs(Property) do
-		local _k = _instKey .. prop
-		_TW_CACHE[_k] = Tween
+		_TW_CACHE[_instKey .. prop] = Tween
 	end
-	Tween.Completed:Connect(function()
+	Tween.Completed:Once(function()
 		for prop in pairs(Property) do
 			local _k = _instKey .. prop
 			if _TW_CACHE[_k] == Tween then _TW_CACHE[_k] = nil end
@@ -2817,20 +2839,20 @@ function Compkiller:_Blur(element , WindowRemote)
 
 		if IsWindowActive then
 
-			Compkiller:_Animation(DepthOfField,TweenInfo.new(0.1),{
+			Compkiller:_Animation(DepthOfField,_TI.t010,{
 				NearIntensity = 1
 			})
 
-			Compkiller:_Animation(Part,TweenInfo.new(0.1),{
+			Compkiller:_Animation(Part,_TI.t010,{
 				Transparency = 0.97,
 				Size = Vector3.new(1, 1, 1) * 0.01;
 			})
 		else
-			Compkiller:_Animation(DepthOfField,TweenInfo.new(0.1),{
+			Compkiller:_Animation(DepthOfField,_TI.t010,{
 				NearIntensity = 0
 			})
 
-			Compkiller:_Animation(Part,TweenInfo.new(0.1),{
+			Compkiller:_Animation(Part,_TI.t010,{
 				Size = Vector3.zero,
 				Transparency = 1.5,
 			})
@@ -2997,12 +3019,9 @@ function Compkiller:Drag(InputFrame, MoveFrame, Speed)
 
 	local updateInput = function(input)
 		local delta = input.Position - dragStart;
-		local position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
+		-- Fix A: direct assignment during drag — no Tween needed (60 Tweens/sec → 0)
+		MoveFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
 			startPos.Y.Scale, startPos.Y.Offset + delta.Y);
-
-		Compkiller:_Animation(MoveFrame,Tween,{
-			Position = position
-		});
 	end;
 
 	InputFrame.InputBegan:Connect(function(input)
@@ -3220,19 +3239,19 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 
 		Signal:Connect(function(bool)
 			if bool then
-				Compkiller:_Animation(ColorFrame,TweenInfo.new(0.15),{
+				Compkiller:_Animation(ColorFrame,_TI.t015,{
 					BackgroundTransparency = 0,
 				})
 
-				Compkiller:_Animation(UIStroke,TweenInfo.new(0.15),{
+				Compkiller:_Animation(UIStroke,_TI.t015,{
 					Transparency = 0,
 				})
 			else
-				Compkiller:_Animation(ColorFrame,TweenInfo.new(0.15),{
+				Compkiller:_Animation(ColorFrame,_TI.t015,{
 					BackgroundTransparency = 1,
 				})
 
-				Compkiller:_Animation(UIStroke,TweenInfo.new(0.15),{
+				Compkiller:_Animation(UIStroke,_TI.t015,{
 					Transparency = 1,
 				})
 			end;
@@ -3240,13 +3259,13 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 
 		Compkiller:_Hover(ColorPicker, function(...)
 			if Signal:GetValue() then
-				Compkiller:_Animation(UIScale,TweenInfo.new(0.35),{
+				Compkiller:_Animation(UIScale,_TI.t035,{
 					Scale = 1.2
 				})
 			end;
 		end , function()
 			if Signal:GetValue() then
-				Compkiller:_Animation(UIScale,TweenInfo.new(0.35),{
+				Compkiller:_Animation(UIScale,_TI.t035,{
 					Scale = 1
 				})
 			end;
@@ -3356,7 +3375,7 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 		local Update = function()
 			local size = TextService:GetTextSize(TextLabel.Text,TextLabel.TextSize,TextLabel.Font,Vector2.new(math.huge,math.huge));
 
-			Compkiller:_Animation(Keybind,TweenInfo.new(0.1),{
+			Compkiller:_Animation(Keybind,_TI.t010,{
 				Size = UDim2.new(0, size.X + 5, 0, 16)
 			});
 		end;
@@ -3463,11 +3482,11 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 
 		Signal:Connect(function(bool)
 			if bool then
-				Compkiller:_Animation(InfoButton,TweenInfo.new(0.15),{
+				Compkiller:_Animation(InfoButton,_TI.t015,{
 					ImageTransparency = 0.500
 				})
 			else
-				Compkiller:_Animation(InfoButton,TweenInfo.new(0.15),{
+				Compkiller:_Animation(InfoButton,_TI.t015,{
 					ImageTransparency = 1
 				})
 			end;
@@ -3475,13 +3494,13 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 
 		Compkiller:_Hover(InfoButton, function(...)
 			if Signal:GetValue() then
-				Compkiller:_Animation(InfoButton,TweenInfo.new(0.15),{
+				Compkiller:_Animation(InfoButton,_TI.t015,{
 					ImageTransparency = 0.1
 				})
 			end;
 		end , function()
 			if Signal:GetValue() then
-				Compkiller:_Animation(InfoButton,TweenInfo.new(0.15),{
+				Compkiller:_Animation(InfoButton,_TI.t015,{
 					ImageTransparency = 0.500
 				})
 			end;
@@ -3512,11 +3531,11 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 
 		Signal:Connect(function(bool)
 			if bool then
-				Compkiller:_Animation(OptionButton,TweenInfo.new(0.15),{
+				Compkiller:_Animation(OptionButton,_TI.t015,{
 					ImageTransparency = 0.500
 				})
 			else
-				Compkiller:_Animation(OptionButton,TweenInfo.new(0.15),{
+				Compkiller:_Animation(OptionButton,_TI.t015,{
 					ImageTransparency = 1
 				})
 			end;
@@ -3524,13 +3543,13 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 
 		Compkiller:_Hover(OptionButton, function(...)
 			if Signal:GetValue() then
-				Compkiller:_Animation(OptionButton,TweenInfo.new(0.15),{
+				Compkiller:_Animation(OptionButton,_TI.t015,{
 					ImageTransparency = 0.1
 				})
 			end;
 		end , function()
 			if Signal:GetValue() then
-				Compkiller:_Animation(OptionButton,TweenInfo.new(0.15),{
+				Compkiller:_Animation(OptionButton,_TI.t015,{
 					ImageTransparency = 0.500
 				})
 			end;
@@ -3615,7 +3634,7 @@ function Compkiller:_CreateBlock(Signal)
 	local rep = {
 		TextTransparency = 0.300,
 		Root = GlobalBlock,
-		Tween = TweenInfo.new(0.25),
+		Tween = _TI.t025,
 	};
 
 	function rep:SetText(Text)
@@ -3653,7 +3672,7 @@ function Compkiller:_CreateBlock(Signal)
 	function rep:SetTransparency(num)
 		rep.TextTransparency = num;
 
-		Compkiller:_Animation(BlockText,TweenInfo.new(0.3),{
+		Compkiller:_Animation(BlockText,_TI.t030,{
 			TextTransparency = rep.TextTransparency
 		});
 	end;
@@ -4071,8 +4090,8 @@ function Compkiller:_AddColorPickerPanel(Button , Callback)
 		IsVisible = false,
 	};
 
-	local Tween = TweenInfo.new(0.2 , Enum.EasingStyle.Quad);
-	local Tween2 = TweenInfo.new(0.275 , Enum.EasingStyle.Quad);
+	local Tween = _TI.t020q;
+	local Tween2 = _TI.t027q;
 
 	Compkiller:_AddPropertyEvent(ColorPickerWindow,function(v)
 		ColorPickerWindow.Visible = v;
@@ -4302,23 +4321,23 @@ function Compkiller:_AddColorPickerPanel(Button , Callback)
 		local MainColor = Color3.fromHSV(H , S , 1);
 		local RealColor = Color3.fromHSV(H , S , V);
 
-		Compkiller:_Animation(ColorPickBox,TweenInfo.new(0.2),{
+		Compkiller:_Animation(ColorPickBox,_TI.t020,{
 			BackgroundColor3 = Color3.fromHSV(H , 1 , 1)
 		});
 
-		Compkiller:_Animation(ColorOpc,TweenInfo.new(0.2),{
+		Compkiller:_Animation(ColorOpc,_TI.t020,{
 			BackgroundColor3 = RealColor
 		});
 
-		Compkiller:_Animation(MouseMovement,TweenInfo.new(0.2),{
+		Compkiller:_Animation(MouseMovement,_TI.t020,{
 			Position = UDim2.fromScale(S , 1 - V)
 		});
 
-		Compkiller:_Animation(ColorOptSlide,TweenInfo.new(0.2),{
+		Compkiller:_Animation(ColorOptSlide,_TI.t020,{
 			Position = UDim2.new(Transparency ,0 , 0.5 ,0)
 		});
 
-		Compkiller:_Animation(ColorRGBSlide,TweenInfo.new(0.2),{
+		Compkiller:_Animation(ColorRGBSlide,_TI.t020,{
 			Position = UDim2.new(0.5 ,0 , H ,0)
 		});
 
@@ -4574,11 +4593,14 @@ function Compkiller:_DrawKeybinds(Window)
 	Ref.THREAD = _TrackThread(task.spawn(function()
 		local _lastContentY  = -1    -- dirty flag: only tween when size actually changes
 		local _lastHasContent = nil  -- dirty flag: only animate show/hide on state change
+		-- Fix E: TweenInfo cached as upvalues outside loop (was 11 allocations per dirty-flag trigger)
+		local _TW_KB_SLOW = _TI.t040
+		local _TW_KB_MED  = _TI.t025
 		while true do RunService.Heartbeat:Wait()
 			local _curY = UIListLayout.AbsoluteContentSize.Y
 			if _curY ~= _lastContentY then
 				_lastContentY = _curY
-				Compkiller:_Animation(MainFrame,TweenInfo.new(0.4),{
+				Compkiller:_Animation(MainFrame,_TW_KB_SLOW,{
 					Size = UDim2.new(1, 30, 1, _curY + 1)
 				});
 			end
@@ -4588,19 +4610,19 @@ function Compkiller:_DrawKeybinds(Window)
 				_lastHasContent = _hasContent
 			end
 			if _hasContent then
-				Compkiller:_Animation(IconFrame,TweenInfo.new(0.25),{
+				Compkiller:_Animation(IconFrame,_TW_KB_MED,{
 					BackgroundTransparency = 0.3
 				})
 
-				Compkiller:_Animation(Frame,TweenInfo.new(0.25),{
+				Compkiller:_Animation(Frame,_TW_KB_MED,{
 					BackgroundTransparency = 0
 				})
 
-				Compkiller:_Animation(HeadLabel,TweenInfo.new(0.25),{
+				Compkiller:_Animation(HeadLabel,_TW_KB_MED,{
 					TextTransparency = 0
 				})
 
-				Compkiller:_Animation(Icon,TweenInfo.new(0.25),{
+				Compkiller:_Animation(Icon,_TW_KB_MED,{
 					ImageTransparency = 0
 				});
 
@@ -4614,28 +4636,28 @@ function Compkiller:_DrawKeybinds(Window)
 					end;
 				end;
 
-				Compkiller:_Animation(Keybinds,TweenInfo.new(0.25),{
+				Compkiller:_Animation(Keybinds,_TW_KB_MED,{
 					BackgroundTransparency = 0.025,
 					Size = UDim2.new(0, LargF, 0, 25)
 				})
 			else
-				Compkiller:_Animation(HeadLabel,TweenInfo.new(0.25),{
+				Compkiller:_Animation(HeadLabel,_TW_KB_MED,{
 					TextTransparency = 1
 				})
 
-				Compkiller:_Animation(Keybinds,TweenInfo.new(0.25),{
+				Compkiller:_Animation(Keybinds,_TW_KB_MED,{
 					BackgroundTransparency = 1
 				})
 
-				Compkiller:_Animation(IconFrame,TweenInfo.new(0.25),{
+				Compkiller:_Animation(IconFrame,_TW_KB_MED,{
 					BackgroundTransparency = 1
 				})
 
-				Compkiller:_Animation(Frame,TweenInfo.new(0.25),{
+				Compkiller:_Animation(Frame,_TW_KB_MED,{
 					BackgroundTransparency = 1
 				})
 
-				Compkiller:_Animation(Icon,TweenInfo.new(0.25),{
+				Compkiller:_Animation(Icon,_TW_KB_MED,{
 					ImageTransparency = 1
 				});
 			end;
@@ -4762,37 +4784,37 @@ function Compkiller:_DrawKeybinds(Window)
 
 		function frame_ref:SetVisible(v)
 			if v then
-				Compkiller:_Animation(Keyholder,TweenInfo.new(0.1),{
+				Compkiller:_Animation(Keyholder,_TI.t010,{
 					BackgroundTransparency = 0.600,
 					Size = UDim2.new(1, 0, 0, 28)
 				});
 
-				Compkiller:_Animation(Label,TweenInfo.new(0.15),{
+				Compkiller:_Animation(Label,_TI.t015,{
 					TextTransparency = 0.100
 				});
 
-				Compkiller:_Animation(Line,TweenInfo.new(0.15),{
+				Compkiller:_Animation(Line,_TI.t015,{
 					BackgroundTransparency = 0
 				});
 
-				Compkiller:_Animation(TypeLabel,TweenInfo.new(0.15),{
+				Compkiller:_Animation(TypeLabel,_TI.t015,{
 					TextTransparency = 0
 				});
 			else
-				Compkiller:_Animation(Keyholder,TweenInfo.new(0.1),{
+				Compkiller:_Animation(Keyholder,_TI.t010,{
 					BackgroundTransparency = 1,
 					Size = UDim2.new(1, 0, 0, 0)
 				});
 
-				Compkiller:_Animation(Label,TweenInfo.new(0.15),{
+				Compkiller:_Animation(Label,_TI.t015,{
 					TextTransparency = 1
 				});
 
-				Compkiller:_Animation(Line,TweenInfo.new(0.15),{
+				Compkiller:_Animation(Line,_TI.t015,{
 					BackgroundTransparency = 1
 				});
 
-				Compkiller:_Animation(TypeLabel,TweenInfo.new(0.15),{
+				Compkiller:_Animation(TypeLabel,_TI.t015,{
 					TextTransparency = 1
 				});
 			end;
@@ -4888,21 +4910,21 @@ function Compkiller:_KeybindHandler(Parent , ObjectType , ElementAPI , Signal , 
 		if bool then
 			KeybindHandler.Position = UDim2.new(0,Parent.AbsolutePosition.X + 225,0,Parent.AbsolutePosition.Y)
 
-			Compkiller:_Animation(KeybindHandler,TweenInfo.new(0.25),{
+			Compkiller:_Animation(KeybindHandler,_TI.t025,{
 				BackgroundTransparency = 0,
 				Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y + 5)
 			});
 
-			Compkiller:_Animation(UIStroke,TweenInfo.new(0.3),{
+			Compkiller:_Animation(UIStroke,_TI.t030,{
 				Transparency = 0
 			});
 		else
-			Compkiller:_Animation(KeybindHandler,TweenInfo.new(0.3),{
+			Compkiller:_Animation(KeybindHandler,_TI.t030,{
 				BackgroundTransparency = 1,
 				Size = UDim2.new(0, 225, 0, 0)
 			});
 
-			Compkiller:_Animation(UIStroke,TweenInfo.new(0.3),{
+			Compkiller:_Animation(UIStroke,_TI.t030,{
 				Transparency = 1
 			});
 		end;
@@ -5115,7 +5137,7 @@ end;
 function Compkiller:_LoadOption(Value , TabSignal)
 	local Args = {};
 	local Window = Compkiller:_GetWindowFromElement(Value.Root);
-	local Tween = TweenInfo.new(0.3,Enum.EasingStyle.Quint);
+	local Tween = _TI.t035q;
 
 	function Args:AddKeybind(Config)
 		Config = Compkiller.__CONFIG(Config,{
@@ -5228,7 +5250,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			local scale = TextService:GetTextSize(Helper.Text.Text,Helper.Text.TextSize,Helper.Text.Font,Vector2.new(math.huge,math.huge));
 
-			Compkiller:_Animation(Helper.Text , TweenInfo.new(0.15), {
+			Compkiller:_Animation(Helper.Text , _TI.t015, {
 				Size = UDim2.fromOffset(scale.X + 50, scale.Y + 5)
 			})
 
@@ -5238,13 +5260,13 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		local Release = function()
 			local scale = Update()
 
-			Compkiller:_Animation(Helper.Text,TweenInfo.new(0.15),{
+			Compkiller:_Animation(Helper.Text,_TI.t015,{
 				TextTransparency = 1,
 				BackgroundTransparency = 1,
 				Position = UDim2.fromOffset(Button.AbsolutePosition.X,Button.AbsolutePosition.Y + (45))
 			});
 
-			Compkiller:_Animation(Helper.UIStroke,TweenInfo.new(0.15),{
+			Compkiller:_Animation(Helper.UIStroke,_TI.t015,{
 				Transparency = 1
 			});
 		end;
@@ -5256,13 +5278,13 @@ function Compkiller:_LoadOption(Value , TabSignal)
 				Helper.Text.Position = UDim2.fromOffset(Button.AbsolutePosition.X,Button.AbsolutePosition.Y + (45))
 			end;
 
-			Compkiller:_Animation(Helper.Text,TweenInfo.new(0.15),{
+			Compkiller:_Animation(Helper.Text,_TI.t015,{
 				TextTransparency = 0.35,
 				BackgroundTransparency = 0,
 				Position = UDim2.fromOffset(Button.AbsolutePosition.X,Button.AbsolutePosition.Y + (40 - (scale.Y / 2)))
 			});
 
-			Compkiller:_Animation(Helper.UIStroke,TweenInfo.new(0.15),{
+			Compkiller:_Animation(Helper.UIStroke,_TI.t015,{
 				Transparency = 0
 			});
 
@@ -5617,23 +5639,23 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 				DropdownWindow.Position = DropPosition;
 			end;
 
-			Compkiller:_Animation(DropdownWindow,TweenInfo.new(0.2),{
+			Compkiller:_Animation(DropdownWindow,_TI.t020,{
 				BackgroundTransparency = 0,
 				Position = MainPosition,
 				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, math.clamp(UIListLayout.AbsoluteContentSize.Y + 10,10 , 200))
 			})
 
-			Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
+			Compkiller:_Animation(UIStroke,_TI.t020,{
 				Transparency = 0
 			})
 		else
-			Compkiller:_Animation(DropdownWindow,TweenInfo.new(0.2),{
+			Compkiller:_Animation(DropdownWindow,_TI.t020,{
 				BackgroundTransparency = 1,
 				Position = DropPosition,
 				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, math.clamp(UIListLayout.AbsoluteContentSize.Y / 1.5, 10 , 200))
 			})
 
-			Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
+			Compkiller:_Animation(UIStroke,_TI.t020,{
 				Transparency = 1
 			})
 		end;
@@ -5741,26 +5763,26 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 
 			table.insert(__signals , ToggleDb:Connect(function(bool)
 				if bool then
-					Compkiller:_Animation(bth.BlockText,TweenInfo.new(0.2),{
+					Compkiller:_Animation(bth.BlockText,_TI.t020,{
 						TextTransparency = ((IsDefault(v) or MatchDefault(v,DataFrame)) and 0) or 0.5
 					});
 
-					Compkiller:_Animation(bth.BlockLine,TweenInfo.new(0.2),{
+					Compkiller:_Animation(bth.BlockLine,_TI.t020,{
 						BackgroundTransparency = 0
 					});
 				else
-					Compkiller:_Animation(bth.BlockText,TweenInfo.new(0.2),{
+					Compkiller:_Animation(bth.BlockText,_TI.t020,{
 						TextTransparency = 1
 					});
 
-					Compkiller:_Animation(bth.BlockLine,TweenInfo.new(0.2),{
+					Compkiller:_Animation(bth.BlockLine,_TI.t020,{
 						BackgroundTransparency = 1
 					});
 				end;
 			end));
 
 			if ToggleDb:GetValue() then
-				Compkiller:_Animation(bth.BlockText,TweenInfo.new(0.2),{
+				Compkiller:_Animation(bth.BlockText,_TI.t020,{
 					TextTransparency = ((IsDefault(v) or MatchDefault(v,DataFrame)) and 0) or 0.5
 				});
 			end;
@@ -5776,14 +5798,14 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 					DataFrame[v] = false;
 				end;
 
-				Compkiller:_Animation(bth.BlockText,TweenInfo.new(0.2),{
+				Compkiller:_Animation(bth.BlockText,_TI.t020,{
 					TextTransparency = ((MatchDefault(v,DataFrame)) and 0) or 0.5
 				});
 
 				Compkiller:_Input(bth.DropdownItem,function()
 					DataFrame[v] = not DataFrame[v];
 
-					Compkiller:_Animation(bth.BlockText,TweenInfo.new(0.2),{
+					Compkiller:_Animation(bth.BlockText,_TI.t020,{
 						TextTransparency = ((MatchDefault(v,DataFrame)) and 0) or 0.5
 					});
 
@@ -5792,7 +5814,7 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 			else
 				Compkiller:_Input(bth.DropdownItem,function()
 					if DataFrame then
-						Compkiller:_Animation(DataFrame.BlockText,TweenInfo.new(0.2),{
+						Compkiller:_Animation(DataFrame.BlockText,_TI.t020,{
 							TextTransparency = ((IsDefault(v) or MatchDefault(v,DataFrame)) and 0) or 0.5
 						});
 					end;
@@ -5801,7 +5823,7 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 
 					DataFrame = bth;
 
-					Compkiller:_Animation(bth.BlockText,TweenInfo.new(0.2),{
+					Compkiller:_Animation(bth.BlockText,_TI.t020,{
 						TextTransparency = ((IsDefault(v) or MatchDefault(v,DataFrame)) and 0) or 0.5
 					});
 
@@ -5868,7 +5890,7 @@ end;
 
 function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKeybind)
 	local Zindex = Parent.ZIndex + 1;
-	local Tween = TweenInfo.new(0.25,Enum.EasingStyle.Quint);
+	local Tween = _TI.t025;
 
 	local Args = {};
 
@@ -6219,13 +6241,13 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Compkiller:_Hover(Frame,function(...)
 			if Signal:GetValue() then
-				Compkiller:_Animation(Frame,TweenInfo.new(0.2),{
+				Compkiller:_Animation(Frame,_TI.t020,{
 					BackgroundTransparency = 0
 				})
 			end;
 		end,function()
 			if Signal:GetValue() then
-				Compkiller:_Animation(Frame,TweenInfo.new(0.2),{
+				Compkiller:_Animation(Frame,_TI.t020,{
 					BackgroundTransparency = 0.1
 				})
 			end;
@@ -6239,37 +6261,37 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Args.Signal = Signal:Connect(function(bool)
 			if bool then
-				Compkiller:_Animation(BlockLine, TweenInfo.new(0.35),{
+				Compkiller:_Animation(BlockLine, _TI.t035,{
 					BackgroundTransparency = 0.500
 				});
 
-				Compkiller:_Animation(Frame, TweenInfo.new(0.35),{
+				Compkiller:_Animation(Frame, _TI.t035,{
 					BackgroundTransparency = 0.1
 				});
 
-				Compkiller:_Animation(UIStroke, TweenInfo.new(0.35),{
+				Compkiller:_Animation(UIStroke, _TI.t035,{
 					Transparency = 0
 				});
 
-				Compkiller:_Animation(TextLabel, TweenInfo.new(0.35),{
+				Compkiller:_Animation(TextLabel, _TI.t035,{
 					TextStrokeTransparency = 0.900,
 					TextTransparency = 0
 				});
 
 			else
-				Compkiller:_Animation(BlockLine, TweenInfo.new(0.35),{
+				Compkiller:_Animation(BlockLine, _TI.t035,{
 					BackgroundTransparency = 1
 				});
 
-				Compkiller:_Animation(Frame, TweenInfo.new(0.35),{
+				Compkiller:_Animation(Frame, _TI.t035,{
 					BackgroundTransparency = 1
 				});
 
-				Compkiller:_Animation(UIStroke, TweenInfo.new(0.35),{
+				Compkiller:_Animation(UIStroke, _TI.t035,{
 					Transparency = 1
 				});
 
-				Compkiller:_Animation(TextLabel, TweenInfo.new(0.35),{
+				Compkiller:_Animation(TextLabel, _TI.t035,{
 					TextStrokeTransparency = 1,
 					TextTransparency = 1
 				});
@@ -6448,13 +6470,13 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Compkiller:_Hover(SliderBar,function(...)
 			if Signal:GetValue() then
-				Compkiller:_Animation(ValueText,TweenInfo.new(0.2),{
+				Compkiller:_Animation(ValueText,_TI.t020,{
 					TextTransparency = 0.2
 				})
 			end;
 		end,function()
 			if Signal:GetValue() then
-				Compkiller:_Animation(ValueText,TweenInfo.new(0.2),{
+				Compkiller:_Animation(ValueText,_TI.t020,{
 					TextTransparency = 0.750
 				})
 			end;
@@ -6473,7 +6495,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 			local Size = (Value - Config.Min) / (Config.Max - Config.Min);
 
-			TweenService:Create(SliderInput , TweenInfo.new(0.2),{
+			TweenService:Create(SliderInput , _TI.t020,{
 				Size = UDim2.new(math.clamp(Size,0.045,1), 0, 1, 0)
 			}):Play();
 
@@ -6530,7 +6552,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 			ValueText.Text = tostring(Config.Default)..tostring(Config.Type)
 
-			Compkiller:_Animation(SliderInput, TweenInfo.new(0.35),{
+			Compkiller:_Animation(SliderInput, _TI.t035,{
 				Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.045), 0, 1, 0)
 			});
 
@@ -6547,7 +6569,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Args.Signal = Signal:Connect(function(bool)
 			if bool then
-				Compkiller:_Animation(SliderInput, TweenInfo.new(0.35),{
+				Compkiller:_Animation(SliderInput, _TI.t035,{
 					Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.045), 0, 1, 0)
 				});
 
@@ -6579,7 +6601,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 					TextTransparency = 0.1
 				})
 			else
-				Compkiller:_Animation(SliderInput, TweenInfo.new(0.35),{
+				Compkiller:_Animation(SliderInput, _TI.t035,{
 					Size = UDim2.new(0, 0, 1, 0)
 				});
 
@@ -6721,14 +6743,14 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			if not DescriptionText.Text:byte() then
 				local TitleScale = TextService:GetTextSize(BlockText.Text,BlockText.TextSize,BlockText.Font,Vector2.new(math.huge,math.huge));
 
-				Compkiller:_Animation(Paragraph,TweenInfo.new(0.15),{
+				Compkiller:_Animation(Paragraph,_TI.t015,{
 					Size = UDim2.new(1, -1, 0, TitleScale.Y + Base)
 				});
 			else
 				local TitleScale = TextService:GetTextSize(BlockText.Text,BlockText.TextSize,BlockText.Font,Vector2.new(math.huge,math.huge));
 				local ContentScale = TextService:GetTextSize(DescriptionText.Text,DescriptionText.TextSize,DescriptionText.Font,Vector2.new(math.huge,math.huge));
 
-				Compkiller:_Animation(Paragraph,TweenInfo.new(0.15),{
+				Compkiller:_Animation(Paragraph,_TI.t015,{
 					Size = UDim2.new(1, -1, 0, (TitleScale.Y + ContentScale.Y) + Base)
 				});
 			end;
@@ -6750,27 +6772,27 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Args.Signal = Signal:Connect(function(bool)
 			if bool then
-				Compkiller:_Animation(BlockText,TweenInfo.new(0.2),{
+				Compkiller:_Animation(BlockText,_TI.t020,{
 					TextTransparency = 0.300
 				});
 
-				Compkiller:_Animation(DescriptionText,TweenInfo.new(0.2),{
+				Compkiller:_Animation(DescriptionText,_TI.t020,{
 					TextTransparency = 0.500
 				});
 
-				Compkiller:_Animation(BlockLine,TweenInfo.new(0.2),{
+				Compkiller:_Animation(BlockLine,_TI.t020,{
 					BackgroundTransparency = 0.500
 				});
 			else
-				Compkiller:_Animation(BlockText,TweenInfo.new(0.2),{
+				Compkiller:_Animation(BlockText,_TI.t020,{
 					TextTransparency = 1
 				});
 
-				Compkiller:_Animation(DescriptionText,TweenInfo.new(0.2),{
+				Compkiller:_Animation(DescriptionText,_TI.t020,{
 					TextTransparency = 1
 				});
 
-				Compkiller:_Animation(BlockLine,TweenInfo.new(0.2),{
+				Compkiller:_Animation(BlockLine,_TI.t020,{
 					BackgroundTransparency = 1
 				});
 			end;
@@ -6900,13 +6922,13 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 			local MainScale = ((scale.X > Base.X) and scale.X) or Base.X;
 
 			local xp = pcall(function()
-				Compkiller:_Animation(LinkValues,TweenInfo.new(0.25),{
+				Compkiller:_Animation(LinkValues,_TI.t025,{
 					Size = UDim2.fromOffset(math.clamp(MainScale + 7 , Base.X , TextBox.AbsoluteSize.X / 2) , 16)
 				})
 			end);
 
 			if not xp then
-				Compkiller:_Animation(LinkValues,TweenInfo.new(0.25),{
+				Compkiller:_Animation(LinkValues,_TI.t025,{
 					Size = UDim2.fromOffset(MainScale + 7 , 16)
 				})
 			end;
@@ -6973,36 +6995,36 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Args.Signal = Signal:Connect(function(bool)
 			if bool then
-				Compkiller:_Animation(BlockText,TweenInfo.new(0.2),{
+				Compkiller:_Animation(BlockText,_TI.t020,{
 					TextTransparency = 0.3
 				});
 
-				Compkiller:_Animation(BlockLine,TweenInfo.new(0.2),{
+				Compkiller:_Animation(BlockLine,_TI.t020,{
 					BackgroundTransparency = 0.5
 				});
 
-				Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
+				Compkiller:_Animation(UIStroke,_TI.t020,{
 					Transparency = 0
 				});
 
-				Compkiller:_Animation(LinkValues,TweenInfo.new(0.2),{
+				Compkiller:_Animation(LinkValues,_TI.t020,{
 					BackgroundTransparency = 0
 				});
 
 			else
-				Compkiller:_Animation(BlockText,TweenInfo.new(0.2),{
+				Compkiller:_Animation(BlockText,_TI.t020,{
 					TextTransparency = 1
 				});
 
-				Compkiller:_Animation(BlockLine,TweenInfo.new(0.2),{
+				Compkiller:_Animation(BlockLine,_TI.t020,{
 					BackgroundTransparency = 1
 				});
 
-				Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
+				Compkiller:_Animation(UIStroke,_TI.t020,{
 					Transparency = 1
 				});
 
-				Compkiller:_Animation(LinkValues,TweenInfo.new(0.2),{
+				Compkiller:_Animation(LinkValues,_TI.t020,{
 					BackgroundTransparency = 1
 				});
 
@@ -7196,11 +7218,11 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 		MainButton.Image = Compkiller:CacheImage("rbxassetid://109535175596957")
 
 		Compkiller:_Hover(ValueItems,function(...)
-			Compkiller:_Animation(ValueItems,TweenInfo.new(0.3),{
+			Compkiller:_Animation(ValueItems,_TI.t030,{
 				BackgroundColor3 = Compkiller.Colors.MouseEnter
 			});
 		end,function()
-			Compkiller:_Animation(ValueItems,TweenInfo.new(0.3),{
+			Compkiller:_Animation(ValueItems,_TI.t030,{
 				BackgroundColor3 = Compkiller.Colors.DropColor
 			});
 		end);
@@ -7221,11 +7243,11 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		repi.EventOut:Connect(function(v)
 			if v then
-				Compkiller:_Animation(MainButton,TweenInfo.new(0.2),{
+				Compkiller:_Animation(MainButton,_TI.t020,{
 					Rotation = -180
 				})
 			else
-				Compkiller:_Animation(MainButton,TweenInfo.new(0.2),{
+				Compkiller:_Animation(MainButton,_TI.t020,{
 					Rotation = 0
 				})
 			end;
@@ -7265,51 +7287,51 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Args.Signal = Signal:Connect(function(bool)
 			if bool then
-				Compkiller:_Animation(BlockText,TweenInfo.new(0.2),{
+				Compkiller:_Animation(BlockText,_TI.t020,{
 					TextTransparency = 0.100
 				});
 
-				Compkiller:_Animation(BlockLine,TweenInfo.new(0.2),{
+				Compkiller:_Animation(BlockLine,_TI.t020,{
 					BackgroundTransparency = 0.100
 				});
 
-				Compkiller:_Animation(ValueItems,TweenInfo.new(0.2),{
+				Compkiller:_Animation(ValueItems,_TI.t020,{
 					BackgroundTransparency = 0
 				});
 
-				Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
+				Compkiller:_Animation(UIStroke,_TI.t020,{
 					Transparency = 0
 				});
 
-				Compkiller:_Animation(ValueText,TweenInfo.new(0.32),{
+				Compkiller:_Animation(ValueText,_TI.t032,{
 					TextTransparency = 0
 				});
 
-				Compkiller:_Animation(MainButton,TweenInfo.new(0.2),{
+				Compkiller:_Animation(MainButton,_TI.t020,{
 					ImageTransparency = 0
 				});
 			else
-				Compkiller:_Animation(BlockText,TweenInfo.new(0.2),{
+				Compkiller:_Animation(BlockText,_TI.t020,{
 					TextTransparency = 1
 				});
 
-				Compkiller:_Animation(BlockLine,TweenInfo.new(0.2),{
+				Compkiller:_Animation(BlockLine,_TI.t020,{
 					BackgroundTransparency = 1 
 				});
 
-				Compkiller:_Animation(ValueItems,TweenInfo.new(0.2),{
+				Compkiller:_Animation(ValueItems,_TI.t020,{
 					BackgroundTransparency = 1
 				});
 
-				Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
+				Compkiller:_Animation(UIStroke,_TI.t020,{
 					Transparency = 1
 				});
 
-				Compkiller:_Animation(ValueText,TweenInfo.new(0.2),{
+				Compkiller:_Animation(ValueText,_TI.t020,{
 					TextTransparency = 1
 				});
 
-				Compkiller:_Animation(MainButton,TweenInfo.new(0.2),{
+				Compkiller:_Animation(MainButton,_TI.t020,{
 					ImageTransparency = 1
 				});
 			end;
@@ -7318,7 +7340,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 		Args.Link = Compkiller:_LoadOption({
 			AddLink = function(self ,Name , Default)
 				return Compkiller:_AddLinkValue(Name , Default , LinkValues , LinkValues , {
-					Tween = TweenInfo.new(0.2)	
+					Tween = _TI.t020	
 				} , Signal);
 			end,
 			Root = Dropdown
@@ -7615,7 +7637,7 @@ function Compkiller.new(Config)
 		end;
 	end)
 
-	Compkiller:_Animation(MainFrame,TweenInfo.new(1,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
+	Compkiller:_Animation(MainFrame,_TI.t100,{
 		Size = Config.Scale
 	});
 
@@ -7764,13 +7786,13 @@ function Compkiller.new(Config)
 		UICorner.Parent = Highlight
 
 		Userinfo.MouseEnter:Connect(function()
-			Compkiller:_Animation(Highlight,TweenInfo.new(0.2),{
+			Compkiller:_Animation(Highlight,_TI.t020,{
 				BackgroundTransparency = 0.925
 			});
 		end);
 
 		Userinfo.MouseLeave:Connect(function()
-			Compkiller:_Animation(Highlight,TweenInfo.new(0.2),{
+			Compkiller:_Animation(Highlight,_TI.t020,{
 				BackgroundTransparency = 1
 			});
 		end);
@@ -7868,6 +7890,11 @@ function Compkiller.new(Config)
 		Compkiller:_AddDragBlacklist(TabButtons);
 	end;
 
+	-- Fix C1: TweenInfo objects cached as upvalues — created once, reused on every open/close
+	local _TW_FAST  = _TI.t020
+	local _TW_MED   = _TI.t030
+	local _TW_SLIDE = _TI.t035
+	local _TW_SNAP  = _TI.t010
 	WindowOpen:Connect(function(v)
 		if WindowArgs.PerformanceMode then
 			MainFrame.BackgroundTransparency = (v and 0) or 1;
@@ -7875,105 +7902,41 @@ function Compkiller.new(Config)
 		end;
 
 		if v then
-			Compkiller:_Animation(MainFrame,TweenInfo.new(0.2),{
-				Size = Config.Scale
-			})
-
-			Compkiller:_Animation(TabButtonScrollingFrame,TweenInfo.new(0.35),{
-				Position = UDim2.new(0.5, 0, 0.5, 0)
-			})
-
-			Compkiller:_Animation(CompLogo,TweenInfo.new(0.2),{
-				ImageTransparency = 0
-			})
-
-			Compkiller:_Animation(WindowLabel,TweenInfo.new(0.2),{
-				TextTransparency = 0
-			})
-
-			Compkiller:_Animation(UserProfile,TweenInfo.new(0.2),{
-				ImageTransparency = 0
-			})
-
-			Compkiller:_Animation(UserText,TweenInfo.new(0.2),{
-				TextTransparency = 0
-			})
-
-			Compkiller:_Animation(ExpireText,TweenInfo.new(0.2),{
-				TextTransparency = 0.5
-			})
-
-			-- If tab is already hovered when window reopens, show pill immediately
+			Compkiller:_Animation(MainFrame,_TW_FAST,{ Size = Config.Scale })
+			Compkiller:_Animation(TabButtonScrollingFrame,_TW_SLIDE,{ Position = UDim2.new(0.5,0,0.5,0) })
+			Compkiller:_Animation(CompLogo,_TW_FAST,{ ImageTransparency = 0 })
+			Compkiller:_Animation(WindowLabel,_TW_FAST,{ TextTransparency = 0 })
+			Compkiller:_Animation(UserProfile,_TW_FAST,{ ImageTransparency = 0 })
+			Compkiller:_Animation(UserText,_TW_FAST,{ TextTransparency = 0 })
+			Compkiller:_Animation(ExpireText,_TW_FAST,{ TextTransparency = 0.5 })
 			if WindowArgs._PillActive and WindowArgs._PremiumBadge and TabHover:GetValue() then
-				Compkiller:_Animation(WindowArgs._PremiumBadge, TweenInfo.new(0.2), {
-					TextTransparency = 0
-				})
+				Compkiller:_Animation(WindowArgs._PremiumBadge,_TW_FAST,{ TextTransparency = 0 })
 			end
-
-			Compkiller:_Animation(MainFrame,TweenInfo.new(0.2),{
-				BackgroundTransparency = 0
-			})
-
-			Compkiller:_Animation(LineFrame1,TweenInfo.new(0.3),{
-				BackgroundTransparency = 0,
-				Size = UDim2.new(0, 20, 1, 0)
-			})
-
-			Compkiller:_Animation(TabFrame,TweenInfo.new(0.2),{
-				BackgroundTransparency = TabFrameBaseTrans
-			})
+			Compkiller:_Animation(MainFrame,_TW_FAST,{ BackgroundTransparency = 0 })
+			Compkiller:_Animation(LineFrame1,_TW_MED,{ BackgroundTransparency = 0, Size = UDim2.new(0,20,1,0) })
+			Compkiller:_Animation(TabFrame,_TW_FAST,{ BackgroundTransparency = TabFrameBaseTrans })
 		else
-			Compkiller:_Animation(MainFrame,TweenInfo.new(0.2),{
-				Size = UDim2.new(math.max(Config.Scale.X.Scale - 0.05,0) , Config.Scale.X.Offset - 10 , math.max(Config.Scale.Y.Scale - 0.05,0) , Config.Scale.Y.Offset - 10)
+			Compkiller:_Animation(MainFrame,_TW_FAST,{
+				Size = UDim2.new(math.max(Config.Scale.X.Scale-0.05,0),Config.Scale.X.Offset-10,math.max(Config.Scale.Y.Scale-0.05,0),Config.Scale.Y.Offset-10)
 			})
-
-			Compkiller:_Animation(TabButtonScrollingFrame,TweenInfo.new(0.35),{
-				Position = UDim2.new(1.5, 100, 0.5, 0)
-			})
-
-			Compkiller:_Animation(LineFrame1,TweenInfo.new(0.1),{
-				BackgroundTransparency = 1,
-				Size = UDim2.new(0, 1, 1, 0)
-			})
-
-			Compkiller:_Animation(CompLogo,TweenInfo.new(0.2),{
-				ImageTransparency = 1
-			})
-
-			Compkiller:_Animation(WindowLabel,TweenInfo.new(0.2),{
-				TextTransparency = 1
-			})
-
-			Compkiller:_Animation(UserProfile,TweenInfo.new(0.2),{
-				ImageTransparency = 1
-			})
-
-			Compkiller:_Animation(UserText,TweenInfo.new(0.2),{
-				TextTransparency = 1
-			})
-
-			Compkiller:_Animation(ExpireText,TweenInfo.new(0.2),{
-				TextTransparency = 1
-			})
-
+			Compkiller:_Animation(TabButtonScrollingFrame,_TW_SLIDE,{ Position = UDim2.new(1.5,100,0.5,0) })
+			Compkiller:_Animation(LineFrame1,_TW_SNAP,{ BackgroundTransparency = 1, Size = UDim2.new(0,1,1,0) })
+			Compkiller:_Animation(CompLogo,_TW_FAST,{ ImageTransparency = 1 })
+			Compkiller:_Animation(WindowLabel,_TW_FAST,{ TextTransparency = 1 })
+			Compkiller:_Animation(UserProfile,_TW_FAST,{ ImageTransparency = 1 })
+			Compkiller:_Animation(UserText,_TW_FAST,{ TextTransparency = 1 })
+			Compkiller:_Animation(ExpireText,_TW_FAST,{ TextTransparency = 1 })
 			if WindowArgs._PremiumBadge then
-				Compkiller:_Animation(WindowArgs._PremiumBadge,TweenInfo.new(0.2),{
-					TextTransparency = 1
-				})
+				Compkiller:_Animation(WindowArgs._PremiumBadge,_TW_FAST,{ TextTransparency = 1 })
 			end
-
-			Compkiller:_Animation(MainFrame,TweenInfo.new(0.2),{
-				BackgroundTransparency = 1
-			})
-
-			Compkiller:_Animation(TabFrame,TweenInfo.new(0.1),{
-				BackgroundTransparency = 1
-			})
+			Compkiller:_Animation(MainFrame,_TW_FAST,{ BackgroundTransparency = 1 })
+			Compkiller:_Animation(TabFrame,_TW_SNAP,{ BackgroundTransparency = 1 })
 		end;
 	end);
 
+	local _TW_TAB_HOVER = TweenInfo.new(0.45, Enum.EasingStyle.Quint)  -- Fix C2: cached
 	TabHover:Connect(function(value)
-		local Style = TweenInfo.new(0.45,Enum.EasingStyle.Quint);
+		local Style = _TW_TAB_HOVER;
 
 		if value then
 			Compkiller:_Animation(TabFrame , Style , {
@@ -8130,7 +8093,7 @@ function Compkiller.new(Config)
 			Compkiller:Drag(UserSettings , UserSettings, 0.15);
 
 			UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
-				Compkiller:_Animation(UserSettings,TweenInfo.new(0.2),{
+				Compkiller:_Animation(UserSettings,_TI.t020,{
 					Size = UDim2.new(0, 235, 0, UIListLayout.AbsoluteContentSize.Y + 50)
 				})
 			end);
@@ -8147,37 +8110,37 @@ function Compkiller.new(Config)
 				if Value then
 					Signal:Fire(true);
 
-					Compkiller:_Animation(UserSettings,TweenInfo.new(0.2),{
+					Compkiller:_Animation(UserSettings,_TI.t020,{
 						BackgroundTransparency = 0.250,
 					});
 
-					Compkiller:_Animation(SectionFrame,TweenInfo.new(0.2),{
+					Compkiller:_Animation(SectionFrame,_TI.t020,{
 						BackgroundTransparency = 0,
 					});
 
-					Compkiller:_Animation(HeaderText,TweenInfo.new(0.2),{
+					Compkiller:_Animation(HeaderText,_TI.t020,{
 						TextTransparency = 0,
 					});
 
-					Compkiller:_Animation(ImageLabel,TweenInfo.new(0.2),{
+					Compkiller:_Animation(ImageLabel,_TI.t020,{
 						ImageTransparency = 0.5,
 					});
 				else
 					Signal:Fire(false);
 
-					Compkiller:_Animation(UserSettings,TweenInfo.new(0.2),{
+					Compkiller:_Animation(UserSettings,_TI.t020,{
 						BackgroundTransparency = 1,
 					});
 
-					Compkiller:_Animation(SectionFrame,TweenInfo.new(0.2),{
+					Compkiller:_Animation(SectionFrame,_TI.t020,{
 						BackgroundTransparency = 1,
 					});
 
-					Compkiller:_Animation(HeaderText,TweenInfo.new(0.2),{
+					Compkiller:_Animation(HeaderText,_TI.t020,{
 						TextTransparency = 1,
 					});
 
-					Compkiller:_Animation(ImageLabel,TweenInfo.new(0.2),{
+					Compkiller:_Animation(ImageLabel,_TI.t020,{
 						ImageTransparency = 1,
 					});
 				end;
@@ -8254,7 +8217,7 @@ function Compkiller.new(Config)
 		UIGradient.Transparency = NumberSequence.new{NumberSequenceKeypoint.new(0.00, 1.00), NumberSequenceKeypoint.new(0.05, 0.21), NumberSequenceKeypoint.new(0.50, 0.00), NumberSequenceKeypoint.new(0.96, 0.17), NumberSequenceKeypoint.new(1.00, 1.00)}
 		UIGradient.Parent = Frame
 
-		local Tween = TweenInfo.new(0.35,Enum.EasingStyle.Quint);
+		local Tween = _TI.t035q;
 
 		TabHover:Connect(function(bool)
 			if bool then
@@ -8283,7 +8246,7 @@ function Compkiller.new(Config)
 			Icon = "eye",
 		});
 
-		local Tween = TweenInfo.new(0.35,Enum.EasingStyle.Quint);
+		local Tween = _TI.t035q;
 		local TabOpenSignal = Compkiller.__SIGNAL(false);
 
 		local TabArgs = {
@@ -8610,38 +8573,38 @@ function Compkiller.new(Config)
 
 				if bool then
 
-					Compkiller:_Animation(Highlight,TweenInfo.new(0.2),{
+					Compkiller:_Animation(Highlight,_TI.t020,{
 						BackgroundTransparency = 0,
 						Size = UDim2.new(0, 5, 0, 10)
 					})
 
-					Compkiller:_Animation(Frame,TweenInfo.new(0.2),{
+					Compkiller:_Animation(Frame,_TI.t020,{
 						BackgroundTransparency = 0
 					})
 
-					Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
+					Compkiller:_Animation(UIStroke,_TI.t020,{
 						Transparency = 0
 					})
 
-					Compkiller:_Animation(TextLabel,TweenInfo.new(0.2),{
+					Compkiller:_Animation(TextLabel,_TI.t020,{
 						TextTransparency = 0
 					})
 				else
 
-					Compkiller:_Animation(Highlight,TweenInfo.new(0.2),{
+					Compkiller:_Animation(Highlight,_TI.t020,{
 						BackgroundTransparency = 1,
 						Size = UDim2.new(0, 5, 0, 2)
 					})
 
-					Compkiller:_Animation(Frame,TweenInfo.new(0.2),{
+					Compkiller:_Animation(Frame,_TI.t020,{
 						BackgroundTransparency = 1
 					})
 
-					Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
+					Compkiller:_Animation(UIStroke,_TI.t020,{
 						Transparency = 1
 					})
 
-					Compkiller:_Animation(TextLabel,TweenInfo.new(0.2),{
+					Compkiller:_Animation(TextLabel,_TI.t020,{
 						TextTransparency = 0.5
 					})
 				end;
@@ -9131,7 +9094,7 @@ function Compkiller.new(Config)
 			Property = 'TextColor3'
 		});
 
-		local Tween = TweenInfo.new(0.35,Enum.EasingStyle.Quint);
+		local Tween = _TI.t035q;
 
 		do -- Fix 1: fire visibility change once on threshold cross
 			local _tabVis = Highlight.BackgroundTransparency <= 0.99
@@ -9970,7 +9933,7 @@ function Compkiller.new(Config)
 				Left.Size = UDim2.new(1,0,1,0)
 			end;
 
-			local Tween = TweenInfo.new(0.35,Enum.EasingStyle.Quint);
+			local Tween = _TI.t035q;
 
 			do -- Fix 1: fire visibility change once on threshold cross
 				local _tabVis = Internal.Highlight.BackgroundTransparency <= 0.99
@@ -10165,7 +10128,7 @@ function Compkiller.new(Config)
 				Left.Size = UDim2.new(1, -1, 1, -1)
 			end;
 
-			local Tween = TweenInfo.new(0.35,Enum.EasingStyle.Quint);
+			local Tween = _TI.t035q;
 
 			do -- Fix 1: fire visibility change once on threshold cross, not every tween frame
 				local _tabVis = Highlight.BackgroundTransparency <= 0.99
@@ -10469,11 +10432,11 @@ function Compkiller.new(Config)
 					local RefPos = Parent.AbsolutePosition.Y + Parent.AbsoluteSize.Y;
 
 					if (Section:GetAttribute('Height') and not Compkiller:_IsMobile() and FullScale <= RefPos) then
-						Compkiller:_Animation(Section,TweenInfo.new(0.4,Enum.EasingStyle.Quint),{
+						Compkiller:_Animation(Section,_TI.t040q,{
 							Size = UDim2.new(1, 0, 0, math.abs(Section:GetAttribute('Height')) + 5)
 						});
 					else
-						Compkiller:_Animation(Section,TweenInfo.new(0.4,Enum.EasingStyle.Quint),{
+						Compkiller:_Animation(Section,_TI.t040q,{
 							Size = UDim2.new(1, 0, 0, math.abs(UIListLayout.AbsoluteContentSize.Y) - 1)
 						});
 
@@ -10486,7 +10449,7 @@ function Compkiller.new(Config)
 				else
 					TabArgs.SectionClose[Parent][Section] = Section;
 
-					Compkiller:_Animation(Section,TweenInfo.new(0.4,Enum.EasingStyle.Quint),{
+					Compkiller:_Animation(Section,_TI.t040q,{
 						Size = UDim2.new(1, 0, 0, 35)
 					});
 				end;
@@ -10567,27 +10530,27 @@ function Compkiller.new(Config)
 
 			TabOpenSignal:Connect(function(bool)
 				if bool then
-					Compkiller:_Animation(Section,TweenInfo.new(0.21),{
+					Compkiller:_Animation(Section,_TI.t021,{
 						BackgroundTransparency = 0
 					})
 
-					Compkiller:_Animation(SectionText,TweenInfo.new(0.21),{
+					Compkiller:_Animation(SectionText,_TI.t021,{
 						TextTransparency = 0.500
 					})
 
-					Compkiller:_Animation(SectionClose,TweenInfo.new(0.21),{
+					Compkiller:_Animation(SectionClose,_TI.t021,{
 						ImageTransparency = 0.500
 					})
 				else
-					Compkiller:_Animation(Section,TweenInfo.new(0.21),{
+					Compkiller:_Animation(Section,_TI.t021,{
 						BackgroundTransparency = 1
 					})
 
-					Compkiller:_Animation(SectionText,TweenInfo.new(0.21),{
+					Compkiller:_Animation(SectionText,_TI.t021,{
 						TextTransparency = 1
 					})
 
-					Compkiller:_Animation(SectionClose,TweenInfo.new(0.21),{
+					Compkiller:_Animation(SectionClose,_TI.t021,{
 						ImageTransparency = 1
 					})
 				end;
@@ -10597,11 +10560,11 @@ function Compkiller.new(Config)
 				IsOpen = not IsOpen;
 
 				if IsOpen then
-					Compkiller:_Animation(SectionClose,TweenInfo.new(0.35),{
+					Compkiller:_Animation(SectionClose,_TI.t035,{
 						Rotation = 0
 					});
 				else
-					Compkiller:_Animation(SectionClose,TweenInfo.new(0.35),{
+					Compkiller:_Animation(SectionClose,_TI.t035,{
 						Rotation = -180
 					});
 				end;
@@ -10625,13 +10588,13 @@ function Compkiller.new(Config)
 			end
 
 			Header.MouseEnter:Connect(function()
-				Compkiller:_Animation(SectionText,TweenInfo.new(0.2),{
+				Compkiller:_Animation(SectionText,_TI.t020,{
 					TextTransparency = 0.25
 				})
 			end)	
 
 			Header.MouseLeave:Connect(function()
-				Compkiller:_Animation(SectionText,TweenInfo.new(0.2),{
+				Compkiller:_Animation(SectionText,_TI.t020,{
 					TextTransparency = 0.500
 				})
 			end)
@@ -10688,23 +10651,23 @@ function Compkiller.new(Config)
 			if v then
 				ImageLabel.ClipsDescendants = true;
 
-				Compkiller:_Animation(CloseWindow,TweenInfo.new(0.2),{
+				Compkiller:_Animation(CloseWindow,_TI.t020,{
 					Size = UDim2.new(0, 52, 0, 52),
 					BackgroundTransparency = 0.025
 				})
 
-				Compkiller:_Animation(ImageLabel,TweenInfo.new(0.2),{
+				Compkiller:_Animation(ImageLabel,_TI.t020,{
 					ImageTransparency = (ImageLabel:GetAttribute('Hover') and 0.1) or 0.35
 				})
 			else
 				ImageLabel.ClipsDescendants = false;
 
-				Compkiller:_Animation(CloseWindow,TweenInfo.new(0.2),{
+				Compkiller:_Animation(CloseWindow,_TI.t020,{
 					Size = UDim2.new(0, 0, 0, 23),
 					BackgroundTransparency = 1
 				})
 
-				Compkiller:_Animation(ImageLabel,TweenInfo.new(0.2),{
+				Compkiller:_Animation(ImageLabel,_TI.t020,{
 					ImageTransparency = 1
 				})
 			end;
@@ -10831,7 +10794,7 @@ function Compkiller.new(Config)
 			Compkiller:_Blur(BackFrame,Signal);
 
 			UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
-				Compkiller:_Animation(Watermark,TweenInfo.new(0.4),{
+				Compkiller:_Animation(Watermark,_TI.t040,{
 					Size = UDim2.new(0, UIListLayout.AbsoluteContentSize.X + 8, 0, 23)
 				});
 			end)
@@ -10958,7 +10921,7 @@ function Compkiller.new(Config)
 					ToggleCloseUI(true);
 
 					if WindowArgs.IsOpen then
-						Compkiller:_Animation(ImageLabel,TweenInfo.new(0.2),{
+						Compkiller:_Animation(ImageLabel,_TI.t020,{
 							ImageTransparency = 0.35
 						});
 
@@ -10966,7 +10929,7 @@ function Compkiller.new(Config)
 					else
 						ImageLabel:GetAttribute("Hover",true);
 
-						Compkiller:_Animation(ImageLabel,TweenInfo.new(0.2),{
+						Compkiller:_Animation(ImageLabel,_TI.t020,{
 							ImageTransparency = 0.1
 						});
 					end;
@@ -11198,8 +11161,13 @@ function Compkiller.new(Config)
 
 		local _lastTabX   = -1  -- dirty: skip size writes when tab width unchanged
 		local _lastSelY   = -1  -- dirty: skip selection tween when position unchanged
+		-- Fix D: cache TweenInfo objects outside loop — was 27 allocations/frame
+		local _TW_SEL_FAST = _TI.t010
+		local _TW_SEL_MOVE = _TI.t015
+		-- Set SelectionFrame color once here; no need to write it every frame
+		SelectionFrame.BackgroundColor3 = Compkiller.Colors.Highlight;
 		while true do RunService.Heartbeat:Wait();
-			-- Skip all per-frame work when window is closed (saves ~4 prop reads + cond tweens)
+			-- Skip all per-frame work when window is closed
 			if not WindowArgs.IsOpen then continue end
 
 			local _tabX = TabFrame.AbsoluteSize.X - 35
@@ -11209,32 +11177,32 @@ function Compkiller.new(Config)
 				MovementFrame.Size  = UDim2.new(1, _tabX, 1, 0);
 			end
 
-			SelectionFrame.BackgroundColor3 = Compkiller.Colors.Highlight;
+			-- BackgroundColor3 write removed from loop (set once above)
 
 			if WindowArgs.SelectedTab and WindowArgs.IsOpen then
 				local vili = -(TabButtons.AbsolutePosition.Y - WindowArgs.SelectedTab.AbsolutePosition.Y) + 4;
 				local distance = (SelectionFrame.Position.Y.Offset - vili);
 
 				if vili < 0 or vili > TabButtons.AbsoluteSize.Y then
-					Compkiller:_Animation(SelectionFrame , TweenInfo.new(0.1) , {
+					Compkiller:_Animation(SelectionFrame , _TW_SEL_FAST , {
 						BackgroundTransparency = 1
 					});
 				else
 					if math.abs(distance) <= 10 then
-						Compkiller:_Animation(SelectionFrame , TweenInfo.new(0.1) , {
+						Compkiller:_Animation(SelectionFrame , _TW_SEL_FAST , {
 							BackgroundTransparency = 0
 						});
 
 						SelectionFrame.Position = UDim2.new(1,5,0,math.ceil(vili));
 					else
-						Compkiller:_Animation(SelectionFrame , TweenInfo.new(0.15) , {
+						Compkiller:_Animation(SelectionFrame , _TW_SEL_MOVE , {
 							BackgroundTransparency = 0,
 							Position = UDim2.new(1,5,0,math.ceil(vili))
 						});
 					end;
 				end;
 			else
-				Compkiller:_Animation(SelectionFrame , TweenInfo.new(0.15) , {
+				Compkiller:_Animation(SelectionFrame , _TW_SEL_MOVE , {
 					BackgroundTransparency = 1
 				});
 			end;
@@ -11624,7 +11592,7 @@ function Compkiller:Loader(IconId,Duration)
 			});
 
 			task.delay(0.1,function(...)
-				Compkiller:_Animation(Vignette,TweenInfo.new(1,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
+				Compkiller:_Animation(Vignette,_TI.t100,{
 					ImageTransparency = 1
 				});
 
@@ -11825,14 +11793,14 @@ function Compkiller.newNotify()
 				local MainY = TitleScale.Y + ((Body.Text:byte() and BodyScale.Y) or 1);
 
 				if BlockFrame:GetAttribute('Already') then
-					Compkiller:_Animation(BlockFrame,TweenInfo.new(0.3),{
+					Compkiller:_Animation(BlockFrame,_TI.t030,{
 						Size = UDim2.new(0,MainX + 55,0,MainY + 35)
 					});
 				else
 					BlockFrame:SetAttribute('Already',true)
 					BlockFrame.Size = UDim2.new(0, MainX + 45, 0, 0);
 
-					Compkiller:_Animation(BlockFrame,TweenInfo.new(0.3),{
+					Compkiller:_Animation(BlockFrame,_TI.t030,{
 						Size = UDim2.new(0,MainX + 55,0,MainY + 35)
 					});
 				end;
@@ -11847,7 +11815,7 @@ function Compkiller.newNotify()
 
 				task.wait(0.3);
 
-				Compkiller:_Animation(BlockFrame,TweenInfo.new(0.3),{
+				Compkiller:_Animation(BlockFrame,_TI.t030,{
 					Size = UDim2.new(1,0,0,0)
 				});
 
@@ -13635,7 +13603,7 @@ Compkiller.MasterControl = function(...)
 				});
 
 				task.delay(0.1,function(...)
-					Compkiller:_Animation(Vignette,TweenInfo.new(1,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
+					Compkiller:_Animation(Vignette,_TI.t100,{
 						ImageTransparency = 1
 					});
 
