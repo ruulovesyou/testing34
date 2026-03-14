@@ -2709,8 +2709,8 @@ local _TI = {
     t020q = TweenInfo.new(0.20, Enum.EasingStyle.Quad),
     t027q = TweenInfo.new(0.275, Enum.EasingStyle.Quad),
     t040q = TweenInfo.new(0.40, Enum.EasingStyle.Quint),
-    t021  = _TI.t021,
-    t032  = _TI.t032,
+    t021  = TweenInfo.new(0.21),
+    t032  = TweenInfo.new(0.32),
     t100  = TweenInfo.new(1.0,  Enum.EasingStyle.Quint, Enum.EasingDirection.InOut),
 }
 
@@ -3015,7 +3015,7 @@ function Compkiller:Drag(InputFrame, MoveFrame, Speed)
 	local dragToggle: boolean = false;
 	local dragStart: Vector3 = nil;
 	local startPos: UDim2 = nil;
-	local Tween = TweenInfo.new(Speed);
+	-- Speed param kept for API compatibility; direct position assignment used (no tween)
 
 	local updateInput = function(input)
 		local delta = input.Position - dragStart;
