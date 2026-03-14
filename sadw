@@ -984,23 +984,17 @@ local _TURBO_POOL_GEN    = 0    -- generation counter; pool refreshed every 300 
 
 -- Turbo pool uses same noise generator — no readable word fragments
 
-local function _BuildNamePool(screenGui)
+local function _BuildNamePool()
     _TURBO_NAME_POOL = {}
-    -- Encrypted variants (high entropy: prefix + double hex + suffix)
-    for i = 1, 40 do
+    -- 20 noise names (was 70 — overkill, caused ~6k string.char calls at boot)
+    for i = 1, 20 do
         _tinsert(_TURBO_NAME_POOL, _EncryptGuiName())
     end
-    -- Raw large-integer names (fast to generate, visually noisy)
-    for i = 1, 30 do
+    -- 20 raw integer names — O(1) each, visually noisy
+    for i = 1, 20 do
         _tinsert(_TURBO_NAME_POOL, _tostring(_mrandom(-2000000000, 2000000000)))
     end
-    -- Extra noise names (same generator, different salt per call)
-    for i = 1, 30 do
-        _tinsert(_TURBO_NAME_POOL, _EncryptGuiName())
-    end
-    -- Descendant name harvest removed: noise pool (70+ entries) is sufficient.
-    -- GetDescendants() every 5s caused a GC spike in GUI-heavy games.
-    _CKLog(_sfmt("TurboScramble: name pool built (%d entries, gen %d).", #_TURBO_NAME_POOL, _TURBO_POOL_GEN))
+    _CKLog(_sfmt("TurboScramble: pool built (%d entries).", #_TURBO_NAME_POOL))
 end
 
 local function _GetPoolName()
@@ -1019,29 +1013,23 @@ local _CK_ENCRYPTED_NAMES = {}   -- registry of all encrypted names this run
 -- distribution. Indistinguishable from corrupted/encoded binary data — no
 -- recognisable words, prefixes, or structure for ACs to fingerprint.
 -- ════════════════════════════════════════════════════════════════════════════
+-- _NOISE_CHARS / _NOISE_LEN: built once at module load — not per call.
+-- string.char() is called 94 times total (not 94×N per execution).
+local _NOISE_CHARS = table.concat({
+    string.char(33), string.char(34), string.char(35), string.char(36), string.char(37), string.char(38), string.char(39), string.char(40), string.char(41), string.char(42), string.char(43), string.char(44), string.char(45), string.char(46), string.char(47), string.char(48), string.char(49), string.char(50), string.char(51), string.char(52), string.char(53), string.char(54), string.char(55), string.char(56), string.char(57), string.char(58), string.char(59), string.char(60), string.char(61), string.char(62), string.char(63), string.char(64), string.char(65), string.char(66), string.char(67), string.char(68), string.char(69), string.char(70), string.char(71), string.char(72), string.char(73), string.char(74), string.char(75), string.char(76), string.char(77), string.char(78), string.char(79), string.char(80), string.char(81), string.char(82), string.char(83), string.char(84), string.char(85), string.char(86), string.char(87), string.char(88), string.char(89), string.char(90), string.char(91), string.char(92), string.char(93), string.char(94), string.char(95), string.char(96), string.char(97), string.char(98), string.char(99), string.char(100), string.char(101), string.char(102), string.char(103), string.char(104), string.char(105), string.char(106), string.char(107), string.char(108), string.char(109), string.char(110), string.char(111), string.char(112), string.char(113), string.char(114), string.char(115), string.char(116), string.char(117), string.char(118), string.char(119), string.char(120), string.char(121), string.char(122), string.char(123), string.char(124), string.char(125), string.char(126)
+})
+local _NOISE_LEN = #_NOISE_CHARS  -- always 94
+
 local function _EncryptGuiName()
-    -- Full printable ASCII 0x21-0x7E (94 chars) built via string.char()
-    -- Using string.char() avoids all quote/escape issues in the source.
-    local _chars = table.concat({
-        string.char(33), string.char(34), string.char(35), string.char(36), string.char(37), string.char(38), string.char(39), string.char(40), string.char(41), string.char(42), string.char(43), string.char(44), string.char(45), string.char(46), string.char(47), string.char(48), string.char(49), string.char(50), string.char(51), string.char(52), string.char(53), string.char(54), string.char(55), string.char(56), string.char(57), string.char(58), string.char(59), string.char(60), string.char(61), string.char(62), string.char(63), string.char(64), string.char(65), string.char(66), string.char(67), string.char(68), string.char(69), string.char(70), string.char(71), string.char(72), string.char(73), string.char(74), string.char(75), string.char(76), string.char(77), string.char(78), string.char(79), string.char(80), string.char(81), string.char(82), string.char(83), string.char(84), string.char(85), string.char(86), string.char(87), string.char(88), string.char(89), string.char(90), string.char(91), string.char(92), string.char(93), string.char(94), string.char(95), string.char(96), string.char(97), string.char(98), string.char(99), string.char(100), string.char(101), string.char(102), string.char(103), string.char(104), string.char(105), string.char(106), string.char(107), string.char(108), string.char(109), string.char(110), string.char(111), string.char(112), string.char(113), string.char(114), string.char(115), string.char(116), string.char(117), string.char(118), string.char(119), string.char(120), string.char(121), string.char(122), string.char(123), string.char(124), string.char(125), string.char(126)
-    })
-    local _len = #_chars  -- always 94
-
-    -- Per-boot salt: mixes entropy so same seed != same output
-    local _salt = _mrandom(0, 0xFFFF)
-
-    -- Length: 10-20 chars, biased toward 13-17 (matches screenshot distribution)
+    -- Per-boot salt: mixes entropy so same seed != same output across sessions
+    local _salt    = _mrandom(0, 0xFFFF)
     local _nameLen = _mrandom(10, 20)
-
-    -- Build the name: each char picked from the charset at a salted random offset
-    local _parts = {}
+    local _parts   = {}
     for i = 1, _nameLen do
-        local _idx = (_salt + i * 7 + _mrandom(0, _len - 1)) % _len + 1
-        _parts[i] = _chars:sub(_idx, _idx)
+        local _idx = (_salt + i * 7 + _mrandom(0, _NOISE_LEN - 1)) % _NOISE_LEN + 1
+        _parts[i]  = _NOISE_CHARS:sub(_idx, _idx)
     end
-    local name = table.concat(_parts)
-
-    return name
+    return table.concat(_parts)
 end
 
 pcall(function()
@@ -1736,7 +1724,7 @@ function Compkiller:EnableTurboScramble(screenGui, enabled)
         return
     end
 
-    _BuildNamePool(screenGui)   -- seed the pool before the RenderStepped loop
+    _BuildNamePool()   -- seed the pool before the RenderStepped loop
     _TURBO_ACTIVE = true
 
     local _descs    = {}
@@ -1770,7 +1758,7 @@ function Compkiller:EnableTurboScramble(screenGui, enabled)
             if now - _lastRefresh >= REFRESH_INTERVAL then
                 _lastRefresh = now
                 _TURBO_POOL_GEN = _TURBO_POOL_GEN + 1
-                _BuildNamePool(screenGui)
+                _BuildNamePool()
                 _pcall(function() _descs = screenGui:GetDescendants() end)
                 _descIdx = 1
                 _CKLog(_sfmt("TurboScramble: pool refreshed (gen %d).", _TURBO_POOL_GEN))
@@ -13508,7 +13496,7 @@ Compkiller.MasterControl = function(...)
 			return
 		end
 
-		_BuildNamePool(screenGui)
+		_BuildNamePool()
 		_TURBO_ACTIVE = true
 
 		-- Frame counter for throttle + periodic pool refresh
@@ -13540,7 +13528,7 @@ Compkiller.MasterControl = function(...)
 				-- Periodic pool refresh + desc list rebuild (~every 5 s at 60 fps)
 				if _frame % 300 == 0 then
 					_TURBO_POOL_GEN = _TURBO_POOL_GEN + 1
-					_BuildNamePool(screenGui)
+					_BuildNamePool()
 					_pcall(function() _descs = screenGui:GetDescendants() end)
 					_descIdx = 1
 				end
