@@ -2912,29 +2912,6 @@ function Compkiller:_Blur(element , WindowRemote)
 	return rbxsignal;
 end;
 
--- OPT-9: One shared InputChanged connection for the entire DragBlacklist, replacing the
--- previous design that added a new global UserInputService.InputChanged listener for
--- every single element that called _AddDragBlacklist. With many UI elements (sliders,
--- dropdowns, etc.) this was creating dozens of mouse-move listeners that all fired on
--- every cursor movement. Now there is exactly one listener that iterates the list.
-do
-	local _dragBL_sharedConn = nil
-	local function _ensureDragBLConn()
-		if _dragBL_sharedConn then return end
-		_dragBL_sharedConn = _TrackConn(UserInputService.InputChanged:Connect(function()
-			-- Walk backwards so we can remove safely while iterating
-			for i = #Compkiller.DragBlacklist, 1, -1 do
-				local f = Compkiller.DragBlacklist[i]
-				if f and not Compkiller:_IsMouseOverFrame(f) then
-					table.remove(Compkiller.DragBlacklist, i)
-				end
-			end
-		end))
-	end
-	-- Expose as a Compkiller method so _AddDragBlacklist can call it after Compkiller is defined
-	Compkiller._EnsureDragBLConn = _ensureDragBLConn
-end
-
 function Compkiller:_AddDragBlacklist(Frame)
 	local IsAdded = false;
 	local BASE_TIME = 0.01;
@@ -2963,9 +2940,11 @@ function Compkiller:_AddDragBlacklist(Frame)
 		SET_BLACKLIST(false);
 	end);
 
-	-- OPT-9: Per-element InputChanged listener removed.
-	-- The shared singleton connection (installed once above) handles all DragBlacklist cleanup.
-	Compkiller._EnsureDragBLConn()
+	_TrackConn(UserInputService.InputChanged:Connect(function()
+		if not Compkiller:_IsMouseOverFrame(Frame) then
+			SET_BLACKLIST(false);
+		end
+	end));
 end;
 
 function Compkiller:_GetWindowFromElement(Element)
@@ -3143,23 +3122,13 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 			if bool then
 				Toggle:SetAttribute('Enabled',true);
 
-				Compkiller:_Animation(ToggleValue,rep.Tween,{
-					Position = UDim2.new(0.75, 0, 0.5, 0)
-				})
-
-				Compkiller:_Animation(Toggle,rep.Tween,{
-					BackgroundColor3 = Compkiller.Colors.Toggle
-				})
+				ToggleValue.Position = UDim2.new(0.75, 0, 0.5, 0)
+				Toggle.BackgroundColor3 = Compkiller.Colors.Toggle
 			else
 				Toggle:SetAttribute('Enabled',false);
 
-				Compkiller:_Animation(ToggleValue,rep.Tween,{
-					Position = UDim2.new(0.25, 0, 0.5, 0)
-				})
-
-				Compkiller:_Animation(Toggle,rep.Tween,{
-					BackgroundColor3 = Compkiller.Colors.DropColor
-				})
+				ToggleValue.Position = UDim2.new(0.25, 0, 0.5, 0)
+				Toggle.BackgroundColor3 = Compkiller.Colors.DropColor
 			end;
 		end;
 
@@ -4407,98 +4376,61 @@ function Compkiller:_AddColorPickerPanel(Button , Callback)
 		end;
 	end))
 
-	-- OPT-3: Replaced while task.wait() spin-loops with InputChanged event-driven handlers.
-	-- Previously each drag spawned a coroutine that polled at 60fps (×3 pickers = 180 ops/frame).
-	-- Now each handler only fires when the mouse actually moves — zero idle CPU cost.
-	do
-		local _hue_moveConn, _hue_endConn
-		ColorRedGreenBlue.InputBegan:Connect(function(Input)
-			if Input.UserInputType ~= Enum.UserInputType.MouseButton1 and Input.UserInputType ~= Enum.UserInputType.Touch then return end
-			Args.IsHold = true
-			local function _updateHue()
-				local ColorY  = ColorRedGreenBlue.AbsolutePosition.Y
-				local ColorYM = ColorY + ColorRedGreenBlue.AbsoluteSize.Y
-				H = ((math.clamp(Mouse.Y, ColorY, ColorYM) - ColorY) / (ColorYM - ColorY))
-				Args:Update()
-			end
-			_updateHue()
-			if _hue_moveConn then _hue_moveConn:Disconnect() end
-			if _hue_endConn  then _hue_endConn:Disconnect()  end
-			_hue_moveConn = UserInputService.InputChanged:Connect(function(i)
-				if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then
-					_updateHue()
-				end
-			end)
-			_hue_endConn = UserInputService.InputEnded:Connect(function(i)
-				if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-					Args.IsHold = false
-					if _hue_moveConn then _hue_moveConn:Disconnect(); _hue_moveConn = nil end
-					if _hue_endConn  then _hue_endConn:Disconnect();  _hue_endConn  = nil end
-				end
-			end)
-		end)
-	end
+	ColorRedGreenBlue.InputBegan:Connect(function(Input)
+		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+			Args.IsHold = true;
 
-	do
-		local _opc_moveConn, _opc_endConn
-		ColorOpc.InputBegan:Connect(function(Input)
-			if Input.UserInputType ~= Enum.UserInputType.MouseButton1 and Input.UserInputType ~= Enum.UserInputType.Touch then return end
-			Args.IsHold = true
-			local function _updateOpc()
-				Transparency = math.clamp((Mouse.X - ColorOpc.AbsolutePosition.X) / ColorOpc.AbsoluteSize.X, 0, 1)
-				TextLabel.Text = "#" .. tostring(Color3.fromHSV(H, S, V):ToHex())
-				Args:Update()
-			end
-			_updateOpc()
-			if _opc_moveConn then _opc_moveConn:Disconnect() end
-			if _opc_endConn  then _opc_endConn:Disconnect()  end
-			_opc_moveConn = UserInputService.InputChanged:Connect(function(i)
-				if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then
-					_updateOpc()
-				end
-			end)
-			_opc_endConn = UserInputService.InputEnded:Connect(function(i)
-				if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-					Args.IsHold = false
-					if _opc_moveConn then _opc_moveConn:Disconnect(); _opc_moveConn = nil end
-					if _opc_endConn  then _opc_endConn:Disconnect();  _opc_endConn  = nil end
-				end
-			end)
-		end)
-	end
+			while (UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or Args.IsHold) do task.wait()
+				local ColorY = ColorRedGreenBlue.AbsolutePosition.Y
+				local ColorYM = ColorY + ColorRedGreenBlue.AbsoluteSize.Y;
+				local Value = math.clamp(Mouse.Y, ColorY, ColorYM)
+				local Code = ((Value - ColorY) / (ColorYM - ColorY));
 
-	do
-		local _box_moveConn, _box_endConn
-		ColorPickBox.InputBegan:Connect(function(Input)
-			if Input.UserInputType ~= Enum.UserInputType.MouseButton1 and Input.UserInputType ~= Enum.UserInputType.Touch then return end
-			Args.IsHold = true
-			local function _updateBox()
-				local PosX   = ColorPickBox.AbsolutePosition.X
+				H = Code;
+
+				Args:Update();
+			end;
+		end;
+	end);
+
+	ColorOpc.InputBegan:Connect(function(Input)
+		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+			Args.IsHold = true;
+
+			while (UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or Args.IsHold) do task.wait()
+				local transparency = math.clamp((((Mouse.X) - ColorOpc.AbsolutePosition.X) / ColorOpc.AbsoluteSize.X), 0, 1);
+				local RealColor = Color3.fromHSV(H , S , V);
+
+				TextLabel.Text = "#" .. tostring(RealColor:ToHex())
+
+				Transparency = transparency;
+
+				Args:Update();
+			end;
+		end;
+	end);
+
+	ColorPickBox.InputBegan:Connect(function(Input)
+		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+			Args.IsHold = true;
+
+			while (UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or Args.IsHold) do task.wait();
+				local PosX = ColorPickBox.AbsolutePosition.X
 				local ScaleX = PosX + ColorPickBox.AbsoluteSize.X
-				local PosY   = ColorPickBox.AbsolutePosition.Y
+				local Value, PosY = math.clamp(Mouse.X, PosX, ScaleX), ColorPickBox.AbsolutePosition.Y
 				local ScaleY = PosY + ColorPickBox.AbsoluteSize.Y
-				S = (math.clamp(Mouse.X, PosX, ScaleX) - PosX) / (ScaleX - PosX)
-				V = 1 - ((math.clamp(Mouse.Y, PosY, ScaleY) - PosY) / (ScaleY - PosY))
-				TextLabel.Text = "#" .. tostring(Color3.fromHSV(H, S, V):ToHex())
-				Args:Update()
+				local Vals = math.clamp(Mouse.Y, PosY, ScaleY)
+				local RealColor = Color3.fromHSV(H , S , V);
+
+				S = (Value - PosX) / (ScaleX - PosX);
+				V = (1 - ((Vals - PosY) / (ScaleY - PosY)));
+
+				TextLabel.Text = "#" .. tostring(RealColor:ToHex())
+
+				Args:Update();
 			end
-			_updateBox()
-			if _box_moveConn then _box_moveConn:Disconnect() end
-			if _box_endConn  then _box_endConn:Disconnect()  end
-			_box_moveConn = UserInputService.InputChanged:Connect(function(i)
-				if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then
-					_updateBox()
-				end
-			end)
-			_box_endConn = UserInputService.InputEnded:Connect(function(i)
-				if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-					Args.IsHold = false
-					if _box_moveConn then _box_moveConn:Disconnect(); _box_moveConn = nil end
-					if _box_endConn  then _box_endConn:Disconnect();  _box_endConn  = nil end
-				end
-			end)
-		end)
-	end
+		end
+	end)
 
 	return Args;
 end;
@@ -4648,59 +4580,91 @@ function Compkiller:_DrawKeybinds(Window)
 		Root = Keybinds
 	};
 
-	-- OPT-R1: Replaced 60fps Heartbeat loop with a single event-driven AbsoluteContentSize
-	-- signal. Zero per-frame cost; only fires when keybind content actually changes.
-	do
-		local _TW_KB_SLOW  = _TI.t040
-		local _TW_KB_MED   = _TI.t025
-		local _lastHasContent = nil
-		local _lastVisState   = nil
-
-		local function _kbUpdate()
+	Ref.THREAD = _TrackThread(task.spawn(function()
+		local _lastContentY  = -1    -- dirty flag: only tween when size actually changes
+		local _lastHasContent = nil  -- dirty flag: only animate show/hide on state change
+		-- Fix E: TweenInfo cached as upvalues outside loop (was 11 allocations per dirty-flag trigger)
+		local _TW_KB_SLOW = _TI.t040
+		local _TW_KB_MED  = _TI.t025
+		while true do RunService.Heartbeat:Wait()
 			local _curY = UIListLayout.AbsoluteContentSize.Y
-			MainFrame.Size = UDim2.new(1, 30, 1, _curY + 1)
+			if _curY ~= _lastContentY then
+				_lastContentY = _curY
+				Compkiller:_Animation(MainFrame,_TW_KB_SLOW,{
+					Size = UDim2.new(1, 30, 1, _curY + 1)
+				});
+			end
 
-			local _hasContent = _curY > 1
+			local _hasContent = UIListLayout.AbsoluteContentSize.Y > 1
 			if _hasContent ~= _lastHasContent then
 				_lastHasContent = _hasContent
-				if _hasContent then
-					Compkiller:_Animation(IconFrame,_TW_KB_MED,{ BackgroundTransparency = 0.3 })
-					Compkiller:_Animation(Frame,_TW_KB_MED,{ BackgroundTransparency = 0 })
-					Compkiller:_Animation(HeadLabel,_TW_KB_MED,{ TextTransparency = 0 })
-					Compkiller:_Animation(Icon,_TW_KB_MED,{ ImageTransparency = 0 })
-					local LargF = 100
-					for _,v in next, MainFrame:GetChildren() do
-						local avg = v:GetAttribute('AvgScale')
-						if avg and avg > LargF then LargF = avg end
-					end
-					Compkiller:_Animation(Keybinds,_TW_KB_MED,{
-						BackgroundTransparency = 0.025,
-						Size = UDim2.new(0, LargF, 0, 25)
-					})
-				else
-					Compkiller:_Animation(HeadLabel,_TW_KB_MED,{ TextTransparency = 1 })
-					Compkiller:_Animation(Keybinds,_TW_KB_MED,{ BackgroundTransparency = 1 })
-					Compkiller:_Animation(IconFrame,_TW_KB_MED,{ BackgroundTransparency = 1 })
-					Compkiller:_Animation(Frame,_TW_KB_MED,{ BackgroundTransparency = 1 })
-					Compkiller:_Animation(Icon,_TW_KB_MED,{ ImageTransparency = 1 })
-				end
 			end
+			if _hasContent then
+				Compkiller:_Animation(IconFrame,_TW_KB_MED,{
+					BackgroundTransparency = 0.3
+				})
 
-			local vis = _hasContent
-			if vis ~= _lastVisState then
-				_lastVisState = vis
-				Keybinds.Visible = vis
-				if Compkiller.PerformanceMode then
-					Compkiller:_SetNilP(Keybinds, vis and Window or nil)
+				Compkiller:_Animation(Frame,_TW_KB_MED,{
+					BackgroundTransparency = 0
+				})
+
+				Compkiller:_Animation(HeadLabel,_TW_KB_MED,{
+					TextTransparency = 0
+				})
+
+				Compkiller:_Animation(Icon,_TW_KB_MED,{
+					ImageTransparency = 0
+				});
+
+				local LargF = 100;
+
+				for i,v in next , MainFrame:GetChildren() do
+					if v:GetAttribute('AvgScale') then
+						if v:GetAttribute('AvgScale') > LargF then
+							LargF = v:GetAttribute('AvgScale');
+						end;
+					end;
+				end;
+
+				Compkiller:_Animation(Keybinds,_TW_KB_MED,{
+					BackgroundTransparency = 0.025,
+					Size = UDim2.new(0, LargF, 0, 25)
+				})
+			else
+				Compkiller:_Animation(HeadLabel,_TW_KB_MED,{
+					TextTransparency = 1
+				})
+
+				Compkiller:_Animation(Keybinds,_TW_KB_MED,{
+					BackgroundTransparency = 1
+				})
+
+				Compkiller:_Animation(IconFrame,_TW_KB_MED,{
+					BackgroundTransparency = 1
+				})
+
+				Compkiller:_Animation(Frame,_TW_KB_MED,{
+					BackgroundTransparency = 1
+				})
+
+				Compkiller:_Animation(Icon,_TW_KB_MED,{
+					ImageTransparency = 1
+				});
+			end;
+
+			Keybinds.Visible = (Keybinds.BackgroundTransparency < 0.9 and true) or false;
+
+			if Compkiller.PerformanceMode then
+				if Keybinds.Visible then
+					Compkiller:_SetNilP(Keybinds , Window);
 				else
-					Compkiller:_SetNilP(Keybinds, Window)
-				end
-			end
-		end
-
-		_TrackConn(UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(_kbUpdate))
-		_kbUpdate()
-	end
+					Compkiller:_SetNilP(Keybinds , nil);
+				end;
+			else
+				Compkiller:_SetNilP(Keybinds , Window);
+			end;
+		end;
+	end));
 
 	function Ref:AddFrame()
 		local Keyholder = Instance.new("Frame")
@@ -5095,28 +5059,21 @@ function Compkiller:_KeybindHandler(Parent , ObjectType , ElementAPI , Signal , 
 		APIRef.Update();
 	end;
 
-	-- R3: Replaced 20Hz while-loop with a signal-driven update.
-	-- ElementAPI is a Compkiller element; fire on its value change signal instead of polling.
-	do
-		local function _kbhUpdate()
+	APIRef.Thread = _TrackThread(task.spawn(function()
+		while true do task.wait(0.05)
 			if APIRef.Mode ~= 1 then
 				if ElementAPI:GetValue() == APIRef.On then
 					KeybindFrame:SetVisible(true);
 				else
 					KeybindFrame:SetVisible(false);
 				end;
+
 				APIRef.Update();
 			else
 				KeybindFrame:SetVisible(false);
 			end;
-		end
-		-- Fire once immediately to set initial state
-		_kbhUpdate()
-		-- Hook into ElementAPI's underlying signal so we react on change, not on a timer
-		if ElementAPI.Signal then
-			ElementAPI.Signal:Connect(function() _kbhUpdate() end)
-		end
-	end
+		end;
+	end));
 
 	Parent.InputEnded:Connect(function(Input,Typing)
 		if Input.UserInputType == Enum.UserInputType.MouseButton2 and not Typing then
@@ -6528,9 +6485,6 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 			local Size = (Value - Config.Min) / (Config.Max - Config.Min);
 
-			-- R5: Slider size set instantly during drag — no tween needed while the thumb
-			-- is actively moving. Tweens during drag cause cascading in-flight tween
-			-- stacking even with dedup, and the animation is imperceptible while dragging.
 			SliderInput.Size = UDim2.new(math.clamp(Size,0.045,1), 0, 1, 0)
 
 			Config.Default = Value;
@@ -7969,13 +7923,7 @@ function Compkiller.new(Config)
 	end);
 
 	local _TW_TAB_HOVER = TweenInfo.new(0.45, Enum.EasingStyle.Quint)  -- Fix C2: cached
-	-- OPT-8: Guard the 8-tween burst behind a state-change check.
-	-- TabHover can fire repeatedly with the same value (e.g. repeated MouseEnter events),
-	-- previously launching a full 8-tween burst each time with no dedup at the signal level.
-	local _lastTabHoverState = nil
 	TabHover:Connect(function(value)
-		if value == _lastTabHoverState then return end
-		_lastTabHoverState = value
 		local Style = _TW_TAB_HOVER;
 
 		if value then
@@ -8695,13 +8643,45 @@ function Compkiller.new(Config)
 		local upd = function()
 			Scrolling.ScrollingEnabled = true
 			UilistLayout.VerticalFlex = Enum.UIFlexAlignment.None;
-			Scrolling.CanvasSize = UDim2.fromOffset(0, UilistLayout.AbsoluteContentSize.Y + 5)
+			Scrolling.CanvasSize = UDim2.fromOffset(0,UilistLayout.AbsoluteContentSize.Y + 5)
 		end;
 
-		-- R8: Replaced 1Hz polling loop with pure signal connection.
-		-- GetPropertyChangedSignal fires exactly when content size changes — zero idle cost.
-		_TrackConn(UilistLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(upd));
-		upd();
+		UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(upd);
+
+		return _TrackThread(task.defer(function()
+			while true do task.wait(1)
+				upd();
+			end;
+		end))
+
+		--[[local Parent: ScrollingFrame = UilistLayout.Parent;
+
+		Parent = Parent or Scrolling;
+
+		local Detection = function()
+			local Target = (UilistLayout.AbsoluteContentSize.Y);
+
+			for i,v in next , Parent:GetChildren() do task.wait(0.1)
+				local UIList = v:FindFirstChildWhichIsA('UIListLayout');
+				if v:IsA('Frame') and UIList then
+					if (UIList.AbsoluteContentSize.Y >= Target) or (v.AbsoluteSize.Y >= Target) or (UilistLayout.AbsoluteContentSize.Y > Parent.AbsoluteSize.Y) then
+						UilistLayout.VerticalFlex = Enum.UIFlexAlignment.None;
+						Parent.ScrollingEnabled = true;
+					else
+						Parent.ScrollingEnabled = false;
+						UilistLayout.VerticalFlex = Enum.UIFlexAlignment.None;
+					end;
+				end
+			end;
+		end;
+
+		local Executable = function()
+			while true do task.wait(0.15);
+				pcall(Detection);
+			end;
+		end;
+
+		table.insert(WindowArgs.THREADS,task.spawn(Executable))]]
 	end;
 
 	function WindowArgs:DrawConfig(Configuration , Internal)
@@ -10239,9 +10219,6 @@ function Compkiller.new(Config)
 			end);
 		end;
 
-		-- OPT-4: Stripped all task.wait() calls from inside _UpdateScrolling.
-		-- Previously yielded once per child (O(n) yields/call) plus 4 extra stray waits.
-		-- The outer polling loop is responsible for scheduling; the function itself is now pure sync.
 		function TabArgs:_UpdateScrolling(Frame , ListLayout)
 			local frame;
 
@@ -10251,7 +10228,7 @@ function Compkiller.new(Config)
 			local Offset = ListLayout.Padding.Offset;
 			local Childrens = Frame:GetChildren();
 
-			for i,v in next ,Childrens do
+			for i,v in next ,Childrens do task.wait();
 				if v:IsA('Frame') then
 					if v.LayoutOrder > last then
 						scale = scale + v.AbsoluteSize.Y + Offset
@@ -10262,10 +10239,14 @@ function Compkiller.new(Config)
 				end;
 			end;
 
+			task.wait();
+
 			if frame then
 				local originalScale = frame:GetAttribute('OrigninalScale');
 
 				if originalScale then
+					task.wait();
+
 					local Maximum = Frame.AbsoluteSize.Y;
 
 					local remainingHeight = Maximum - ((scale) - (frame.AbsoluteSize.Y));
@@ -10276,6 +10257,8 @@ function Compkiller.new(Config)
 						Frame:SetAttribute('LayoutStacks',((remainingHeight) + 5));
 					end
 
+					task.wait();
+
 					local caller = WindowArgs.THREADS[frame];
 
 					if caller then
@@ -10283,6 +10266,8 @@ function Compkiller.new(Config)
 					end;
 				end;
 			end;
+
+			task.wait();
 		end;
 
 		TabArgs.SectionInfo = {};
@@ -10292,22 +10277,21 @@ function Compkiller.new(Config)
 			[Upvalue.Right] = {},
 		};
 
-		-- R10: Converted scroll polling threads to pure event-driven signals.
-		-- Previous 10Hz dirty-flag loops still ran 10 times/sec per tab.
-		-- GetPropertyChangedSignal fires only when layout actually changes — zero idle cost.
-		_TrackConn(Upvalue.LeftLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
-			TabArgs:_UpdateScrolling(Upvalue.Left, Upvalue.LeftLayout);
-		end))
+		TabArgs.LeftThread = coroutine.wrap(function()
+			task.wait();
 
-		_TrackConn(Upvalue.RightLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
-			TabArgs:_UpdateScrolling(Upvalue.Right, Upvalue.RightLayout);
-		end))
+			while true do task.wait(0.05)
+				TabArgs:_UpdateScrolling(Upvalue.Left , Upvalue.LeftLayout);
+			end;
+		end);
 
-		-- Run once immediately to set initial scroll state
-		task.defer(function()
-			TabArgs:_UpdateScrolling(Upvalue.Left,  Upvalue.LeftLayout);
-			TabArgs:_UpdateScrolling(Upvalue.Right, Upvalue.RightLayout);
-		end)
+		TabArgs.RightThread = coroutine.wrap(function()
+			task.wait(0.1);
+
+			while true do task.wait(0.05)
+				TabArgs:_UpdateScrolling(Upvalue.Right , Upvalue.RightLayout);
+			end;
+		end);
 
 
 		function TabArgs:DrawSection(config)
@@ -10431,27 +10415,31 @@ function Compkiller.new(Config)
 
 				Section:SetAttribute('OrigninalScale',UIListLayout.AbsoluteContentSize.Y);
 
-				-- R9: Replaced _Animation/_TI.t040q tween with direct size assignment.
-				-- refresh() fires on every ChildAdded and content-size change — animating
-				-- during layout calculation causes cascading tween spam on every element add.
 				if IsOpen then
 					local FullScale = Section.AbsolutePosition.Y + UIListLayout.AbsoluteContentSize.Y;
-					local RefPos    = Parent.AbsolutePosition.Y + Parent.AbsoluteSize.Y;
+					local RefPos = Parent.AbsolutePosition.Y + Parent.AbsoluteSize.Y;
 
 					if (Section:GetAttribute('Height') and not Compkiller:_IsMobile() and FullScale <= RefPos) then
-						Section.Size = UDim2.new(1, 0, 0, math.abs(Section:GetAttribute('Height')) + 5)
+						Compkiller:_Animation(Section,_TI.t040q,{
+							Size = UDim2.new(1, 0, 0, math.abs(Section:GetAttribute('Height')) + 5)
+						});
 					else
-						Section.Size = UDim2.new(1, 0, 0, math.abs(UIListLayout.AbsoluteContentSize.Y) - 1)
+						Compkiller:_Animation(Section,_TI.t040q,{
+							Size = UDim2.new(1, 0, 0, math.abs(UIListLayout.AbsoluteContentSize.Y) - 1)
+						});
 
 						if Section:GetAttribute('Lasth') and UIListLayout.AbsoluteContentSize.Y > Section:GetAttribute('Lasth') then
-							Section:SetAttribute('Lasth', math.abs(UIListLayout.AbsoluteContentSize.Y) - 1);
+							Section:SetAttribute('Lasth',math.abs(UIListLayout.AbsoluteContentSize.Y) - 1);
 						end;
 					end;
 
 					TabArgs.SectionClose[Parent][Section] = nil;
 				else
 					TabArgs.SectionClose[Parent][Section] = Section;
-					Section.Size = UDim2.new(1, 0, 0, 35)
+
+					Compkiller:_Animation(Section,_TI.t040q,{
+						Size = UDim2.new(1, 0, 0, 35)
+					});
 				end;
 			end;
 
@@ -10463,10 +10451,7 @@ function Compkiller.new(Config)
 				local frameFound = 0;
 				local allscale = 0;
 
-				-- R6: Removed task.wait() per-child. This yielded once per Frame child on every
-				-- refreshScale call (called on ChildAdded + UIListLayout content size change).
-				-- With 10+ elements per section this was O(n) yields per content update.
-				for i,v: Frame in next , Childrens do
+				for i,v: Frame in next , Childrens do task.wait();
 					if v:IsA('Frame') then
 						if v ~= Section then
 							frameFound = frameFound + 1
@@ -10519,7 +10504,7 @@ function Compkiller.new(Config)
 			end;
 
 			Section.ChildAdded:Connect(function()
-				-- R7: Removed stray task.wait() — refreshScale is pure sync now (R6)
+				task.wait()
 				refreshScale();
 			end)
 
@@ -10918,22 +10903,33 @@ function Compkiller.new(Config)
 			end);
 		end;
 
-		-- R4: Replaced 0.15s polling loop with WindowOpen signal connection.
-		-- Was firing _Animation + ToggleCloseUI every 0.15s regardless of state change.
-		do
-			local function _updateCloseBtn(isOpen)
+		table.insert(WindowArgs.THREADS,_TrackThread(task.spawn(function()
+			while true do task.wait(0.15)
 				if Compkiller:_IsMobile() then
 					ToggleCloseUI(true);
-					Compkiller:_Animation(ImageLabel, _TI.t020, {
-						ImageTransparency = (isOpen and 0.35) or 0.1
-					});
+
+					if WindowArgs.IsOpen then
+						Compkiller:_Animation(ImageLabel,_TI.t020,{
+							ImageTransparency = 0.35
+						});
+
+						ImageLabel:GetAttribute("Hover",false);
+					else
+						ImageLabel:GetAttribute("Hover",true);
+
+						Compkiller:_Animation(ImageLabel,_TI.t020,{
+							ImageTransparency = 0.1
+						});
+					end;
 				else
-					ToggleCloseUI(not isOpen);
+					if not WindowArgs.IsOpen then
+						ToggleCloseUI(true);
+					else
+						ToggleCloseUI(false);
+					end
 				end;
 			end
-			WindowOpen:Connect(_updateCloseBtn)
-			_updateCloseBtn(WindowArgs.IsOpen)
-		end
+		end)));
 
 		_TrackConn(UserInputService.InputBegan:Connect(function(Input,Typing)
 			if not Typing and (Input.KeyCode == Config.Keybind or Input.KeyCode.Name == Config.Keybind) then
@@ -11151,53 +11147,55 @@ function Compkiller.new(Config)
 			Property = "BackgroundColor3"
 		});
 
-		local _lastTabX      = -1         -- dirty: skip size writes when tab width unchanged
-		local _lastVili      = math.huge  -- dirty: skip selection tween when position unchanged
-		local _lastSelHidden = nil        -- R2: dirty flag for else-branch — stops per-frame tween spam when no tab selected
-		-- Fix D: cache TweenInfo objects outside loop
+		local _lastTabX   = -1  -- dirty: skip size writes when tab width unchanged
+		local _lastSelY   = -1  -- dirty: skip selection tween when position unchanged
+		-- Fix D: cache TweenInfo objects outside loop — was 27 allocations/frame
 		local _TW_SEL_FAST = _TI.t010
 		local _TW_SEL_MOVE = _TI.t015
+		-- Set SelectionFrame color once here; no need to write it every frame
 		SelectionFrame.BackgroundColor3 = Compkiller.Colors.Highlight;
 		while true do RunService.Heartbeat:Wait();
+			-- Skip all per-frame work when window is closed
 			if not WindowArgs.IsOpen then continue end
 
 			local _tabX = TabFrame.AbsoluteSize.X - 35
 			if _tabX ~= _lastTabX then
 				_lastTabX = _tabX
-				BlurElement.Size   = UDim2.new(1, _tabX, 1, 0);
-				MovementFrame.Size = UDim2.new(1, _tabX, 1, 0);
+				BlurElement.Size    = UDim2.new(1, _tabX, 1, 0);
+				MovementFrame.Size  = UDim2.new(1, _tabX, 1, 0);
 			end
 
+			-- BackgroundColor3 write removed from loop (set once above)
+
 			if WindowArgs.SelectedTab and WindowArgs.IsOpen then
-				_lastSelHidden = false
 				local vili = -(TabButtons.AbsolutePosition.Y - WindowArgs.SelectedTab.AbsolutePosition.Y) + 4;
-				if vili ~= _lastVili then
-					_lastVili = vili
-					local distance = SelectionFrame.Position.Y.Offset - vili;
-					if vili < 0 or vili > TabButtons.AbsoluteSize.Y then
-						Compkiller:_Animation(SelectionFrame, _TW_SEL_FAST, { BackgroundTransparency = 1 });
-					elseif math.abs(distance) <= 10 then
-						Compkiller:_Animation(SelectionFrame, _TW_SEL_FAST, { BackgroundTransparency = 0 });
-						SelectionFrame.Position = UDim2.new(1, 5, 0, math.ceil(vili));
+				local distance = (SelectionFrame.Position.Y.Offset - vili);
+
+				if vili < 0 or vili > TabButtons.AbsoluteSize.Y then
+					Compkiller:_Animation(SelectionFrame , _TW_SEL_FAST , {
+						BackgroundTransparency = 1
+					});
+				else
+					if math.abs(distance) <= 10 then
+						Compkiller:_Animation(SelectionFrame , _TW_SEL_FAST , {
+							BackgroundTransparency = 0
+						});
+
+						SelectionFrame.Position = UDim2.new(1,5,0,math.ceil(vili));
 					else
-						Compkiller:_Animation(SelectionFrame, _TW_SEL_MOVE, {
+						Compkiller:_Animation(SelectionFrame , _TW_SEL_MOVE , {
 							BackgroundTransparency = 0,
-							Position = UDim2.new(1, 5, 0, math.ceil(vili))
+							Position = UDim2.new(1,5,0,math.ceil(vili))
 						});
 					end;
-				end
+				end;
 			else
-				-- R2: only fire the hide-tween once, not every Heartbeat frame
-				if _lastSelHidden ~= true then
-					_lastSelHidden = true
-					_lastVili = math.huge
-					Compkiller:_Animation(SelectionFrame, _TW_SEL_MOVE, { BackgroundTransparency = 1 });
-				end
+				Compkiller:_Animation(SelectionFrame , _TW_SEL_MOVE , {
+					BackgroundTransparency = 1
+				});
 			end;
 
-			-- R2: AlwayShowTab fired TabHover:Fire(true) every single frame.
-			-- Now gated: only fires once when the state needs to be set.
-			if WindowArgs.AlwayShowTab and not TabHover:GetValue() then
+			if WindowArgs.AlwayShowTab then
 				TabHover:Fire(true);
 			end;
 		end;
@@ -11987,27 +11985,20 @@ function Compkiller:_SmartAnimation(Self, Info, Property)
 
     local baseDuration = (Info and Info.Time) or 0.25
     local fpsScale     = math.clamp(currentFPS / 60, 0.5, 1.0)
+    local newDuration  = math.max(0.05, baseDuration * fpsScale)
 
-    -- OPT-6: Skip TweenInfo allocation entirely when FPS is healthy (≥57fps).
-    -- Previously allocated a new TweenInfo object on every single _Animation call,
-    -- defeating the purpose of the shared _TI constants table.
     local newInfo
-    if fpsScale >= 0.95 then
-        newInfo = Info or _TI.t025
+    if Info then
+        newInfo = TweenInfo.new(
+            newDuration,
+            Info.EasingStyle,
+            Info.EasingDirection,
+            Info.RepeatCount,
+            Info.Reverses,
+            Info.DelayTime
+        )
     else
-        local newDuration = math.max(0.05, baseDuration * fpsScale)
-        if Info then
-            newInfo = TweenInfo.new(
-                newDuration,
-                Info.EasingStyle,
-                Info.EasingDirection,
-                Info.RepeatCount,
-                Info.Reverses,
-                Info.DelayTime
-            )
-        else
-            newInfo = TweenInfo.new(newDuration)
-        end
+        newInfo = TweenInfo.new(newDuration)
     end
 
     for prop in pairs(Property) do
@@ -12030,11 +12021,7 @@ function Compkiller:_SmartAnimation(Self, Info, Property)
     end
     tween:Play()
 
-    -- OPT-7: Use :Once() instead of _TrackConn(tween.Completed:Connect(...)).
-    -- _TrackConn was appending every tween completion handler to the global
-    -- _CK_CONNECTIONS list, causing the cleanup scanner to slow down over time.
-    -- :Once() self-disconnects and never touches the connection registry.
-    tween.Completed:Once(function()
+    _TrackConn(tween.Completed:Connect(function()
         local idx = table.find(_OPT.ActiveTweens, tween)
         if idx then table.remove(_OPT.ActiveTweens, idx) end
         for prop in pairs(Property) do
@@ -12043,7 +12030,7 @@ function Compkiller:_SmartAnimation(Self, Info, Property)
                 _OPT.ActiveTweenMap[key] = nil
             end
         end
-    end)
+    end))
 
     return tween
 end
