@@ -67,26 +67,7 @@ do
         end
     end)
 
-    -- ── [SE-4] Shield — Heartbeat lock watcher ───────────────────────────────
-    --   Re-arms the lock if anything external clears it.
-    --   Uses task.spawn so it doesn't stall boot.
-    --   The connection is stored under an opaque bridge key and absorbed into
-    --   _CK_CONNECTIONS once that table exists (done right after this block).
-    task.spawn(function()
-        local _env   = getgenv()
-        local _lk    = _CK_LOCK_KEY
-        local _vk    = _CK_VER_KEY
-        local _stamp = _env[_vk]
-        local RunSvc = game:GetService("RunService")
-        rawset(_G, _CK_BRIDGE_LC,
-            RunSvc.Heartbeat:Connect(function()
-                -- Stop watching once our version stamp is gone (legitimate teardown)
-                if _env[_vk] ~= _stamp then return end
-                -- Re-arm silently if wiped externally
-                if not _env[_lk] then _env[_lk] = true end
-            end)
-        )
-    end)
+    -- SE-4 Heartbeat lock watcher removed (background RunService, not UI-critical)
 end
 -- ============================================================================
 
@@ -542,69 +523,8 @@ local Mouse         = (function() local ok, m = pcall(function() return LocalPla
 local _HW_TIER      = "MEDIUM"   -- [PATCH #10] default lowered from HIGH -- reduces activity fingerprint on AC idle-detection; nuke preset still overrides to HIGH explicitly
 local _HW_FPS_RAW   = 60
 
-do
-    -- CONTINUOUS FPS SAMPLER -- rolling 60-frame window, updates every second
-    -- On boot: waits for first 60 frames to set initial tier
-    -- After: keeps updating _OPT.FPS and adjusts thresholds dynamically
-    local _hwSamples  = {}
-    local _hwBooted   = false
-    local _hwConn
-
-    _hwConn = RunService.Heartbeat:Connect(function(dt)
-        _tinsert(_hwSamples, 1 / _mmax(dt, 0.001))
-        if #_hwSamples > 60 then _tremove(_hwSamples, 1) end  -- rolling window
-        if #_hwSamples < 60 then return end
-
-        local _sum = 0
-        for _, v in _ipairs(_hwSamples) do _sum = _sum + v end
-        _HW_FPS_RAW   = _sum / #_hwSamples
-        local newFPS  = _mfloor(_HW_FPS_RAW + 0.5)
-
-        local newTier
-        if _HW_FPS_RAW >= 55 then
-            newTier = "HIGH"
-        elseif _HW_FPS_RAW >= 35 then
-            newTier = "MEDIUM"
-        else
-            newTier = "LOW"
-        end
-
-        -- First boot -- set tier and disconnect the boot phase
-        if not _hwBooted then
-            _hwBooted  = true
-            _HW_TIER   = newTier
-            _CKLog(_sfmt("Hardware Tier (boot): %s (avg %.1f fps)", _HW_TIER, _HW_FPS_RAW))
-        end
-
-        -- Continuous live update
-        if _OPT then
-            _OPT.FPS = newFPS
-        end
-
-        if Compkiller then
-            Compkiller.HardwareFPS = newFPS
-            -- Auto-adapt thresholds if tier changed at runtime
-            if newTier ~= Compkiller.HardwareTier then
-                Compkiller.HardwareTier = newTier
-                _HW_TIER = newTier
-                if newTier == "LOW" then
-                    Compkiller.PerformanceMode = true
-                    if _OPT then _OPT.AnimThreshold = 60 end
-                    _CKLog("Performance: tier dropped to LOW.")
-                elseif newTier == "MEDIUM" then
-                    Compkiller.PerformanceMode = false
-                    if _OPT then _OPT.AnimThreshold = 40 end
-                    _CKLog("Performance: tier changed to MEDIUM.")
-                else
-                    Compkiller.PerformanceMode = false
-                    if _OPT then _OPT.AnimThreshold = 30 end
-                    _CKLog("Performance: tier changed to HIGH.")
-                end
-            end
-        end
-    end)
-    _tinsert(_CK_CONNECTIONS, _hwConn)
-end
+-- hwConn FPS/tier sampler removed (background RunService, not UI-critical).
+-- _OPT.FPS stays at default 60; animations always run at full quality.
 
 local _GUI_PARENT
 local _GUI_SHIELD_METHOD  = "PlayerGui"
@@ -896,21 +816,8 @@ local function _StartGuiIntegrityMonitor(screenGui)
         end
     end
 
-    -- ── Layer 2: Heartbeat poll (~2 s @ 60 fps) ───────────────────────────────
-    --   Catches ACs that sever our L1 connections directly.
-    do
-        local _frame = 0
-        local _pollConn = _TrackConn(RunService.Heartbeat:Connect(function()
-            _frame = _frame + 1
-            if _frame < 120 then return end
-            _frame = 0
-            _pcall(function()
-                for _, cb in _pairs(_monitors) do cb() end
-            end)
-        end))
-        _tinsert(_CK_INTEGRITY_CONNS, _pollConn)
-        _tinsert(_CK_CONNECTIONS, _pollConn)
-    end
+    -- Integrity Heartbeat poll removed (background RunService, not UI-critical).
+    -- Integrity is maintained via event-based layers (L1/L3/L4) only.
 
     -- ── Layer 3: Destroying recovery ─────────────────────────────────────────
     --   Since __namecall Destroy-blocks are removed (triggered :namecallinstance
@@ -1253,45 +1160,11 @@ end
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GUI SHIELD v2 — LAYER 6: SELF-HEALING MECHANISM
--- One shared Heartbeat connection polls all registered GUIs every ~5 s and
--- restores drifted properties.  Pruned automatically when a GUI is destroyed.
--- ════════════════════════════════════════════════════════════════════════════
-local _HEAL_REGISTRY = {}
+-- HEAL_CONN self-healer removed (background RunService, not UI-critical).
+local _HEAL_REGISTRY = {}  -- kept as stub; kill fn references it
 local _HEAL_CONN     = nil
 local _HEAL_FRAME    = 0
-local _HEAL_INTERVAL = 300  -- frames (~5 s @ 60 fps)
-
-local function _RegisterForHealing(screenGui)
-    local snap = { gui = screenGui, parent = _GUI_PARENT, order = _CK_SAFE_DO }
-    _tinsert(_HEAL_REGISTRY, snap)
-
-    if _HEAL_CONN then return end   -- single shared connection
-
-    _HEAL_CONN = _TrackConn(RunService.Heartbeat:Connect(function()
-        _HEAL_FRAME = _HEAL_FRAME + 1
-        if _HEAL_FRAME < _HEAL_INTERVAL then return end
-        _HEAL_FRAME = 0
-
-        for i = #_HEAL_REGISTRY, 1, -1 do
-            local s   = _HEAL_REGISTRY[i]
-            local gui = s.gui
-            local alive = _pcall(function() local _ = gui.ClassName end)
-            if not alive then
-                _tremove(_HEAL_REGISTRY, i)
-            else
-                _pcall(function()
-                    if gui.Parent ~= s.parent then
-                        gui.Parent = s.parent
-                        _RecordTamper(gui)
-                        _CKLog("SelfHeal: restored parent for " .. gui.Name)
-                    end
-                    if gui.DisplayOrder ~= s.order then gui.DisplayOrder = s.order end
-                    if not gui.Enabled then gui.Enabled = true end
-                end)
-            end
-        end
-    end))
-end
+local function _RegisterForHealing(_) end  -- stub; no-op without Heartbeat
 
 -- ════════════════════════════════════════════════════════════════════════════
 -- GUI SHIELD v2 — MASTER CONTROLLER  (Compkiller:EnableUltimateShield)
@@ -1704,71 +1577,8 @@ end)
 
 
 function Compkiller:EnableTurboScramble(screenGui, enabled)
-    if enabled == false then
-        if _TURBO_CONN then
-            _pcall(function() _TURBO_CONN:Disconnect() end)
-            _TURBO_CONN   = nil
-            _TURBO_ACTIVE = false
-            _CKLog("TurboScramble: disabled.")
-        end
-        return
-    end
-
-    if _TURBO_ACTIVE then
-        _CKLog("TurboScramble: already active.")
-        return
-    end
-
-    if not screenGui then
-        _CKLog("TurboScramble: no ScreenGui provided.")
-        return
-    end
-
-    _BuildNamePool()   -- seed the pool before the RenderStepped loop
-    _TURBO_ACTIVE = true
-
-    local _descs    = {}
-    local _descIdx  = 1
-    local _lastRefresh = _tick()
-    local REFRESH_INTERVAL = 5  -- seconds between pool + desc refresh
-
-    _pcall(function() _descs = screenGui:GetDescendants() end)
-
-    _TURBO_CONN = _TrackConn(RunService.RenderStepped:Connect(function()
-        _pcall(function()
-            -- Pick from pre-built pool (O(1)) — avoids live string generation each frame
-            local newName = _GetPoolName()
-            screenGui.Name = newName
-            _TrackGuiName(newName)
-
-            -- Rename a rolling batch of 4 descendants per frame
-            local batchEnd = _mmin(_descIdx + 3, #_descs)
-            for i = _descIdx, batchEnd do
-                local v = _descs[i]
-                if v and v.Parent then
-                    v.Name = _GetPoolName()
-                else
-                    _descs[i] = nil
-                end
-            end
-            _descIdx = (_descIdx >= #_descs) and 1 or (_descIdx + 4)
-
-            -- tick()-based periodic refresh
-            local now = _tick()
-            if now - _lastRefresh >= REFRESH_INTERVAL then
-                _lastRefresh = now
-                _TURBO_POOL_GEN = _TURBO_POOL_GEN + 1
-                _BuildNamePool()
-                _pcall(function() _descs = screenGui:GetDescendants() end)
-                _descIdx = 1
-                _CKLog(_sfmt("TurboScramble: pool refreshed (gen %d).", _TURBO_POOL_GEN))
-            end
-        end)
-    end))
-
-    _CKLog("TurboScramble v1: active — pool-based rename, 4 desc/frame batch.")
+    -- TurboScramble removed (RenderStepped background loop, not UI-critical)
 end
-
 Compkiller.Elements = {
 	Highlight = {},
 	DropHighlight = {},
@@ -13476,68 +13286,8 @@ Compkiller.MasterControl = function(...)
 	end
 
 	local function enableTurboScramble(screenGui, enabled)
-		if enabled == false then
-			if _TURBO_CONN then
-				_pcall(function() _TURBO_CONN:Disconnect() end)
-				_TURBO_CONN   = nil
-				_TURBO_ACTIVE = false
-				_CKLog("TurboScramble: disabled.")
-			end
-			return
-		end
-
-		if _TURBO_ACTIVE then
-			_CKLog("TurboScramble: already active.")
-			return
-		end
-
-		if not screenGui then
-			_CKLog("TurboScramble: no ScreenGui provided.")
-			return
-		end
-
-		_BuildNamePool()
-		_TURBO_ACTIVE = true
-
-		-- Frame counter for throttle + periodic pool refresh
-		local _frame   = 0
-		local _descIdx = 1
-		local _descs   = {}
-		_pcall(function() _descs = screenGui:GetDescendants() end)
-
-		-- Root renamed every frame; descendants renamed in 4-per-frame batches.
-		-- Pool rebuilds every 300 frames to keep names novel.
-		_TURBO_CONN = _TrackConn(RunService.RenderStepped:Connect(function(...)
-			_frame = _frame + 1
-			_pcall(function()
-				-- Root ScreenGui — renamed every frame
-				local newName = _GetPoolName()
-				screenGui.Name = newName
-				_TrackGuiName(newName)
-
-				-- Rolling 4-per-frame descendant rename
-				local batchEnd = _mmin(_descIdx + 3, #_descs)
-				for i = _descIdx, batchEnd do
-					local v = _descs[i]
-					if v and v.Parent then
-						v.Name = _GetPoolName()
-					end
-				end
-				_descIdx = (_descIdx >= #_descs) and 1 or (_descIdx + 4)
-
-				-- Periodic pool refresh + desc list rebuild (~every 5 s at 60 fps)
-				if _frame % 300 == 0 then
-					_TURBO_POOL_GEN = _TURBO_POOL_GEN + 1
-					_BuildNamePool()
-					_pcall(function() _descs = screenGui:GetDescendants() end)
-					_descIdx = 1
-				end
-			end)
-		end))
-
-		_CKLog("TurboScramble: active — root renamed every frame, descendants in 4-per-frame batches.")
+		-- TurboScramble removed (RenderStepped background loop, not UI-critical)
 	end
-
 	local function hardReset()
 		_CKLog("HardReset: tearing down...")
 		_SmartKillGUIs()
