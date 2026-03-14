@@ -2687,6 +2687,10 @@ function Compkiller:_Rounding(num, numDecimalPlaces)
 	return math.floor(num * mult + 0.5) / mult;
 end;
 
+-- Per-instance-per-property tween cache: cancels previous before starting new.
+-- Prevents dozens of conflicting Tweens piling up during spam tab switches.
+local _TW_CACHE = {}
+
 function Compkiller:_Animation(Self , Info , Property)
 	if _OPT and _OPT._AnimPaused then
 		for prop, val in pairs(Property) do
@@ -2697,8 +2701,29 @@ function Compkiller:_Animation(Self , Info , Property)
 	if _OPT and _OPT.Enabled then
 		return self:_SmartAnimation(Self, Info, Property)
 	end
+	-- Cancel any running tween on the same instance+property before creating a new one
+	local _instKey = tostring(Self)
+	for prop in pairs(Property) do
+		local _k = _instKey .. prop
+		local _prev = _TW_CACHE[_k]
+		if _prev then
+			_prev:Cancel()
+			_TW_CACHE[_k] = nil
+		end
+	end
 	local Tween = TweenService:Create(Self , Info or TweenInfo.new(0.25) , Property);
 	Tween:Play();
+	-- Cache the tween; auto-clear on completion to prevent table growth
+	for prop in pairs(Property) do
+		local _k = _instKey .. prop
+		_TW_CACHE[_k] = Tween
+	end
+	Tween.Completed:Connect(function()
+		for prop in pairs(Property) do
+			local _k = _instKey .. prop
+			if _TW_CACHE[_k] == Tween then _TW_CACHE[_k] = nil end
+		end
+	end)
 	return Tween;
 end;
 
@@ -2920,37 +2945,27 @@ end;
 
 function Compkiller.__SIGNAL(default)
 	local Bindable = Instance.new('BindableEvent');
-
-	Bindable.Name = string.sub(tostring({}),7);
-
-	Bindable:SetAttribute('Value',default);
+	local _value = default  -- plain Lua upvalue: no GetAttribute/SetAttribute overhead
 
 	local Binds = {
-		__signals = {}	
+		__signals = {}
 	};
 
 	function Binds:Connect(event)
-		event(Bindable:GetAttribute("Value"));
-
+		event(_value);
 		local signal = Bindable.Event:Connect(event);
-
-		table.insert(Binds.__signals,signal);
-
+		table.insert(Binds.__signals, signal);
 		return signal;
 	end;
 
 	function Binds:Fire(value)
-		local IsSame = Bindable:GetAttribute("Value") == value;
-
-		Bindable:SetAttribute('Value',value);
-
-		if not IsSame then
-			Bindable:Fire(value);
-		end;
+		if _value == value then return end  -- IsSame guard: pure Lua comparison
+		_value = value;
+		Bindable:Fire(value);
 	end;
 
 	function Binds:GetValue()
-		return Bindable:GetAttribute("Value");
+		return _value;
 	end;
 
 	return Binds;
@@ -8391,23 +8406,16 @@ function Compkiller.new(Config)
 		UIListLayout.Padding = UDim.new(0, 10)
 
 		-- Functions --
-		Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
-			if Highlight.BackgroundTransparency <= 0.99 then
-				ContainerTab.Visible = true;
-			else
-				ContainerTab.Visible = false;
-			end;
-
-			if Compkiller.PerformanceMode then
-				if ContainerTab.Visible then
-					Compkiller:_SetNilP(ContainerTab , TabMainFrame);
-				else
-					Compkiller:_SetNilP(ContainerTab , nil);
-				end;
-			else
-				Compkiller:_SetNilP(ContainerTab , TabMainFrame);
-			end;
-		end);
+		do -- Fix 1: fire visibility change once on threshold cross
+			local _tabVis = Highlight.BackgroundTransparency <= 0.99
+			Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
+				local _nowVis = Highlight.BackgroundTransparency <= 0.99
+				if _nowVis == _tabVis then return end
+				_tabVis = _nowVis
+				ContainerTab.Visible = _nowVis
+				Compkiller:_SetNilP(ContainerTab, _nowVis and TabMainFrame or nil)
+			end)
+		end
 
 		local TabOpen = function(bool)
 			if bool then
@@ -8452,6 +8460,7 @@ function Compkiller.new(Config)
 		if not WindowArgs.Tabs[1] then
 			TabOpenSignal:Fire(true);
 			TabOpen(true);
+			WindowArgs._OpenTabRemote = TabOpenSignal; -- track initially open tab
 		else
 			TabOpen(false);
 		end;
@@ -8486,61 +8495,25 @@ function Compkiller.new(Config)
 		TabOpenSignal:Connect(TabOpen);
 
 		TabHover:Connect(function(bool)
+			-- Fix 2+6: removed no-op TabButton.Size and Icon.Size tweens (identical in both branches)
 			if bool then
-				Compkiller:_Animation(TabButton,Tween,{
-					Size = UDim2.new(1, -10, 0, 32)
-				});
-
-				Compkiller:_Animation(Icon,Tween,{
-					Size = UDim2.new(0, 16, 0, 16),
-				});
-
-				Compkiller:_Animation(TabNameLabel,Tween,{
-					Size = UDim2.new(0, 200, 0, 25),
-					Position = UDim2.new(0, 43, 0.5, 0)
-				});
-
-				Compkiller:_Animation(UICorner,Tween,{
-					CornerRadius = UDim.new(0, 4)
-				});
-
-				Compkiller:_Animation(Highlight,Tween,{
-					Size = UDim2.new(1, -17, 1, 0),
-					Position = UDim2.new(0.5, 0, 0.5, 0)
-				});
+				Compkiller:_Animation(TabNameLabel,Tween,{ Position = UDim2.new(0, 43, 0.5, 0) });
+				Compkiller:_Animation(UICorner,Tween,{ CornerRadius = UDim.new(0, 4) });
+				Compkiller:_Animation(Highlight,Tween,{ Size = UDim2.new(1,-17,1,0), Position = UDim2.new(0.5,0,0.5,0) });
 			else
-				Compkiller:_Animation(UICorner,Tween,{
-					CornerRadius = UDim.new(0, 10)
-				});
-
-				Compkiller:_Animation(TabButton,Tween,{
-					Size = UDim2.new(1, -10, 0, 32)
-				});
-
-				Compkiller:_Animation(Icon,Tween,{
-					Size = UDim2.new(0, 16, 0, 16),
-				});
-
-				Compkiller:_Animation(TabNameLabel,Tween,{
-					Size = UDim2.new(0, 200, 0, 25),
-					Position = UDim2.new(0, 80, 0.5, 0)
-				});
-
-				Compkiller:_Animation(Highlight,Tween,{
-					Size = UDim2.new(1, -10,1, 5),
-					Position = UDim2.new(0.5, 0, 0.5, 0)
-				});
+				Compkiller:_Animation(TabNameLabel,Tween,{ Position = UDim2.new(0, 80, 0.5, 0) });
+				Compkiller:_Animation(UICorner,Tween,{ CornerRadius = UDim.new(0, 10) });
+				Compkiller:_Animation(Highlight,Tween,{ Size = UDim2.new(1,-10,1,5), Position = UDim2.new(0.5,0,0.5,0) });
 			end;
 		end);
 
 		Compkiller:_Input(TabButton,function()
-			for i,v in next, WindowArgs.Tabs do
-				if v.Root == TabButton then
-					v.Remote:Fire(true);
-				else
-					v.Remote:Fire(false);
-				end;
+			-- Fix 3: fire only prev-close + new-open (was iterating all N tabs)
+			if WindowArgs._OpenTabRemote then
+				WindowArgs._OpenTabRemote:Fire(false);
 			end;
+			TabOpenSignal:Fire(true);
+			WindowArgs._OpenTabRemote = TabOpenSignal;
 		end);
 
 		function TabArgs:DrawTab(TabConfig) -- Internal Tab
@@ -9160,24 +9133,16 @@ function Compkiller.new(Config)
 
 		local Tween = TweenInfo.new(0.35,Enum.EasingStyle.Quint);
 
-		Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
-			if Highlight.BackgroundTransparency <= 0.99 then
-				TabConfig.Visible = true;
-			else
-				TabConfig.Visible = false;
-			end;
-
-			if Compkiller.PerformanceMode then
-				if TabConfig.Visible then
-					Compkiller:_SetNilP(TabConfig , TabMainFrame);
-				else
-					Compkiller:_SetNilP(TabConfig , nil);
-				end;
-			else
-				Compkiller:_SetNilP(TabConfig , TabMainFrame);
-			end;
-
-		end)
+		do -- Fix 1: fire visibility change once on threshold cross
+			local _tabVis = Highlight.BackgroundTransparency <= 0.99
+			Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
+				local _nowVis = Highlight.BackgroundTransparency <= 0.99
+				if _nowVis == _tabVis then return end
+				_tabVis = _nowVis
+				TabConfig.Visible = _nowVis
+				Compkiller:_SetNilP(TabConfig, _nowVis and TabMainFrame or nil)
+			end)
+		end
 
 		local TabOpen = function(bool)
 			if bool then
@@ -9372,61 +9337,25 @@ function Compkiller.new(Config)
 		TabOpenSignal:Connect(TabOpen);
 
 		TabHover:Connect(function(bool)
+			-- Fix 2+6: removed no-op TabButton.Size and Icon.Size tweens (identical in both branches)
 			if bool then
-				Compkiller:_Animation(TabButton,Tween,{
-					Size = UDim2.new(1, -10, 0, 32)
-				});
-
-				Compkiller:_Animation(Icon,Tween,{
-					Size = UDim2.new(0, 16, 0, 16),
-				});
-
-				Compkiller:_Animation(TabNameLabel,Tween,{
-					Size = UDim2.new(0, 200, 0, 25),
-					Position = UDim2.new(0, 43, 0.5, 0)
-				});
-
-				Compkiller:_Animation(UICorner,Tween,{
-					CornerRadius = UDim.new(0, 4)
-				});
-
-				Compkiller:_Animation(Highlight,Tween,{
-					Size = UDim2.new(1, -17, 1, 0),
-					Position = UDim2.new(0.5, 0, 0.5, 0)
-				});
+				Compkiller:_Animation(TabNameLabel,Tween,{ Position = UDim2.new(0, 43, 0.5, 0) });
+				Compkiller:_Animation(UICorner,Tween,{ CornerRadius = UDim.new(0, 4) });
+				Compkiller:_Animation(Highlight,Tween,{ Size = UDim2.new(1,-17,1,0), Position = UDim2.new(0.5,0,0.5,0) });
 			else
-				Compkiller:_Animation(UICorner,Tween,{
-					CornerRadius = UDim.new(0, 10)
-				});
-
-				Compkiller:_Animation(TabButton,Tween,{
-					Size = UDim2.new(1, -10, 0, 32)
-				});
-
-				Compkiller:_Animation(Icon,Tween,{
-					Size = UDim2.new(0, 16, 0, 16),
-				});
-
-				Compkiller:_Animation(TabNameLabel,Tween,{
-					Size = UDim2.new(0, 200, 0, 25),
-					Position = UDim2.new(0, 80, 0.5, 0)
-				});
-
-				Compkiller:_Animation(Highlight,Tween,{
-					Size = UDim2.new(1, -10,1, 5),
-					Position = UDim2.new(0.5, 0, 0.5, 0)
-				});
+				Compkiller:_Animation(TabNameLabel,Tween,{ Position = UDim2.new(0, 80, 0.5, 0) });
+				Compkiller:_Animation(UICorner,Tween,{ CornerRadius = UDim.new(0, 10) });
+				Compkiller:_Animation(Highlight,Tween,{ Size = UDim2.new(1,-10,1,5), Position = UDim2.new(0.5,0,0.5,0) });
 			end;
 		end);
 
 		Compkiller:_Input(TabButton,function()
-			for i,v in next, WindowArgs.Tabs do
-				if v.Root == TabButton then
-					v.Remote:Fire(true);
-				else
-					v.Remote:Fire(false);
-				end;
+			-- Fix 3: fire only prev-close + new-open (was iterating all N tabs)
+			if WindowArgs._OpenTabRemote then
+				WindowArgs._OpenTabRemote:Fire(false);
 			end;
+			TabOpenSignal:Fire(true);
+			WindowArgs._OpenTabRemote = TabOpenSignal;
 		end);
 
 		function TabArgs:_DrawConfig()
@@ -10043,23 +9972,16 @@ function Compkiller.new(Config)
 
 			local Tween = TweenInfo.new(0.35,Enum.EasingStyle.Quint);
 
-			Internal.Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
-				if Internal.Highlight.BackgroundTransparency <= 0.99 then
-					TabContent.Visible = true;
-				else
-					TabContent.Visible = false;
-				end;
-
-				if Compkiller.PerformanceMode then
-					if TabContent.Visible then
-						Compkiller:_SetNilP(TabContent , Internal.Parent);
-					else
-						Compkiller:_SetNilP(TabContent , nil);
-					end;
-				else
-					Compkiller:_SetNilP(TabContent , Internal.Parent);
-				end;
-			end);
+			do -- Fix 1: fire visibility change once on threshold cross
+				local _tabVis = Internal.Highlight.BackgroundTransparency <= 0.99
+				Internal.Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
+					local _nowVis = Internal.Highlight.BackgroundTransparency <= 0.99
+					if _nowVis == _tabVis then return end
+					_tabVis = _nowVis
+					TabContent.Visible = _nowVis
+					Compkiller:_SetNilP(TabContent, _nowVis and Internal.Parent or nil)
+				end)
+			end
 
 			Upvalue.Left = Left;
 			Upvalue.Right = Right;
@@ -10245,23 +10167,16 @@ function Compkiller.new(Config)
 
 			local Tween = TweenInfo.new(0.35,Enum.EasingStyle.Quint);
 
-			Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
-				if Highlight.BackgroundTransparency <= 0.99 then
-					TabContent.Visible = true;
-				else
-					TabContent.Visible = false;
-				end;
-
-				if Compkiller.PerformanceMode then
-					if TabContent.Visible then
-						Compkiller:_SetNilP(TabContent , TabMainFrame);
-					else
-						Compkiller:_SetNilP(TabContent , nil);
-					end;
-				else
-					Compkiller:_SetNilP(TabContent , TabMainFrame);
-				end;
-			end)
+			do -- Fix 1: fire visibility change once on threshold cross, not every tween frame
+				local _tabVis = Highlight.BackgroundTransparency <= 0.99
+				Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
+					local _nowVis = Highlight.BackgroundTransparency <= 0.99
+					if _nowVis == _tabVis then return end
+					_tabVis = _nowVis
+					TabContent.Visible = _nowVis
+					Compkiller:_SetNilP(TabContent, _nowVis and TabMainFrame or nil)
+				end)
+			end
 
 			local TabOpen = function(bool)
 				if bool then
@@ -10331,61 +10246,25 @@ function Compkiller.new(Config)
 			TabOpenSignal:Connect(TabOpen);
 
 			TabHover:Connect(function(bool)
+				-- Fix 2+6: removed no-op TabButton.Size and Icon.Size tweens
 				if bool then
-					Compkiller:_Animation(TabButton,Tween,{
-						Size = UDim2.new(1, -10, 0, 32)
-					});
-
-					Compkiller:_Animation(Icon,Tween,{
-						Size = UDim2.new(0, 16, 0, 16),
-					});
-
-					Compkiller:_Animation(TabNameLabel,Tween,{
-						Size = UDim2.new(0, 200, 0, 25),
-						Position = UDim2.new(0, 43, 0.5, 0)
-					});
-
-					Compkiller:_Animation(UICorner,Tween,{
-						CornerRadius = UDim.new(0, 4)
-					});
-
-					Compkiller:_Animation(Highlight,Tween,{
-						Size = UDim2.new(1, -17, 1, 0),
-						Position = UDim2.new(0.5, 0, 0.5, 0)
-					});
+					Compkiller:_Animation(TabNameLabel,Tween,{ Position = UDim2.new(0, 43, 0.5, 0) });
+					Compkiller:_Animation(UICorner,Tween,{ CornerRadius = UDim.new(0, 4) });
+					Compkiller:_Animation(Highlight,Tween,{ Size = UDim2.new(1,-17,1,0), Position = UDim2.new(0.5,0,0.5,0) });
 				else
-					Compkiller:_Animation(UICorner,Tween,{
-						CornerRadius = UDim.new(0, 10)
-					});
-
-					Compkiller:_Animation(TabButton,Tween,{
-						Size = UDim2.new(1, -10, 0, 32)
-					});
-
-					Compkiller:_Animation(Icon,Tween,{
-						Size = UDim2.new(0, 16, 0, 16),
-					});
-
-					Compkiller:_Animation(TabNameLabel,Tween,{
-						Size = UDim2.new(0, 200, 0, 25),
-						Position = UDim2.new(0, 80, 0.5, 0)
-					});
-
-					Compkiller:_Animation(Highlight,Tween,{
-						Size = UDim2.new(1, -10,1, 5),
-						Position = UDim2.new(0.5, 0, 0.5, 0)
-					});
+					Compkiller:_Animation(TabNameLabel,Tween,{ Position = UDim2.new(0, 80, 0.5, 0) });
+					Compkiller:_Animation(UICorner,Tween,{ CornerRadius = UDim.new(0, 10) });
+					Compkiller:_Animation(Highlight,Tween,{ Size = UDim2.new(1,-10,1,5), Position = UDim2.new(0.5,0,0.5,0) });
 				end;
 			end);
 
 			Compkiller:_Input(TabButton,function()
-				for i,v in next, WindowArgs.Tabs do
-					if v.Root == TabButton then
-						v.Remote:Fire(true);
-					else
-						v.Remote:Fire(false);
-					end;
+				-- Fix 3: fire only prev-close + new-open (was iterating all N tabs)
+				if WindowArgs._OpenTabRemote then
+					WindowArgs._OpenTabRemote:Fire(false);
 				end;
+				TabOpenSignal:Fire(true);
+				WindowArgs._OpenTabRemote = TabOpenSignal;
 			end);
 		end;
 
