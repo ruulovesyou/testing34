@@ -9956,27 +9956,38 @@ function Compkiller.new(Config)
 			-- not via tween-frame threshold polling.
 			TabOpenSignal = Internal.Signal;
 
-			-- Set initial visibility directly based on current signal state
+			-- Set initial visibility based on current signal state.
+			-- If this sub-tab is the active one, evict all siblings from MainFrame first.
 			if not TabOpenSignal:GetValue() then
 				TabContent.Visible = false
 				TabContent.Parent = _GetNilFolder()
 			else
+				for _, child in ipairs(Internal.Parent:GetChildren()) do
+					if child ~= TabContent and child:IsA("Frame") then
+						child.Visible = false
+						child.Parent = _GetNilFolder()
+					end
+				end
 				TabContent.Visible = true
 				TabContent.Parent = Internal.Parent
 			end
 
 			-- React to FUTURE open/close events only — skip the immediate Connect fire.
-			-- Binds:Connect calls the callback instantly with the current value,
-			-- which causes every sub-tab to re-parent to Internal.Parent when the
-			-- first tab's Signal is true, stacking all content frames at once.
-			-- We use a plain boolean guard so only real state-change fires move the frame.
 			local _tabContentSeenFirst = false
 			TabOpenSignal:Connect(function(visible)
 				if not _tabContentSeenFirst then
 					_tabContentSeenFirst = true
-					return  -- skip the immediate fire; initial state set above
+					return  -- skip immediate fire; initial state already set above
 				end
 				if visible then
+					-- Hide every other TabContent currently in the same parent (MainFrame)
+					-- before showing this one — prevents stacking when switching sub-tabs.
+					for _, child in ipairs(Internal.Parent:GetChildren()) do
+						if child ~= TabContent and child:IsA("Frame") then
+							child.Visible = false
+							child.Parent = _GetNilFolder()
+						end
+					end
 					TabContent.Visible = true
 					TabContent.Parent = Internal.Parent
 				else
