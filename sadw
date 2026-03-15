@@ -10581,18 +10581,17 @@ function Compkiller.new(Config)
 			end);
 
 			if config.Closed then
-				local _closedOnce = false
-				TabOpenSignal:Connect(function(bool)
-					if bool and not _closedOnce then
-						_closedOnce = true
-						task.defer(function()
-							task.wait()
-							IsOpen = false
-							SectionClose.Rotation = -180
-							refresh()
-							refreshScale()
-						end)
-					end
+				-- Wait until UIListLayout has measured a real height (> 0),
+				-- then collapse. Avoids the race where AbsoluteContentSize is
+				-- still 0 when the section first appears, causing headers to stack.
+				task.spawn(function()
+					local _t = 0
+					repeat task.wait(0.05); _t = _t + 0.05 until
+						UIListLayout.AbsoluteContentSize.Y > 0 or _t >= 5
+					IsOpen = false
+					SectionClose.Rotation = -180
+					refresh()
+					refreshScale()
 				end)
 			end
 
