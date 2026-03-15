@@ -8380,9 +8380,8 @@ function Compkiller.new(Config)
 			if bool then
 				WindowArgs.SelectedTab = TabButton;
 
-				-- Show content immediately (no tween delay, no re-parent cost)
+				-- Show content immediately
 				ContainerTab.Visible = true
-				ContainerTab.Parent = TabMainFrame
 
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0,
@@ -8402,9 +8401,8 @@ function Compkiller.new(Config)
 					end;
 				end;
 			else
-				-- Hide content immediately (no tween delay)
+				-- Hide content immediately
 				ContainerTab.Visible = false
-				ContainerTab.Parent = _GetNilFolder()
 
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0.5
@@ -9108,9 +9106,8 @@ function Compkiller.new(Config)
 
 				WindowArgs.SelectedTab = TabButton;
 
-				-- Show content immediately (no tween delay, no re-parent cost)
+				-- Show content immediately
 				TabConfig.Visible = true
-				TabConfig.Parent = TabMainFrame
 
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0,
@@ -9190,7 +9187,6 @@ function Compkiller.new(Config)
 
 				-- Hide content immediately
 				TabConfig.Visible = false
-				TabConfig.Parent = _GetNilFolder()
 
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0.5
@@ -9946,20 +9942,16 @@ function Compkiller.new(Config)
 			-- Set initial visibility directly based on current signal state
 			if not TabOpenSignal:GetValue() then
 				TabContent.Visible = false
-				TabContent.Parent = _GetNilFolder()
 			else
 				TabContent.Visible = true
-				TabContent.Parent = Internal.Parent
 			end
 
 			-- React to future open/close events immediately
 			TabOpenSignal:Connect(function(visible)
 				if visible then
 					TabContent.Visible = true
-					TabContent.Parent = Internal.Parent
 				else
 					TabContent.Visible = false
-					TabContent.Parent = _GetNilFolder()
 				end
 			end)
 		else
@@ -10134,7 +10126,6 @@ function Compkiller.new(Config)
 
 					-- Show content immediately — no render-tree rebuild delay
 					TabContent.Visible = true
-					TabContent.Parent = TabMainFrame
 
 					Compkiller:_Animation(Icon,Tween,{
 						ImageTransparency = 0,
@@ -10150,7 +10141,6 @@ function Compkiller.new(Config)
 				else
 					-- Hide content immediately
 					TabContent.Visible = false
-					TabContent.Parent = _GetNilFolder()
 
 					Compkiller:_Animation(Icon,Tween,{
 						ImageTransparency = 0.5
