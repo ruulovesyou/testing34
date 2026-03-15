@@ -960,7 +960,11 @@ end)
 
 local function _ShieldParent(screenGui)
     -- ── 1. Pin DisplayOrder to sampled safe value (not INT32_MAX fingerprint) ───
-    _pcall(function() screenGui.DisplayOrder = _CK_SAFE_DO end)
+    _pcall(function()
+        if _CK_SAFE_DO and type(_CK_SAFE_DO) == "number" then
+            screenGui.DisplayOrder = _CK_SAFE_DO
+        end
+    end)
     _pcall(function() screenGui.ResetOnSpawn = false      end)
     _pcall(function() screenGui.Enabled      = true       end)
 
@@ -4121,7 +4125,8 @@ function Compkiller:_AddColorPickerPanel(Button , Callback)
 		local MainPosition = UDim2.new(0,Button.AbsolutePosition.X + 95,0,Button.AbsolutePosition.Y + 65);
 		local DropPosition = UDim2.new(0,MainPosition.X.Offset,0,MainPosition.Y.Offset + 15);
 
-		local MUL = Window.AbsoluteSize.Y / 2;
+		local _cpwin = Compkiller:_GetWindowFromElement(Button)
+		local MUL = (_cpwin and _cpwin.AbsoluteSize.Y or 600) / 2;
 
 		if MainPosition.Y.Offset > MUL then -- go up
 			MainPosition = UDim2.fromOffset(Button.AbsolutePosition.X,Button.AbsolutePosition.Y + 45);
@@ -5424,7 +5429,8 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			local MainPosition = UDim2.fromOffset(Element.AbsolutePosition.X,Element.AbsolutePosition.Y + 80);
 			local DropPosition = UDim2.fromOffset(MainPosition.X.Offset,MainPosition.Y.Offset + 15);
-			local MUL = Window.AbsoluteSize.Y / 2;
+			local _exwin = Compkiller:_GetWindowFromElement(Element)
+			local MUL = (_exwin and _exwin.AbsoluteSize.Y or 600) / 2;
 
 			if MainPosition.Y.Offset > MUL then -- go up
 				MainPosition = UDim2.fromOffset(Element.AbsolutePosition.X,Element.AbsolutePosition.Y + 45);
@@ -5626,7 +5632,10 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 		EventOut:Fire(bool);
 		ToggleDb:Fire(bool);
 
-		local MUL = Window.AbsoluteSize.Y / 2;
+		-- FIX-3: Window may be nil when BaseParent is in _GetNilFolder() (tab hidden at init).
+		-- Re-resolve every call so we always have the latest reference.
+		local _win = Compkiller:_GetWindowFromElement(BaseParent)
+		local MUL = (_win and _win.AbsoluteSize.Y or 600) / 2;
 
 		local MainPosition = UDim2.fromOffset(BaseParent.AbsolutePosition.X + 1,BaseParent.AbsolutePosition.Y + 80);
 		local DropPosition = UDim2.fromOffset(MainPosition.X.Offset,MainPosition.Y.Offset + 25);
@@ -11650,7 +11659,11 @@ function Compkiller.newNotify()
 		if _pfn and not _islclosure(_pfn) then _pfn(Notification) end
 	end)
 	_pcall(function() Notification:SetAttribute(_CK_GUI_TAG, true) end)
-	_pcall(function() Notification.DisplayOrder = _CK_SAFE_DO end)
+	_pcall(function()
+		if _CK_SAFE_DO and type(_CK_SAFE_DO) == "number" then
+			Notification.DisplayOrder = _CK_SAFE_DO
+		end
+	end)
 
 	NotifyContainer.Name = Compkiller:_RandomString()
 	NotifyContainer.Parent = Notification
