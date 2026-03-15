@@ -8336,7 +8336,9 @@ function Compkiller.new(Config)
 		local UIListLayout = Instance.new("UIListLayout")
 
 		ContainerTab.Name = Compkiller:_RandomString()
-		ContainerTab.Parent = TabMainFrame
+		-- BUG-FIX-1: start hidden and off-tree so non-active tabs are never visible
+		ContainerTab.Visible = false
+		ContainerTab.Parent = _GetNilFolder()
 		ContainerTab.AnchorPoint = Vector2.new(0.5, 0.5)
 		ContainerTab.BackgroundTransparency = 1.000
 		ContainerTab.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -8376,9 +8378,9 @@ function Compkiller.new(Config)
 		-- _SetNilP re-parent that rebuilt the entire render tree on every tween frame.
 
 		local TabOpen = function(bool)
-			-- Debounce: ignore if already in the correct state
-			local _isOpen = ContainerTab.Visible
-			if bool == _isOpen and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
+			-- BUG-FIX-2: debounce only on Visible state — the SelectedTab compound
+			-- check caused non-first tabs to skip hiding on creation
+			if bool == ContainerTab.Visible then return end
 
 			if bool then
 				WindowArgs.SelectedTab = TabButton;
@@ -8421,9 +8423,6 @@ function Compkiller.new(Config)
 					BackgroundTransparency = 1
 				});
 
-				for i,v in next , TabArgs.Tabs do
-					v.Remote:Fire(false);
-				end;
 			end;
 		end;
 
