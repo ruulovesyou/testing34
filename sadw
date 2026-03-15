@@ -8394,7 +8394,6 @@ function Compkiller.new(Config)
 			if bool then
 				WindowArgs.SelectedTab = TabButton;
 
-				-- Show content immediately (no tween delay, no re-parent cost)
 				ContainerTab.Visible = true
 				ContainerTab.Parent = TabMainFrame
 
@@ -8410,13 +8409,17 @@ function Compkiller.new(Config)
 					BackgroundTransparency = 0.925
 				});
 
+				-- Direct Content management: show active sub-tab, hide all others
 				for i,v in next , TabArgs.Tabs do
-					if v.Root == TabArgs.__Current.Root then
+					if TabArgs.__Current and v.Root == TabArgs.__Current.Root then
 						v.Remote:Fire(true);
+						if v.Content then v.Content.Visible = true; v.Content.Parent = MainFrame end
+					else
+						v.Remote:Fire(false);
+						if v.Content then v.Content.Visible = false; v.Content.Parent = _GetNilFolder() end
 					end;
 				end;
 			else
-				-- Hide content immediately (no tween delay)
 				ContainerTab.Visible = false
 				ContainerTab.Parent = _GetNilFolder()
 
@@ -8646,10 +8649,19 @@ function Compkiller.new(Config)
 				for i,v in next , TabArgs.Tabs do
 					if v.Root == Frame then
 						TabArgs.__Current = v;
-
 						v.Remote:Fire(true);
+						-- Directly show this sub-tab's content frame
+						if v.Content then
+							v.Content.Visible = true
+							v.Content.Parent = MainFrame
+						end
 					else
 						v.Remote:Fire(false);
+						-- Directly hide every other sub-tab's content frame
+						if v.Content then
+							v.Content.Visible = false
+							v.Content.Parent = _GetNilFolder()
+						end
 					end;
 				end;
 			end);
@@ -9873,9 +9885,11 @@ function Compkiller.new(Config)
 			local UIListLayout_2 = Instance.new("UIListLayout")
 
 			TabContent.Name = Compkiller:_RandomString()
-			-- BUG-FIX-4: born hidden, not parented yet — avoids flash-visible stacking
+			-- Born hidden — avoids flash-visible stacking
 			TabContent.Visible = false
 			TabContent.Parent = _GetNilFolder()
+			-- Store direct reference on Id so the click handler can manage it without signals
+			if Internal.ID then Internal.ID.Content = TabContent end
 			TabContent.AnchorPoint = Vector2.new(0.5, 0.5)
 			TabContent.BackgroundTransparency = 1.000
 			TabContent.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -9956,45 +9970,14 @@ function Compkiller.new(Config)
 			-- not via tween-frame threshold polling.
 			TabOpenSignal = Internal.Signal;
 
-			-- Set initial visibility based on current signal state.
-			-- If this sub-tab is the active one, evict all siblings from MainFrame first.
-			if not TabOpenSignal:GetValue() then
-				TabContent.Visible = false
-				TabContent.Parent = _GetNilFolder()
-			else
-				for _, child in ipairs(Internal.Parent:GetChildren()) do
-					if child ~= TabContent and child:IsA("Frame") then
-						child.Visible = false
-						child.Parent = _GetNilFolder()
-					end
-				end
-				TabContent.Visible = true
-				TabContent.Parent = Internal.Parent
-			end
+			-- Initial state: always start hidden.
+			-- The ContainerTab TabOpen handler (Step 4) will show the correct sub-tab
+			-- when the container opens. Direct management, no signal races.
+			TabContent.Visible = false
+			TabContent.Parent = _GetNilFolder()
 
-			-- React to FUTURE open/close events only — skip the immediate Connect fire.
-			local _tabContentSeenFirst = false
-			TabOpenSignal:Connect(function(visible)
-				if not _tabContentSeenFirst then
-					_tabContentSeenFirst = true
-					return  -- skip immediate fire; initial state already set above
-				end
-				if visible then
-					-- Hide every other TabContent currently in the same parent (MainFrame)
-					-- before showing this one — prevents stacking when switching sub-tabs.
-					for _, child in ipairs(Internal.Parent:GetChildren()) do
-						if child ~= TabContent and child:IsA("Frame") then
-							child.Visible = false
-							child.Parent = _GetNilFolder()
-						end
-					end
-					TabContent.Visible = true
-					TabContent.Parent = Internal.Parent
-				else
-					TabContent.Visible = false
-					TabContent.Parent = _GetNilFolder()
-				end
-			end)
+			-- TabContent visibility is now managed DIRECTLY by the click handler (Step 3).
+			-- No signal-based Connect needed here for parenting — avoids all race conditions.
 		else
 			-- Button --
 			local TabButton = Instance.new("Frame")
