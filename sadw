@@ -1401,7 +1401,6 @@ getgenv()[_CLN_KEY] = function(...)
 
     -- Clear tween cache to prevent stale references from old GUI instances
     _TW_CACHE = {}
-    _TW_KEYS_MAP = {}   -- FIX: release shared cleanup map alongside _TW_CACHE
 
     -- FIX E: reset all module-level state that persists across executions
     -- Without these, re-execution inherits stale flags and stale data tables.
@@ -1519,6 +1518,11 @@ local Compkiller = {
 		TabClose = 85,
 	},
 	PerformanceMode = false,
+	-- Set AnimationsEnabled = false to skip all tweens and write properties instantly.
+	-- Eliminates all TweenService overhead for maximum FPS. Usage:
+	--   local mc = Compkiller.new({...})
+	--   Compkiller.AnimationsEnabled = false
+	AnimationsEnabled = true,
 	WindowsNil = {},
 	NilFolder = nil,  -- lazy-init on first use; destroyed on kill
 	ArcylicParent = CurrentCamera,
@@ -2715,133 +2719,54 @@ local _TI = {
     t100  = TweenInfo.new(1.0,  Enum.EasingStyle.Quint, Enum.EasingDirection.InOut),
 }
 
--- ── FPS sampler: lightweight tick-delta loop, replaces the removed hwConn ────
--- Runs at 2 Hz (every 0.5 s) — far cheaper than per-frame Heartbeat.
--- Keeps _OPT.FPS current so _SmartAnimation can actually adapt durations.
-do
-	local _FPS_SAMPLE_INTERVAL = 0.5   -- seconds between samples
-	local _FPS_SAMPLE_COUNT    = 6     -- rolling window size
-
-	_ckSpawn(function()
-		local _lastTick = _tick()
-		while true do
-			task.wait(_FPS_SAMPLE_INTERVAL)
-			local _now  = _tick()
-			local _dt   = _now - _lastTick
-			_lastTick   = _now
-			-- Derive FPS from actual elapsed time vs expected frames
-			local _fps  = _mfloor((_FPS_SAMPLE_INTERVAL / _dt) * 60 + 0.5)
-			_fps        = _mmax(1, _mmin(360, _fps))
-			-- Rolling average
-			local _samp = _OPT.FpsSamples
-			_tinsert(_samp, _fps)
-			if #_samp > _FPS_SAMPLE_COUNT then _tremove(_samp, 1) end
-			local _sum = 0
-			for _, v in _ipairs(_samp) do _sum = _sum + v end
-			_OPT.FPS = _mfloor(_sum / #_samp + 0.5)
+function Compkiller:_Animation(Self , Info , Property)
+	-- Global animation kill-switch. Set Compkiller.AnimationsEnabled = false to skip
+	-- all tweens and write properties instantly. Useful for low-end devices / FPS boost.
+	-- FIX-1: PerformanceMode=true (performance="LOW") also hard-bypasses TweenService,
+	-- regardless of measured FPS, so LOW-tier devices never create tweens.
+	if not Compkiller.AnimationsEnabled or Compkiller.PerformanceMode then
+		for prop, val in pairs(Property) do
+			pcall(function() Self[prop] = val end)
 		end
-	end)
-end
-
--- ── Shared TweenInfo scale-cache: avoids TweenInfo.new() inside _SmartAnimation ─
--- Key = "dur_ms|style|dir" (integer ms, no floats as keys)
-local _TI_SCALED = {}
-local function _GetScaledTI(info, fpsScale)
-	if not info then info = _TI.t025 end
-	local _dur = _mfloor(info.Time * fpsScale * 1000 + 0.5)  -- ms, integer
-	local _sty = info.EasingStyle.Value
-	local _dir = info.EasingDirection.Value
-	local _key = _dur .. "|" .. _sty .. "|" .. _dir
-	local _cached = _TI_SCALED[_key]
-	if _cached then return _cached end
-	local _newTI = TweenInfo.new(
-		_mmax(0.05, _dur * 0.001),  -- back to seconds
-		info.EasingStyle,
-		info.EasingDirection,
-		info.RepeatCount or 0,
-		info.Reverses    or false,
-		info.DelayTime   or 0
-	)
-	_TI_SCALED[_key] = _newTI
-	-- Bound the cache to prevent unbounded growth (keep newest 256 entries)
-	local _sz = 0
-	for _ in pairs(_TI_SCALED) do _sz = _sz + 1 end
-	if _sz > 256 then
-		-- Evict: clear half the cache (simple strategy, O(n) but infrequent)
-		local _cnt = 0
-		for k in pairs(_TI_SCALED) do
-			if _cnt >= 128 then break end
-			_TI_SCALED[k] = nil
-			_cnt = _cnt + 1
-		end
+		return (_OPT and _OPT._DummyTween) or nil
 	end
-	return _newTI
-end
-
--- ── Shared _TW_CACHE cleanup: one function reused per tween, avoids closure per tween ─
--- Keys for each tween are stored in _TW_KEYS_MAP so the shared handler can look them up.
-local _TW_KEYS_MAP = {}   -- [tween] = { key1, key2, ... }
-local function _OnTweenCompleted(tween)
-	local _keys = _TW_KEYS_MAP[tween]
-	if _keys then
-		for _, _k in _ipairs(_keys) do
-			if _TW_CACHE[_k] == tween then _TW_CACHE[_k] = nil end
-		end
-		_TW_KEYS_MAP[tween] = nil
-	end
-end
-
-function Compkiller:_Animation(Self, Info, Property)
-	-- ── Fast path: animations paused → instant-set all properties ───────────
 	if _OPT and _OPT._AnimPaused then
-		for prop, val in _pairs(Property) do
-			_pcall(function() Self[prop] = val end)
+		for prop, val in pairs(Property) do
+			pcall(function() Self[prop] = val end)
 		end
 		return _OPT._DummyTween
 	end
-
-	-- ── Smart path: FPS-adaptive tweens when Enabled ──────────────────────
 	if _OPT and _OPT.Enabled then
 		return self:_SmartAnimation(Self, Info, Property)
 	end
-
-	-- ── Standard path: dedup-cancel + shared cleanup (no per-tween closure) ─
-	local _instKey = _tostring(Self)
-
-	-- Cancel any running tween on the same instance+property
-	for prop in _pairs(Property) do
-		local _k  = _instKey .. prop
+	-- Cancel any running tween on the same instance+property before creating a new one
+	local _instKey = tostring(Self)
+	for prop in pairs(Property) do
+		local _k = _instKey .. prop
 		local _prev = _TW_CACHE[_k]
 		if _prev then
-			_pcall(function() _prev:Cancel() end)
-			-- Remove key from _TW_KEYS_MAP for the old tween
-			local _oldKeys = _TW_KEYS_MAP[_prev]
-			if _oldKeys then
-				for _i = #_oldKeys, 1, -1 do
-					if _oldKeys[_i] == _k then _tremove(_oldKeys, _i) break end
-				end
-			end
+			_prev:Cancel()
 			_TW_CACHE[_k] = nil
 		end
 	end
-
-	local Tween = TweenService:Create(Self, Info or _TI.t025, Property)
-	Tween:Play()
-
-	-- Register in cache + build key list for shared cleanup handler
-	local _keyList = {}
-	for prop in _pairs(Property) do
+	local Tween = TweenService:Create(Self , Info or _TI.t025 , Property);
+	Tween:Play();
+	-- FIX-3: Pre-compute cache keys once; avoids re-iterating Property inside the closure
+	-- and eliminates per-tween capture overhead on hover/tab-switch spam.
+	local _cleanupKeys = {}
+	for prop in pairs(Property) do
 		local _k = _instKey .. prop
 		_TW_CACHE[_k] = Tween
-		_tinsert(_keyList, _k)
+		_cleanupKeys[#_cleanupKeys + 1] = _k
 	end
-	_TW_KEYS_MAP[Tween] = _keyList
-
-	-- Shared handler: one closure instance reused, no per-tween allocation
-	Tween.Completed:Once(function() _OnTweenCompleted(Tween) end)
-
-	return Tween
-end
+	Tween.Completed:Once(function()
+		for i = 1, #_cleanupKeys do
+			local _k = _cleanupKeys[i]
+			if _TW_CACHE[_k] == Tween then _TW_CACHE[_k] = nil end
+		end
+	end)
+	return Tween;
+end;
 
 function Compkiller:_Input(Frame , Callback)
 	local Button = Instance.new('TextButton',Frame);
@@ -3216,23 +3141,13 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 			if bool then
 				Toggle:SetAttribute('Enabled',true);
 
-				Compkiller:_Animation(ToggleValue,rep.Tween,{
-					Position = UDim2.new(0.75, 0, 0.5, 0)
-				})
-
-				Compkiller:_Animation(Toggle,rep.Tween,{
-					BackgroundColor3 = Compkiller.Colors.Toggle
-				})
+				ToggleValue.Position = UDim2.new(0.75, 0, 0.5, 0)
+				Toggle.BackgroundColor3 = Compkiller.Colors.Toggle
 			else
 				Toggle:SetAttribute('Enabled',false);
 
-				Compkiller:_Animation(ToggleValue,rep.Tween,{
-					Position = UDim2.new(0.25, 0, 0.5, 0)
-				})
-
-				Compkiller:_Animation(Toggle,rep.Tween,{
-					BackgroundColor3 = Compkiller.Colors.DropColor
-				})
+				ToggleValue.Position = UDim2.new(0.25, 0, 0.5, 0)
+				Toggle.BackgroundColor3 = Compkiller.Colors.DropColor
 			end;
 		end;
 
@@ -6589,9 +6504,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 			local Size = (Value - Config.Min) / (Config.Max - Config.Min);
 
-			TweenService:Create(SliderInput , _TI.t020,{
-				Size = UDim2.new(math.clamp(Size,0.045,1), 0, 1, 0)
-			}):Play();
+			SliderInput.Size = UDim2.new(math.clamp(Size,0.045,1), 0, 1, 0)
 
 			Config.Default = Value;
 
@@ -6663,9 +6576,8 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Args.Signal = Signal:Connect(function(bool)
 			if bool then
-				Compkiller:_Animation(SliderInput, _TI.t035,{
-					Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.045), 0, 1, 0)
-				});
+				-- SliderInput size set instantly on tab switch (no animation)
+				SliderInput.Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.045), 0, 1, 0);
 
 				Compkiller:_Animation(ValueText,Tween,{
 					TextTransparency = 0.750
@@ -6695,9 +6607,8 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 					TextTransparency = 0.1
 				})
 			else
-				Compkiller:_Animation(SliderInput, _TI.t035,{
-					Size = UDim2.new(0, 0, 1, 0)
-				});
+				-- SliderInput size set instantly on tab hide (no animation)
+				SliderInput.Size = UDim2.new(0, 0, 1, 0);
 
 				Compkiller:_Animation(ValueText,Tween,{
 					TextTransparency = 1
@@ -8462,21 +8373,22 @@ function Compkiller.new(Config)
 		UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 		UIListLayout.Padding = UDim.new(0, 10)
 
-		-- Functions --
-		do -- Fix 1: fire visibility change once on threshold cross
-			local _tabVis = Highlight.BackgroundTransparency <= 0.99
-			Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
-				local _nowVis = Highlight.BackgroundTransparency <= 0.99
-				if _nowVis == _tabVis then return end
-				_tabVis = _nowVis
-				ContainerTab.Visible = _nowVis
-				Compkiller:_SetNilP(ContainerTab, _nowVis and TabMainFrame or nil)
-			end)
-		end
+		-- SMART TAB SWITCH: ContainerTab visibility is now set directly in TabOpen
+		-- instead of waiting for the Highlight tween to cross 0.99 transparency.
+		-- This eliminates per-frame GetPropertyChangedSignal firing and the costly
+		-- _SetNilP re-parent that rebuilt the entire render tree on every tween frame.
 
 		local TabOpen = function(bool)
+			-- Debounce: ignore if already in the correct state
+			local _isOpen = ContainerTab.Visible
+			if bool == _isOpen and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
+
 			if bool then
 				WindowArgs.SelectedTab = TabButton;
+
+				-- Show content immediately (no tween delay, no re-parent cost)
+				ContainerTab.Visible = true
+				ContainerTab.Parent = TabMainFrame
 
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0,
@@ -8496,6 +8408,10 @@ function Compkiller.new(Config)
 					end;
 				end;
 			else
+				-- Hide content immediately (no tween delay)
+				ContainerTab.Visible = false
+				ContainerTab.Parent = _GetNilFolder()
+
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0.5
 				});
@@ -8744,20 +8660,51 @@ function Compkiller.new(Config)
 		return TabArgs;
 	end;
 
-	function WindowArgs:AddUnbind(UilistLayout, Scrolling)
+	function WindowArgs:AddUnbind(UilistLayout , Scrolling)
+
 		local upd = function()
 			Scrolling.ScrollingEnabled = true
-			UilistLayout.VerticalFlex = Enum.UIFlexAlignment.None
-			Scrolling.CanvasSize = UDim2.fromOffset(0, UilistLayout.AbsoluteContentSize.Y + 5)
-		end
+			UilistLayout.VerticalFlex = Enum.UIFlexAlignment.None;
+			Scrolling.CanvasSize = UDim2.fromOffset(0,UilistLayout.AbsoluteContentSize.Y + 5)
+		end;
 
-		-- Event-driven only — no polling loop needed.
-		-- AbsoluteContentSize fires whenever children are added/removed/resized.
-		_TrackConn(UilistLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(upd))
+		UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(upd);
 
-		-- Single deferred call to sync initial state
-		return _TrackThread(task.defer(upd))
-	end
+		return _TrackThread(task.defer(function()
+			while true do task.wait(1)
+				upd();
+			end;
+		end))
+
+		--[[local Parent: ScrollingFrame = UilistLayout.Parent;
+
+		Parent = Parent or Scrolling;
+
+		local Detection = function()
+			local Target = (UilistLayout.AbsoluteContentSize.Y);
+
+			for i,v in next , Parent:GetChildren() do task.wait(0.1)
+				local UIList = v:FindFirstChildWhichIsA('UIListLayout');
+				if v:IsA('Frame') and UIList then
+					if (UIList.AbsoluteContentSize.Y >= Target) or (v.AbsoluteSize.Y >= Target) or (UilistLayout.AbsoluteContentSize.Y > Parent.AbsoluteSize.Y) then
+						UilistLayout.VerticalFlex = Enum.UIFlexAlignment.None;
+						Parent.ScrollingEnabled = true;
+					else
+						Parent.ScrollingEnabled = false;
+						UilistLayout.VerticalFlex = Enum.UIFlexAlignment.None;
+					end;
+				end
+			end;
+		end;
+
+		local Executable = function()
+			while true do task.wait(0.15);
+				pcall(Detection);
+			end;
+		end;
+
+		table.insert(WindowArgs.THREADS,task.spawn(Executable))]]
+	end;
 
 	function WindowArgs:DrawConfig(Configuration , Internal)
 		Configuration = Compkiller.__CONFIG(Configuration,{
@@ -9157,23 +9104,19 @@ function Compkiller.new(Config)
 			Property = 'TextColor3'
 		});
 
+		-- SMART TAB SWITCH: TabConfig visibility is now set directly in TabOpen.
 		local Tween = _TI.t035q;
 
-		do -- Fix 1: fire visibility change once on threshold cross
-			local _tabVis = Highlight.BackgroundTransparency <= 0.99
-			Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
-				local _nowVis = Highlight.BackgroundTransparency <= 0.99
-				if _nowVis == _tabVis then return end
-				_tabVis = _nowVis
-				TabConfig.Visible = _nowVis
-				Compkiller:_SetNilP(TabConfig, _nowVis and TabMainFrame or nil)
-			end)
-		end
-
 		local TabOpen = function(bool)
+			if bool == TabConfig.Visible and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
+
 			if bool then
 
 				WindowArgs.SelectedTab = TabButton;
+
+				-- Show content immediately (no tween delay, no re-parent cost)
+				TabConfig.Visible = true
+				TabConfig.Parent = TabMainFrame
 
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0,
@@ -9250,6 +9193,10 @@ function Compkiller.new(Config)
 					ImageTransparency = 0.5,
 				});
 			else
+
+				-- Hide content immediately
+				TabConfig.Visible = false
+				TabConfig.Parent = _GetNilFolder()
 
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0.5
@@ -9998,42 +9945,29 @@ function Compkiller.new(Config)
 
 			local Tween = _TI.t035q;
 
-			do -- Fix 1: fire visibility change once on threshold cross
-				local _tabVis = Internal.Highlight.BackgroundTransparency <= 0.99
-				Internal.Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
-					local _nowVis = Internal.Highlight.BackgroundTransparency <= 0.99
-					if _nowVis == _tabVis then return end
-					_tabVis = _nowVis
-					TabContent.Visible = _nowVis
-					Compkiller:_SetNilP(TabContent, _nowVis and Internal.Parent or nil)
-				end)
-			end
-
-			Upvalue.Left = Left;
-			Upvalue.Right = Right;
-
-			if Compkiller:_IsMobile() then
-				Compkiller:_AddDragBlacklist(Left);
-				Compkiller:_AddDragBlacklist(Right);
-			end;
-
+			-- SMART TAB SWITCH: TabContent shown/hidden immediately via signal value,
+			-- not via tween-frame threshold polling.
 			TabOpenSignal = Internal.Signal;
 
+			-- Set initial visibility directly based on current signal state
 			if not TabOpenSignal:GetValue() then
-				TabContent.Visible = false;
+				TabContent.Visible = false
+				TabContent.Parent = _GetNilFolder()
 			else
-				TabContent.Visible = true;
-			end;
+				TabContent.Visible = true
+				TabContent.Parent = Internal.Parent
+			end
 
-			if Compkiller.PerformanceMode then
-				if TabContent.Visible then
-					Compkiller:_SetNilP(TabContent , Internal.Parent);
+			-- React to future open/close events immediately
+			TabOpenSignal:Connect(function(visible)
+				if visible then
+					TabContent.Visible = true
+					TabContent.Parent = Internal.Parent
 				else
-					Compkiller:_SetNilP(TabContent , nil);
-				end;
-			else
-				Compkiller:_SetNilP(TabContent , Internal.Parent);
-			end;
+					TabContent.Visible = false
+					TabContent.Parent = _GetNilFolder()
+				end
+			end)
 		else
 			-- Button --
 			local TabButton = Instance.new("Frame")
@@ -10193,21 +10127,20 @@ function Compkiller.new(Config)
 
 			local Tween = _TI.t035q;
 
-			do -- Fix 1: fire visibility change once on threshold cross, not every tween frame
-				local _tabVis = Highlight.BackgroundTransparency <= 0.99
-				Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
-					local _nowVis = Highlight.BackgroundTransparency <= 0.99
-					if _nowVis == _tabVis then return end
-					_tabVis = _nowVis
-					TabContent.Visible = _nowVis
-					Compkiller:_SetNilP(TabContent, _nowVis and TabMainFrame or nil)
-				end)
-			end
+			-- SMART TAB SWITCH: TabContent shown/hidden instantly in TabOpen.
+			-- Removed tween-driven GetPropertyChangedSignal approach that fired
+			-- per-frame and triggered an expensive _SetNilP re-parent each switch.
 
 			local TabOpen = function(bool)
+				if bool == TabContent.Visible and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
+
 				if bool then
 
 					WindowArgs.SelectedTab = TabButton;
+
+					-- Show content immediately — no render-tree rebuild delay
+					TabContent.Visible = true
+					TabContent.Parent = TabMainFrame
 
 					Compkiller:_Animation(Icon,Tween,{
 						ImageTransparency = 0,
@@ -10221,6 +10154,10 @@ function Compkiller.new(Config)
 						BackgroundTransparency = 0.925
 					});
 				else
+					-- Hide content immediately
+					TabContent.Visible = false
+					TabContent.Parent = _GetNilFolder()
+
 					Compkiller:_Animation(Icon,Tween,{
 						ImageTransparency = 0.5
 					});
@@ -12049,30 +11986,40 @@ function Compkiller:_SmartAnimation(Self, Info, Property)
     local currentFPS = _OPT.FPS
     local threshold  = _OPT.AnimThreshold
 
-    -- ── Below threshold: instant-set (no tween overhead at all) ─────────────
     if currentFPS < threshold then
-        for prop, val in _pairs(Property) do
-            _pcall(function() Self[prop] = val end)
+        for prop, val in pairs(Property) do
+            pcall(function() Self[prop] = val end)
         end
         _OPT.Stats.InstantSets = _OPT.Stats.InstantSets + 1
         return _OPT._DummyTween
     end
 
-    -- ── FPS-adaptive TweenInfo: cached, not allocated per call ───────────────
-    local fpsScale = _mmax(0.5, _mmin(1.0, currentFPS / 60))
-    local newInfo  = _GetScaledTI(Info, fpsScale)
 
-    -- ── Dedup-cancel: avoid pcall per property; use raw property read ────────
-    local _instKey = _tostring(Self)
-    for prop in _pairs(Property) do
-        local dedupKey = _instKey .. "|" .. prop
+    local baseDuration = (Info and Info.Time) or 0.25
+    local fpsScale     = math.clamp(currentFPS / 60, 0.5, 1.0)
+    local newDuration  = math.max(0.05, baseDuration * fpsScale)
+
+    local newInfo
+    if Info then
+        newInfo = TweenInfo.new(
+            newDuration,
+            Info.EasingStyle,
+            Info.EasingDirection,
+            Info.RepeatCount,
+            Info.Reverses,
+            Info.DelayTime
+        )
+    else
+        newInfo = TweenInfo.new(newDuration)
+    end
+
+    for prop in pairs(Property) do
+        local dedupKey = tostring(Self) .. "|" .. prop
         local existing = _OPT.ActiveTweenMap[dedupKey]
         if existing then
-            -- Direct PlaybackState read — safe since existing is a valid Tween object
-            local _state
-            _pcall(function() _state = existing.PlaybackState end)
-            if _state == Enum.PlaybackState.Playing then
-                _pcall(function() existing:Cancel() end)
+            local ok, playing = pcall(function() return existing.PlaybackState end)
+            if ok and playing == Enum.PlaybackState.Playing then
+                pcall(function() existing:Cancel() end)
                 _OPT.Stats.DedupCancels = _OPT.Stats.DedupCancels + 1
             end
             _OPT.ActiveTweenMap[dedupKey] = nil
@@ -12080,17 +12027,17 @@ function Compkiller:_SmartAnimation(Self, Info, Property)
     end
 
     local tween = TweenService:Create(Self, newInfo, Property)
-    _tinsert(_OPT.ActiveTweens, tween)
-    for prop in _pairs(Property) do
-        _OPT.ActiveTweenMap[_instKey .. "|" .. prop] = tween
+    table.insert(_OPT.ActiveTweens, tween)
+    for prop in pairs(Property) do
+        _OPT.ActiveTweenMap[tostring(Self) .. "|" .. prop] = tween
     end
     tween:Play()
 
     _TrackConn(tween.Completed:Connect(function()
         local idx = table.find(_OPT.ActiveTweens, tween)
-        if idx then _tremove(_OPT.ActiveTweens, idx) end
-        for prop in _pairs(Property) do
-            local key = _instKey .. "|" .. prop
+        if idx then table.remove(_OPT.ActiveTweens, idx) end
+        for prop in pairs(Property) do
+            local key = tostring(Self) .. "|" .. prop
             if _OPT.ActiveTweenMap[key] == tween then
                 _OPT.ActiveTweenMap[key] = nil
             end
@@ -12750,62 +12697,1467 @@ end
 
 
 
--- ============================================================================
--- MASTERCONTROL MODULE LOADER
--- MasterControl lives in CK_MasterControl.lua for clean code separation.
--- CK_v25.lua wires it in below so the public API is unchanged:
---   local MC = Compkiller.MasterControl()
--- ============================================================================
-do
-	local _MC_ok, _MC_loader = pcall(function()
-		-- Try filesystem first (executor environment)
-		if type(readfile) == "function" and type(isfile) == "function" then
-			if isfile("CK_MasterControl.lua") then
-				local _src = readfile("CK_MasterControl.lua")
-				local _fn, _err = loadstring(_src)
-				if _fn then return _fn() end
-				warn("[CK] CK_MasterControl.lua parse error: " .. tostring(_err))
-			end
-		end
-		-- Fallback: try require() if running in a Roblox module context
-		if type(require) == "function" then
-			local _ok2, _mod = pcall(require, script and script.Parent and script.Parent:FindFirstChild("CK_MasterControl") or "CK_MasterControl")
-			if _ok2 and type(_mod) == "function" then return _mod end
-		end
-		return nil
-	end)
 
-	if _MC_ok and type(_MC_loader) == "function" then
-		-- Module loaded successfully — wire MasterControl into Compkiller.
-		-- Calling as MasterControl({...}) directly applies the config via __call.
-		-- Calling as MasterControl() returns the controller for chaining.
-		local function _mc_call(cfg)
-			local _ctrl = _MC_loader(Compkiller)
-			if type(cfg) == "table" then
-				_ctrl.apply(cfg)
-			end
-			return _ctrl
+-- ==============================================================================
+
+-- ==============================================================================
+--   MASTERCONTROL  v5.5.2  -- Compkiller
+-- Single callable function. Call it once to get the controller, then use it.
+--
+--   local MC = Compkiller.MasterControl()
+--   MC.antiKick(true)
+--   MC.performance("HIGH")
+--   MC.preset("secure")
+--
+-- Or fire everything in one shot via apply():
+--   local MC = Compkiller.MasterControl()
+--   MC.apply({
+--     antiKick             = true,
+--     antiAfk              = true,
+--     performance          = "HIGH",
+--     obfuscate            = true,
+--     turboScramble        = true,
+--     turboScrambleGui     = Window.Root,
+--     integrityTest        = true,
+--     preset               = "secure",
+--     -- also available in apply():
+--     debug                = false,
+--     dumpStats            = false,
+--     tier                 = "HIGH",
+--     animThreshold        = 30,
+--     memInterval          = 5,
+--     fpsCap               = 60,
+--     smartAnimations      = true,
+--     advancedOpt          = true,
+--     sleepMode            = false,
+--     optimizeMode         = false,
+--     pauseAnimations      = false,
+--     forceGC              = false,
+--     cleanupAll           = false,
+--     renderManager        = true,
+--     renderCull           = false,
+--     safeCall             = true,
+--     hardReset            = false,
+--     savePosition         = false,
+--     loadPosition         = false,
+--     anomalyWatch         = true,
+--     anomalyInterval      = 5,
+--     anomalyCallback      = nil,
+--     runDiagnostics       = false,
+--     anomalyCheck         = false,
+--     diagnosticsDelay     = 8,
+--     presetOverrides      = {},
+--   })
+-- ==============================================================================
+
+-- ============================================================================
+--  MASTERCONTROL  v5.5.2  --  Compkiller
+--  Single function. Every CK capability lives inside.
+--
+--  local MC = Compkiller.MasterControl()
+--  MC.antiKick(true)
+--  MC.performance("HIGH")
+--  MC.preset("secure")
+--  MC.apply({ antiKick=true, performance="HIGH", obfuscate=true })
+-- ============================================================================
+Compkiller.MasterControl = function(...)
+
+	-- value coercion helpers
+	local function _bv(v, d) if v == nil then return d ~= false end return v ~= false and v ~= "false" end
+	local function _sv(v, d) return type(v) == "string" and v or (d or "") end
+	local function _nv(v, d) return type(v) == "number" and v or (d or 0) end
+
+	-- fpsCap (executor native, not a Compkiller method)
+	local function fpsCap(v)
+		_pcall(function() setfpscap(_nv(v, 60)) end)
+	end
+
+	-- indexHook: intentionally disabled — hooking game.__index/__namecall is
+	-- detected by ACs as :indexcallinstance/:namecallinstance.
+	-- GUI hiding is handled by protect_gui / gethui (executor-native).
+	local function indexHook()
+		_CKLog("IndexHook: disabled (metatable hooks are AC-detectable — using executor-native protection instead).")
+	end
+
+
+	-- ========================================================================
+	-- DEBUG
+	-- ========================================================================
+	local function setDebug(enabled)
+		Compkiller.Debug = (enabled == true)
+		_CK_DEBUG  = Compkiller.Debug   -- sync boot flag too
+		_CKLog("Debug logging " .. (Compkiller.Debug and "ENABLED" or "DISABLED"))
+		return Compkiller.Debug
+	end
+
+	local function dumpStats()
+		local stats = getOptimizerStats()
+		local lines = {
+			"+==========================================",
+			"|  Compkiller v" .. Compkiller.Version .. " -- Runtime Stats",
+			"+==========================================",
+			"|  Hardware Tier   : " .. tostring(Compkiller.HardwareTier or "N/A"),
+			"|  Hardware FPS    : " .. tostring(Compkiller.HardwareFPS  or "N/A"),
+			"|  GUI Shield      : " .. tostring(Compkiller.GuiShieldMethod or "N/A"),
+			"|  Performance Mode: " .. tostring(Compkiller.PerformanceMode),
+			"+==========================================",
+			"|  Live FPS        : " .. stats.FPS,
+			"|  Anim Threshold  : " .. stats.AnimThreshold .. " fps",
+			"|  Smart Anim ON   : " .. tostring(stats.Enabled),
+			"|  Active Tweens   : " .. stats.ActiveTweens,
+			"+==========================================",
+			"|  Tweens Cancelled: " .. stats.TweensCancelled,
+			"|  Instant Sets    : " .. stats.InstantSets,
+			"|  Dedup Cancels   : " .. stats.DedupCancels,
+			"|  Memory Sweeps   : " .. stats.MemorySweeps,
+			"|  Tracked Threads : " .. #_CK_THREADS,
+			"|  Tracked Conns   : " .. #_CK_CONNECTIONS,
+			"|  GC Memory (KB)  : " .. tostring(math.floor((collectgarbage("count") or 0) + 0.5)),
+			"+==========================================",
+			"|  Windows Open    : " .. #Compkiller.Windows,
+			"+==========================================",
+		}
+		_CKLog("dump")
+		return stats
+	end
+
+	local function getVersionInfo()
+		return {
+			Version      = Compkiller.Version,
+			HardwareTier = Compkiller.HardwareTier,
+			HardwareFPS  = Compkiller.HardwareFPS,
+			GuiShield    = Compkiller.GuiShieldMethod,
+			PerfMode     = Compkiller.PerformanceMode,
+			SmartAnim    = _OPT.Enabled,
+			AnimThreshold= _OPT.AnimThreshold,
+			Executor     = _CK_EXECUTOR,
+			ExecVersion  = _CK_EXEC_VERSION,
+			Elevated     = _CK_ELEVATED,
+			MissingEnv   = _CK_MISSING_ENV,
+		}
+	end
+
+	local function getExecutorProfile()
+		return {
+			executor   = _CK_EXECUTOR,
+			version    = _CK_EXEC_VERSION,
+			elevated   = _CK_ELEVATED,
+			missingEnv = _CK_MISSING_ENV,
+			guiShield  = _GUI_SHIELD_METHOD,
+		}
+	end
+
+	local function getMissingEnv()
+		return _CK_MISSING_ENV
+	end
+
+	local function isStudio()
+		return RunService:IsStudio()	
+	end;
+
+
+	-- ========================================================================
+	-- PERFORMANCE
+	-- ========================================================================
+	local function setPerformanceProfile(profile)
+		local p = tostring(profile):upper()
+		if p == "LOW" then
+			Compkiller.PerformanceMode = true
+			_OPT.AnimThreshold   = 60
+			Compkiller.HardwareTier    = "LOW"
+		elseif p == "MEDIUM" then
+			Compkiller.PerformanceMode = false
+			_OPT.AnimThreshold   = 40
+			Compkiller.HardwareTier    = "MEDIUM"
+		else
+			Compkiller.PerformanceMode = false
+			_OPT.AnimThreshold   = 30
+			Compkiller.HardwareTier    = "HIGH"
 		end
-		Compkiller.MasterControl = _mc_call
-		if Compkiller.Debug then
-			print("[CK] MasterControl loaded from CK_MasterControl.lua")
+		_CKLog("SetPerformanceProfile: " .. p)
+		return Compkiller.HardwareTier
+	end
+
+	local function setHardwareTier(tier)
+		local valid = {HIGH = true, MEDIUM = true, LOW = true}
+		tier = tostring(tier):upper()
+		if not valid[tier] then
+			_CKLog("SetHardwareTier: invalid tier '" .. tier .. "'. Use HIGH/MEDIUM/LOW.")
+			return false
 		end
-	else
-		-- Graceful fallback: MasterControl returns a no-op stub with a clear warning
-		warn("[CK] CK_MasterControl.lua not found — MasterControl unavailable. " ..
-			"Place CK_MasterControl.lua in the same directory as CK_v25.lua.")
-		Compkiller.MasterControl = function()
-			warn("[CK] MasterControl not loaded. See console for details.")
-			return setmetatable({}, {
-				__index = function(_, key)
-					warn("[CK] MasterControl." .. tostring(key) .. " called but module is not loaded.")
-					return function() end
-				end
-			})
+		Compkiller.HardwareTier = tier
+		if tier == "LOW" then
+			Compkiller.PerformanceMode = true
+			_OPT.AnimThreshold   = 60     -- instant-set everything
+			_CKLog("SetHardwareTier: LOW | PerformanceMode=true | Threshold=60fps")
+		elseif tier == "MEDIUM" then
+			Compkiller.PerformanceMode = false
+			_OPT.AnimThreshold   = 40
+			_CKLog("SetHardwareTier: MEDIUM | PerformanceMode=false | Threshold=40fps")
+		else
+			Compkiller.PerformanceMode = false
+			_OPT.AnimThreshold   = 30     -- default threshold
+			_CKLog("SetHardwareTier: HIGH | PerformanceMode=false | Threshold=30fps")
+		end
+		return Compkiller.HardwareTier
+	end
+
+	local function setAnimThreshold(fps)
+		_OPT.AnimThreshold = math.clamp(math.floor(fps), 10, 144)
+		_CKLog("SetAnimThreshold: " .. _OPT.AnimThreshold .. " fps")
+		return _OPT.AnimThreshold
+	end
+
+	local function setMemInterval(seconds)
+		_OPT.MemInterval = math.max(10, seconds)
+		_CKLog("SetMemInterval: " .. _OPT.MemInterval .. "s")
+		return _OPT.MemInterval
+	end
+
+	local function setSleepMode(enabled)
+		if enabled and not _SLEEP_ACTIVE then
+			_SLEEP_ACTIVE           = true
+			_SLEEP_PREV_THRESHOLD   = _OPT.AnimThreshold
+			_OPT.AnimThreshold      = 999
+			_OPT.Enabled            = false
+			pcall(function() setfpscap(10) end)
+			_CKLog("SetSleepMode: ON -- animations paused, FPS capped to 10.")
+		elseif not enabled and _SLEEP_ACTIVE then
+			_SLEEP_ACTIVE      = false
+			_OPT.AnimThreshold = _SLEEP_PREV_THRESHOLD or 30
+			_OPT.Enabled       = true
+			pcall(function() setfpscap(360) end)
+			_CKLog("SetSleepMode: OFF -- restored.")
 		end
 	end
-end
 
+	local function optimizeMode(v)
+		Compkiller.PerformanceMode = v;
+	end;
+
+	local function getFPS(): number
+		local fps = math.floor(_OPT.FPS + 0.5)
+		_CKLog("GetFPS: " .. fps .. " fps")
+		return fps
+	end
+
+	local function getOptimizerStats()
+		return {
+			FPS             = getFPS(),
+			Enabled         = _OPT.Enabled,
+			AnimThreshold   = _OPT.AnimThreshold,
+			ActiveTweens    = #_OPT.ActiveTweens,
+			TweensCancelled = _OPT.Stats.TweensCancelled,
+			InstantSets     = _OPT.Stats.InstantSets,
+			DedupCancels    = _OPT.Stats.DedupCancels,
+			MemorySweeps    = _OPT.Stats.MemorySweeps,
+			LastSweepAt     = _OPT.Stats.LastSweepAt,
+		}
+	end
+
+	local function isMobileTier()
+		local isMobile = (Compkiller.HardwareTier == "LOW")
+			or (UserInputService and UserInputService.TouchEnabled and not UserInputService.MouseEnabled)
+		return isMobile
+	end
+
+
+	-- ========================================================================
+	-- ANIMATIONS
+	-- ========================================================================
+	local function setSmartAnimations(enabled)
+		_OPT.Enabled = (enabled == true)
+		_CKLog("SetSmartAnimations: " .. (_OPT.Enabled and "ENABLED" or "DISABLED") .. " | Threshold=" .. _OPT.AnimThreshold .. "fps")
+		return _OPT.Enabled
+	end
+
+	local function enableAdvancedOptimizations(enabled)
+		_OPT.Enabled = (enabled == true)
+		if _OPT.Enabled then
+			if not _OPT.MonitorThread then
+				local thread
+				thread = task.spawn(function()
+					while _OPT.Enabled and _OPT.MonitorThread == thread do
+						task.wait(_OPT.MemInterval)
+						if _OPT.Enabled and _OPT.MonitorThread == thread then
+							Compkiller:_SweepMemory()
+						end
+					end
+					if _OPT.MonitorThread == thread then
+						_OPT.MonitorThread = nil
+					end
+				end)
+				_OPT.MonitorThread = thread
+				_TrackThread(thread)
+			end
+		else
+			_OPT.MonitorThread = nil
+		end
+		_CKLog("AdvancedOptimizations: " .. (_OPT.Enabled and "ON" or "OFF") .. " | Threshold=" .. _OPT.AnimThreshold .. "fps" .. " | MemInterval=" .. _OPT.MemInterval .. "s")
+		return _OPT.Enabled
+	end
+
+	local function pauseAllAnimations()
+		_OPT._AnimPaused = true
+		_OPT.Enabled     = false
+		_CKLog("PauseAllAnimations: animations paused.")
+	end
+
+	local function resumeAllAnimations()
+		_OPT._AnimPaused = false
+		_OPT.Enabled     = true
+		_CKLog("ResumeAllAnimations: animations resumed.")
+	end
+
+	local function forceGC()
+		local before = math.floor((collectgarbage("count") or 0) + 0.5)
+		collectgarbage("collect")
+		local after  = math.floor((collectgarbage("count") or 0) + 0.5)
+		local freed  = math.max(0, before - after)
+		_CKLog(string.format("ForceGC: freed ~%d KB (before=%d, after=%d)", freed, before, after))
+		return freed
+	end
+
+	local function cleanupAll()
+		local cancelled = 0
+		for key, tw in pairs(_OPT.ActiveTweenMap) do
+			local ok, playing = pcall(function() return tw.PlaybackState end)
+			if ok and playing == Enum.PlaybackState.Playing then
+				pcall(function() tw:Cancel() end)
+				cancelled = cancelled + 1
+			end
+			_OPT.ActiveTweenMap[key] = nil
+		end
+		for _, tw in ipairs(_OPT.ActiveTweens) do
+			local ok, playing = pcall(function() return tw.PlaybackState end)
+			if ok and playing == Enum.PlaybackState.Playing then
+				pcall(function() tw:Cancel() end)
+				cancelled = cancelled + 1
+			end
+		end
+		_OPT.ActiveTweens = {}
+		_OPT.Stats.TweensCancelled = _OPT.Stats.TweensCancelled + cancelled
+		Compkiller:_SweepMemory()
+		_CKLog("CleanupAll: cancelled " .. cancelled .. " tweens.")
+		return cancelled
+	end
+
+
+	-- ========================================================================
+	-- RENDER MANAGER
+	-- ========================================================================
+	local function startRenderManager()
+		stopRenderManager()
+
+		local conns = {}
+
+		local c1 = _TrackConn(UserInputService.WindowFocusReleased:Connect(function()
+			if not getgenv()[_CULL_KEY] then
+				getgenv()[_CULL_KEY] = _SaveCameraState()
+			end
+			_SuppressRender()
+			_CKLog("RenderManager: focus lost -- 3D suppressed, FPS capped.")
+		end))
+		table.insert(conns, c1)
+
+		local c2 = _TrackConn(UserInputService.WindowFocused:Connect(function()
+			local state = getgenv()[_CULL_KEY]
+			if state then
+				_RestoreRender(state)
+				getgenv()[_CULL_KEY] = nil
+			end
+			_CKLog("RenderManager: focus gained -- 3D restored.")
+		end))
+		table.insert(conns, c2)
+
+		getgenv()[_RENDER_CONN] = conns
+		_CKLog("StartRenderManager: active.")
+	end
+
+	local function stopRenderManager()
+		local state = getgenv()[_CULL_KEY]
+		if state then
+			_RestoreRender(state)
+			getgenv()[_CULL_KEY] = nil
+		end
+		local conns = getgenv()[_RENDER_CONN]
+		if type(conns) == "table" then
+			for _, c in ipairs(conns) do
+				pcall(function() c:Disconnect() end)
+			end
+		end
+		getgenv()[_RENDER_CONN] = nil
+		_CKLog("StopRenderManager: stopped, 3D restored.")
+	end
+
+	local function renderCull()
+		if getgenv()[_CULL_KEY] then
+			_CKLog("RenderCull: already active.")
+			return
+		end
+		getgenv()[_CULL_KEY] = _SaveCameraState()
+		_SuppressRender()
+		_CKLog("RenderCull: 3D suppressed.")
+	end
+
+	local function renderResume()
+		local state = getgenv()[_CULL_KEY]
+		if not state then
+			_CKLog("RenderResume: nothing to resume.")
+			return
+		end
+		_RestoreRender(state)
+		getgenv()[_CULL_KEY] = nil
+		_CKLog("RenderResume: 3D restored.")
+	end
+
+
+	-- ========================================================================
+	-- GUI SHIELD
+	-- ========================================================================
+	local function enableNameObfuscation(enabled)
+		if enabled == false then
+			_CKLog("EnableNameObfuscation: OFF (static name retained).")
+			return
+		end
+		pcall(function()
+			for _, win in ipairs(Compkiller.Windows) do
+				local sg = win and win._ScreenGui
+				if sg and sg.Parent then
+					local newName = _EncryptGuiName and _EncryptGuiName() or sg.Name
+					sg.Name = newName
+					_CKLog("EnableNameObfuscation: renamed -> " .. newName)
+				end
+			end
+		end)
+	end
+
+	local function enableTurboScramble(screenGui, enabled)
+		-- TurboScramble removed (RenderStepped background loop, not UI-critical)
+	end
+	local function hardReset()
+		_CKLog("HardReset: tearing down...")
+		_SmartKillGUIs()
+		pcall(getgenv().__rbxClnSvc)
+		_CKLog("HardReset: done.")
+	end
+
+	local function isWindowOpen(win)
+		if not win then return false end
+		for _, w in ipairs(Compkiller.Windows) do
+			if w == win then return true end
+		end
+		return false
+	end
+
+	local function enableDecoySystem(enabled)
+	end
+
+	local function enableUltimateShield(config)
+		return _EnableUltimateShield(Compkiller, config)
+	end
+
+	-- Advanced Shield closures (AS-1 through AS-4)
+	local function enableMemoryScrambling(screenGui, enabled)
+		_EnableMemoryScrambling(screenGui, enabled ~= false)
+	end
+
+	local function enableBehavioralNoise(screenGui, enabled)
+	end
+
+	local function enableGhostInstances(enabled)
+	end
+
+	local function enableFingerprintRotation(screenGui, enabled)
+		_EnableFingerprintRotation(screenGui, enabled ~= false)
+	end
+
+	local function enableUltimateShieldAdvanced(config)
+		return _EnableUltimateShieldAdvanced(Compkiller, config)
+	end
+
+
+	-- ========================================================================
+	-- SANDBOX & SAFE EXECUTION
+	-- ========================================================================
+	local function setSafeCall(enabled)
+		_SAFE_CALL_ENABLED = (enabled == true)
+		_CKLog("SetSafeCall: " .. (_SAFE_CALL_ENABLED and "ON" or "OFF"))
+	end
+
+	local function safeExec(fn, onError)
+		if _type(fn) ~= "function" then
+			_CKLog("SafeExec: argument must be a function, got " .. _type(fn))
+			return false, "invalid argument"
+		end
+		local ok, err = _xpcall(fn, function(e)
+			local tb = ""
+			_pcall(function() tb = debug and debug.traceback and debug.traceback(_tostring(e), 2) or "" end)
+			return _tostring(e) .. (tb ~= "" and ("\n" .. tb) or "")
+		end)
+		if not ok then
+			_CKLog("SafeExec caught error: " .. _tostring(err))
+			if _type(onError) == "function" then
+				_pcall(onError, err)
+			end
+		end
+		return ok, ok and nil or _tostring(err)
+	end
+
+	local function safeCall(fn, ...)
+		if not _SAFE_CALL_ENABLED then
+			return fn(...)
+		end
+		local args = {...}
+		local ok, result = pcall(function() return fn((table.unpack or unpack)(args)) end)
+		if not ok then
+			table.insert(_SANDBOX_ERRORS, { time = tick(), err = tostring(result) })
+			_CKLog("SafeCall caught: " .. tostring(result))
+		end
+		return ok, result
+	end
+
+	local function wrap(fn, onError)
+		if _type(fn) ~= "function" then return fn end
+		return _newcclosure(function(...)
+			return safeExec(function(...) return fn(...) end, onError)
+		end)
+	end
+
+	local function newSandbox(cfg)
+		cfg = cfg or {}
+		local _MAX_ERRORS  = cfg.maxErrors or 10
+		local _errorCount  = 0
+		local _disabled    = false
+		local _errorLog    = {}
+
+		local sandbox = {}
+
+		function sandbox:Run(fn, ...)
+			if _disabled then
+				_CKLog("Sandbox: disabled after too many errors.")
+				return false, "sandbox disabled"
+			end
+			if _type(fn) ~= "function" then return false, "not a function" end
+			local args = {...}
+			local ok, err = _xpcall(function() return fn(_unpack(args)) end, function(e)
+				return _tostring(e)
+			end)
+			if not ok then
+				_errorCount = _errorCount + 1
+				_tinsert(_errorLog, { time = _tick(), err = err })
+				_CKLog(_sfmt("Sandbox: error #%d -- %s", _errorCount, err))
+				if _errorCount >= _MAX_ERRORS then
+					_disabled = true
+					warn("[CK:Sandbox] Too many errors -- sandbox disabled.")
+				end
+			end
+			return ok, ok and nil or err
+		end
+
+		function sandbox:GetErrors()  return _errorLog  end
+		function sandbox:GetCount()   return _errorCount end
+		function sandbox:IsDisabled() return _disabled   end
+		function sandbox:Reset()
+			_errorCount = 0
+			_disabled   = false
+			_errorLog   = {}
+			_CKLog("Sandbox: reset.")
+		end
+
+		return sandbox
+	end
+
+	local function newJanitor()
+		return Janitor.new()
+	end
+
+	local function newRateLimiter(interval)
+		return RateLimiter.new(interval)
+	end
+
+	local function getSandboxErrors()
+		return _SANDBOX_ERRORS
+	end
+
+
+	-- ========================================================================
+	-- WINDOW POSITION
+	-- ========================================================================
+	local function saveWindowPosition(pos)
+		if not pos then return end
+		getgenv()[_POS_KEY] = {
+			xs = pos.X.Scale,  xo = pos.X.Offset,
+			ys = pos.Y.Scale,  yo = pos.Y.Offset,
+		}
+	end
+
+	local function loadWindowPosition()
+		local raw = getgenv()[_POS_KEY]
+		if raw and type(raw) == "table" then
+			return UDim2.new(raw.xs, raw.xo, raw.ys, raw.yo)
+		end
+		return nil
+	end
+
+
+	-- ========================================================================
+	-- CONFIG / THEME / ASSETS
+	-- ========================================================================
+	local function getConfig(Type)
+		local ConfigFlags = {};
+
+		for i,v in next , Compkiller.Flags do
+			local Value = v:GetValue();
+			local Suf = {};
+
+			if typeof(Value) == "table" and Value.ColorPicker and typeof(Value.ColorPicker) == 'table' then
+				Suf.Color3 = {
+					R = Value.ColorPicker.Color.R,
+					G = Value.ColorPicker.Color.G,
+					B = Value.ColorPicker.Color.B
+				};
+
+				Suf.Transparency = Value.ColorPicker.Transparency;
+
+				Suf.Type = "ColorPicker";
+			else
+				Suf.Value = Value;
+				Suf.Type = "NormalElement";
+			end;
+
+			if Type == "KV" then
+				ConfigFlags[v.Flag] = {
+					Flag = v.Flag,
+					Value = Suf,
+					Functions = v,
+					AutoKeybind = (v.AutoKeybind and v.AutoKeybind:GetSettings());
+				}
+			elseif Type == "MK" then
+				ConfigFlags[v.Flag] = {
+					Flag = v.Flag,
+					Value = Suf,
+					AutoKeybind = (v.AutoKeybind and v.AutoKeybind:GetSettings());
+				}
+			else
+				table.insert(ConfigFlags , {
+					Flag = v.Flag,
+					Value = Suf,
+					AutoKeybind = (v.AutoKeybind and v.AutoKeybind:GetSettings());
+				})
+			end;
+		end;
+
+		return ConfigFlags;
+	end;
+
+	local function getTheme()
+		return Compkiller.Colors;
+	end;
+
+	local function setTheme(name)
+		if name == "Dark Green" then
+			Compkiller.Colors = {
+				["BGDBColor"] = Color3.new(0.0429964, 0.110345, 0.0727226),
+				["BlockBackground"] = Color3.new(0.159287, 0.234483, 0.201811),
+				["BlockColor"] = Color3.new(0, 0.137931, 0.0951249),
+				["DropColor"] = Color3.new(0, 0.227586, 0.100452),
+				["Highlight"] = Color3.new(0.0666667, 0.992157, 0.628343),
+				["LineColor"] = Color3.new(0.263258, 0.372414, 0.329504),
+				["MouseEnter"] = Color3.new(0, 0.841379, 0.51063),
+				["Risky"] = Color3.new(1, 0.398296, 0.152941),
+				["StrokeColor"] = Color3.new(0.132342, 0.241379, 0.198517),
+				["SwitchColor"] = Color3.new(0.927586, 1, 0.980523),
+				["Toggle"] = Color3.new(0, 0.613793, 0.220119),
+				HighStrokeColor = Color3.new(0, 0.241379, 0.186445),
+			};
+		elseif name == "Default" then
+			Compkiller.Colors = {
+				Highlight = Color3.fromRGB(17, 238, 253),
+				Toggle = Color3.fromRGB(14, 203, 213),
+				Risky = Color3.fromRGB(251, 255, 39),
+				BGDBColor = Color3.fromRGB(22, 24, 29),
+				BlockColor = Color3.fromRGB(28, 29, 34),
+				StrokeColor = Color3.fromRGB(37, 38, 43),
+				SwitchColor = Color3.fromRGB(255, 255, 255),
+				DropColor = Color3.fromRGB(33, 35, 39),
+				MouseEnter = Color3.fromRGB(55, 58, 65),
+				BlockBackground = Color3.fromRGB(39, 40, 47),
+				LineColor = Color3.fromRGB(65, 65, 65),
+				HighStrokeColor = Color3.fromRGB(55, 56, 63),
+			};
+		elseif name == "Dark Blue" then
+			Compkiller.Colors = {
+				["BGDBColor"] = Color3.new(0.0393817, 0.0754204, 0.165517),
+				["BlockBackground"] = Color3.new(0, 0.0618311, 0.172414),
+				["BlockColor"] = Color3.new(0, 0.0172414, 0.103448),
+				["DropColor"] = Color3.new(0, 0.0965518, 0.289655),
+				["HighStrokeColor"] = Color3.new(0, 0.132604, 0.234483),
+				["Highlight"] = Color3.new(0.0666667, 0.781528, 0.992157),
+				["LineColor"] = Color3.new(0, 0.110345, 0.275862),
+				["MouseEnter"] = Color3.new(0, 0.606896, 1),
+				["Risky"] = Color3.new(0.0310345, 0.819572, 1),
+				["StrokeColor"] = Color3.new(0, 0.119857, 0.248276),
+				["SwitchColor"] = Color3.new(1, 1, 1),
+				["Toggle"] = Color3.new(0.054902, 0.463935, 0.835294)
+			}
+		elseif name == "Purple Rose" then
+			Compkiller.Colors = {
+				["BGDBColor"] = Color3.new(0.0459068, 0.030321, 0.117241),
+				["BlockBackground"] = Color3.new(0.156272, 0.119596, 0.324138),
+				["BlockColor"] = Color3.new(0.0948428, 0.0576457, 0.165517),
+				["DropColor"] = Color3.new(0.131034, 0, 0.0813317),
+				["HighStrokeColor"] = Color3.new(0.136259, 0.101237, 0.296552),
+				["Highlight"] = Color3.new(0.992157, 0.0666667, 0.33474),
+				["LineColor"] = Color3.new(0.20872, 0.137408, 0.372414),
+				["MouseEnter"] = Color3.new(0.365517, 0, 0.120999),
+				["Risky"] = Color3.new(1, 0.6086, 0.152941),
+				["StrokeColor"] = Color3.new(0.148499, 0.137836, 0.248276),
+				["SwitchColor"] = Color3.new(1, 1, 1),
+				["Toggle"] = Color3.new(0.835294, 0.054902, 0.248654)
+			}
+		elseif name == "Skeet" then		
+			Compkiller.Colors = {
+				["BGDBColor"] = Color3.new(0.114578, 0.125191, 0.151724),
+				["BlockBackground"] = Color3.new(0.128181, 0.131124, 0.151724),
+				["BlockColor"] = Color3.new(0.0732699, 0.0760008, 0.0896552),
+				["DropColor"] = Color3.new(0.0809037, 0.0861197, 0.0965517),
+				["HighStrokeColor"] = Color3.new(0.119382, 0.1217, 0.137931),
+				["Highlight"] = Color3.new(0, 0.634483, 0.0700119),
+				["LineColor"] = Color3.new(0.151724, 0.151724, 0.151724),
+				["MouseEnter"] = Color3.new(0.134007, 0.141391, 0.158621),
+				["Risky"] = Color3.new(0.984314, 1, 0.152941),
+				["StrokeColor"] = Color3.new(0.0769798, 0.0790924, 0.0896552),
+				["SwitchColor"] = Color3.new(1, 1, 1),
+				["Toggle"] = Color3.new(0, 0.324138, 0.10283)
+			}
+		end;
+
+		refreshCurrentColor()
+	end;
+
+	local function refreshCurrentColor()
+		for i,v in next , Compkiller.Elements.Highlight do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.Highlight;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements do
+			if v.Element and v.Property and v.Element:GetAttribute('Enabled') then
+				v.Element[v.Property] = Compkiller.Colors.Highlight;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.Risky do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.Risky;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.BlockColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.BlockColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.BGDBColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.BGDBColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.StrokeColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.StrokeColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.SwitchColor do
+			if v.Element and v.Property and v.Element[v.Property] ~= Compkiller.Colors.MouseEnter then
+				v.Element[v.Property] = Compkiller.Colors.SwitchColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.BlockBackground do
+			if v.Element and v.Property and v.Element[v.Property] then
+				v.Element[v.Property] = Compkiller.Colors.BlockBackground;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.DropColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.DropColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.LineColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.LineColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.HighStrokeColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.HighStrokeColor;
+			end;
+		end;
+	end;
+
+	local function changeHighlightColor(NewColor)
+		local H,S,V = NewColor:ToHSV();
+
+		Compkiller.Colors.Highlight = NewColor;
+		Compkiller.Colors.Toggle = Color3.fromHSV(H,S,V - 0.2);
+
+		for i,v in next , Compkiller.Elements.Highlight do
+			if v.Element and v.Property then
+				v.Element[v.Property] = NewColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements do
+			if v.Element and v.Property and v.Element:GetAttribute('Enabled') then
+				v.Element[v.Property] = NewColor;
+			end;
+		end;
+	end;
+
+	local function loader(IconId,Duration)
+		local CompKiller = Instance.new("ScreenGui")
+
+		CompKiller.Name = Compkiller:_RandomString()
+		CompKiller.Parent = CoreGui
+		CompKiller.Enabled = true
+		CompKiller.ResetOnSpawn = false
+		CompKiller.IgnoreGuiInset = true
+		CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global
+
+		local Loader = Instance.new("Frame")
+		local Icon = Instance.new("ImageLabel")
+		local Vignette = Instance.new("ImageLabel")
+
+		Loader.Name = Compkiller:_RandomString()
+		Loader.Parent = CompKiller
+		Loader.AnchorPoint = Vector2.new(0.5, 0.5)
+		Loader.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+		Loader.BackgroundTransparency = 1
+		Loader.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		Loader.BorderSizePixel = 0
+		Loader.Position = UDim2.new(0.5, 0, 0.5, 0)
+		Loader.Size = UDim2.new(1, 0, 1, 0)
+
+		Icon.Name = Compkiller:_RandomString()
+		Icon.Parent = Loader
+		Icon.AnchorPoint = Vector2.new(0.5, 0.5)
+		Icon.BackgroundTransparency = 1.000
+		Icon.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		Icon.BorderSizePixel = 0
+		Icon.Position = UDim2.new(0.5, 0, 0.5, 0)
+		Icon.Size = UDim2.new(0, 750, 0, 750)
+		Icon.ZIndex = 100
+		Icon.Image = IconId or Compkiller.Logo;
+		Icon.ImageTransparency = 1
+
+		Vignette.Name = Compkiller:_RandomString()
+		Vignette.Parent = Loader
+		Vignette.BackgroundTransparency = 1.000
+		Vignette.BorderColor3 = Color3.fromRGB(27, 42, 53)
+		Vignette.BorderSizePixel = 0
+		Vignette.Size = UDim2.new(1, 0, 1, 0)
+		Vignette.Image = cacheImage("rbxassetid://18720640102")
+		Vignette.ImageColor3 = Compkiller.Colors.Highlight
+		Vignette.ImageTransparency = 1
+		Vignette.AnchorPoint = Vector2.new(0.5,0.5)
+		Vignette.Position = UDim2.fromScale(0.5,0.5)
+
+		Compkiller:_Animation(Loader,TweenInfo.new(0.55,Enum.EasingStyle.Quint),{
+			BackgroundTransparency = 0.5
+		});
+
+		local Event = Instance.new('BindableEvent');
+
+		task.delay(0.5,function(...)
+			Compkiller:_Animation(Icon,TweenInfo.new(0.75,Enum.EasingStyle.Quint),{
+				ImageTransparency = 0.01,
+				Size = UDim2.new(0, 200, 0, 200)
+			});
+
+			task.delay(0.25,function(...)
+				Compkiller:_Animation(Vignette,TweenInfo.new(5),{
+					ImageTransparency = 0.2
+				});
+
+				task.wait(Duration or 4.5)
+
+				Compkiller:_Animation(Vignette,TweenInfo.new(3,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
+					Size = UDim2.new(2, 0, 2, 0)
+				});
+
+				Compkiller:_Animation(Icon,TweenInfo.new(0.75,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
+					ImageTransparency = 1,
+				});
+
+				Compkiller:_Animation(Loader,TweenInfo.new(1.5,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
+					BackgroundTransparency = 1
+				});
+
+				task.delay(0.1,function(...)
+					Compkiller:_Animation(Vignette,_TI.t100,{
+						ImageTransparency = 1
+					});
+
+					task.wait(0.2)
+
+					task.delay(3,function()
+						CompKiller:Destroy();
+					end)
+				end)
+
+				task.delay(0.6,function()
+					Event:Fire();
+				end)
+			end)
+		end);
+
+		return {
+			yield = function()
+				return Event.Event:Wait();
+			end	
+		};
+	end;
+
+	local function preloadIcons()
+		local RequiredAssets = {
+			"http://www.roblox.com/asset/?id=112554223509763",
+			"rbxassetid://4805639000",
+			"rbxassetid://6198493000",
+			"rbxassetid://10709790948",
+			"rbxassetid://18518299306",
+			"rbxassetid://10747362393",
+			"rbxassetid://18720640102",
+			"rbxassetid://10723344270",
+			"rbxassetid://109535175596957",
+			"rbxassetid://10747384394",
+			"rbxassetid://10734941499",
+			Compkiller.Logo,
+		};
+
+		if Compkiller.SecureMode then
+			for i,v in next , RequiredAssets do task.wait()
+				pcall(function()
+					cacheImage(v);
+				end);
+			end;
+		else
+			local ContentProvider: ContentProvider = cloneref(game:GetService('ContentProvider'));
+
+			for i,v in next , RequiredAssets do
+				ContentProvider:Preload(v);
+			end;
+		end;
+	end;
+
+	local function cacheImage(id) : string
+		if not Compkiller.SecureMode or not id or not id:byte() then
+			return id or "";
+		end;
+
+		assert(Compkiller.SecureMode , "please use security(< string >) before cache image")
+		assert(Compkiller.CacheDirectory , "please use security(< string >) before cache image")
+
+		local ids = string.match(id , "%d+");
+
+		if ids == nil then
+			return id;
+		end;
+
+		local Hash = Compkiller.Hash(id);
+
+		local cache_path = string.format("%s/cache-%s.png" ,Compkiller.CacheDirectory , Hash);
+
+		if isfile(cache_path) then
+			return (getcustomasset or getsynasset or function() return ''; end)(cache_path);
+		end;
+
+		local imgSize = Compkiller.SecurityConfig.ImageScale;
+
+		local imagesize = (imgSize and string.format("%sx%s", tostring(math.round(imgSize)), tostring(math.round(imgSize)))) or "150x150"
+
+		if imagesize == nil then
+			return ''
+		end;
+
+		local endpoint = string.format(
+			"https://thumbnails.roblox.com/v1/assets?assetIds=%s&size=%s&format=Png&isCircular=false",
+			ids,
+			imagesize
+		);
+
+		local json = game:HttpGet(endpoint);
+
+		local JSON_Decode = select(2, pcall(function()
+			return HttpService:JSONDecode(json);
+		end));
+
+		if typeof(JSON_Decode) == "table" and JSON_Decode and JSON_Decode.data and JSON_Decode.data[1] and JSON_Decode.data[1].imageUrl and JSON_Decode.data[1].state == "Completed" then task.wait()
+			local en = JSON_Decode.data[1].imageUrl;
+
+			writefile(cache_path , game:HttpGet(en));
+
+			task.wait();
+
+			return (getcustomasset or getsynasset or function() return ''; end)(cache_path);
+		end;
+
+		return "";
+	end;
+
+	local function getDate(Time)
+		Time = Time or tick();
+
+		local val = os.date('*t',Time);
+
+		return string.format("%s/%s/%s",val.day,val.month,val.year);
+	end;
+
+	local function getTimeNow(Time)
+		Time = Time or tick();
+
+		local val = os.date('*t',Time);
+
+		return string.format("%s:%s:%s",val.hour,val.min,val.sec);
+	end;
+
+	local function security(directory,Config) -- Security Mode
+		directory = directory or "Compkiller-Cache";
+
+		if not isfolder(directory) then
+			makefolder(directory);
+		end;
+
+		Compkiller.SecureMode = true;
+
+		Compkiller.SecurityConfig = Config or {};
+
+		Compkiller.CacheDirectory = directory;
+	end;
+
+	local function configManager(ConfigManager) : ConfigFunctions
+		ConfigManager = Compkiller.__CONFIG(ConfigManager , {
+			Directory = "Compkiller",
+			Config = "Software"
+		});
+
+		if not isfolder(ConfigManager.Directory) then
+			makefolder(ConfigManager.Directory);
+		end;
+
+		if not isfolder(Compkiller:_Path(ConfigManager.Directory , ConfigManager.Config)) then
+			makefolder(Compkiller:_Path(ConfigManager.Directory , ConfigManager.Config));
+		end;
+
+		local Args = {
+			Directory = Compkiller:_Path(ConfigManager.Directory , ConfigManager.Config);
+			EnableNotify = false,
+		};
+
+		local notify = Compkiller.newNotify();
+
+		function Args:WriteConfig(Config)
+			Config = Compkiller.__CONFIG(Config , {
+				Name = Compkiller:_RandomString(),
+				Author = LocalPlayer.Name,
+			});
+
+			local Flags = getConfig("MK");
+
+			Flags["__INFORMATION"] = {
+				Type = "Information",
+				Author = Config.Author,
+				Name = Config.Name,
+				CreatedDate = getDate()
+			};
+
+			if Args.EnableNotify then
+				notify.new({
+					Title = "Configs",
+					Icon = Compkiller:_GetIcon('settings'),
+					Content = "Create config \""..Config.Name.."\""
+				})
+			end
+
+			writefile(Compkiller:_Path(Args.Directory , Config.Name) , HttpService:JSONEncode(Flags));
+		end;
+
+		function Args:LoadConfigFromString(str)
+			local decoded = HttpService:JSONDecode(str);
+
+			local Flags = getConfig("KV");
+
+			for i,v in next , decoded do
+				if v and v.Flag then
+
+					local Value = Flags[v.Flag];
+
+					if Value then
+
+						if v.Value.Type == "NormalElement" then
+							Value.Functions:SetValue(v.Value.Value);
+
+						elseif v.Value.Type == "ColorPicker" then
+
+							local Color = Color3.new(v.Value.Color3.R,v.Value.Color3.G,v.Value.Color3.B);
+
+							local Transparency = v.Value.Transparency;
+
+							Value.Functions:SetValue(Color , Transparency);
+						end;
+					end;
+				end
+			end;
+		end;
+
+		function Args:GetCurrentConfig()
+			return getConfig("MK")
+		end;
+
+		function Args:ReadInfo(ConfigName)
+			local _path = Compkiller:_Path(Args.Directory , ConfigName);
+
+			if isfile(_path) then
+				local info = readfile(_path);
+
+				local decoded = HttpService:JSONDecode(info);
+
+				return decoded.__INFORMATION;
+			end;
+
+			return false;
+		end;
+
+		function Args:GetConfigs()
+			local names = {};
+
+			for i,v in next , listfiles(Args.Directory) do
+				local Name = string.sub(v , #Args.Directory + 2);
+
+				table.insert(names , Name);
+			end;
+
+			return names;
+		end;
+
+		function Args:GetFullConfigs()
+			local names = {};
+
+			for i,v in next , listfiles(Args.Directory) do
+				local Name = string.sub(v , #Args.Directory + 2);
+				local Info = Args:ReadInfo(Name);
+
+				table.insert(names , {
+					Name = Name,
+					Info = Info,
+				});
+			end;
+
+			return names;
+		end;
+
+		function Args:DeleteConfig(ConfigName)
+			local _path = Compkiller:_Path(Args.Directory,ConfigName);
+
+			if Args.EnableNotify then
+				notify.new({
+					Title = "Configs",
+					Icon = Compkiller:_GetIcon('settings'),
+					Content = "Delete config \""..ConfigName.."\""
+				})
+			end
+
+			if isfile(_path) then
+				delfile(_path);
+			end;
+		end;
+
+		function Args:GetConfigCount()
+			return #listfiles(Args.Directory);
+		end;
+
+		function Args:LoadConfig(ConfigName)
+			local _path = Compkiller:_Path(Args.Directory,ConfigName);
+
+			if isfile(_path) then
+				local info = readfile(_path);
+
+				local decoded = HttpService:JSONDecode(info);
+
+				local Flags = getConfig("KV");
+
+				if Args.EnableNotify then
+					notify.new({
+						Title = "Configs",
+						Icon = Compkiller:_GetIcon('settings'),
+						Content = "Load config \""..ConfigName.."\""
+					})
+				end
+
+				for i,v in next , decoded do
+					if v and v.Flag then
+
+						local Value = Flags[v.Flag];
+
+						if Value then
+
+							if v.Value.Type == "NormalElement" then
+								Value.Functions:SetValue(v.Value.Value);
+
+							elseif v.Value.Type == "ColorPicker" then
+
+								local Color = Color3.new(v.Value.Color3.R,v.Value.Color3.G,v.Value.Color3.B);
+
+								local Transparency = v.Value.Transparency;
+
+								Value.Functions:SetValue(Color , Transparency);
+							end;
+
+							if Value.Functions.AutoKeybind then
+								if v.AutoKeybind then
+									Value.Functions.AutoKeybind:LoadSettings(v.AutoKeybind)
+								end;
+							end;
+						end;
+					end
+				end;
+			end;
+		end;
+
+		return Args;
+	end;
+	-- ========================================================================
+
+	-- ========================================================================
+	-- PRESETS
+	-- ========================================================================
+	-- MC.preset("stealth"/"performance"/"balanced"/"secure"/"nuke")
+	-- MC.preset("nuke", { gcBypass=false }) -> nuke with selective overrides
+	local function preset(name, overrides)
+		local p = {}
+		p.stealth = function()
+			setPerformanceProfile("LOW")
+			setSmartAnimations(false)
+			enableAdvancedOptimizations(false)
+			setSleepMode(true)
+			enableNameObfuscation(true)
+			_CKLog("Preset.stealth: active")
+		end
+		p.performance = function()
+			setPerformanceProfile("HIGH")
+			setSmartAnimations(true)
+			enableAdvancedOptimizations(true)
+			setSleepMode(false)
+			startRenderManager()
+			_CKLog("Preset.performance: active")
+		end
+		p.balanced = function()
+			setPerformanceProfile("MEDIUM")
+			setSmartAnimations(true)
+			enableAdvancedOptimizations(true)
+			setSleepMode(false)
+			_CKLog("Preset.balanced: active")
+		end
+		p.secure = function()
+			enableNameObfuscation(true)
+			setSafeCall(true)
+			_CKLog("Preset.secure: active")
+		end
+		local fn = p[tostring(name):lower()]
+		if fn then fn()
+		else warn("[CK] MasterControl.preset: unknown '" .. tostring(name) ..
+			"' -- valid: stealth  performance  balanced  secure") end
+	end
+
+
+	-- ========================================================================
+	-- APPLY -- fire everything from one config table
+	-- ========================================================================
+	local function apply(cfg)
+		if type(cfg) ~= "table" then return end
+
+		-- DEBUG
+		if cfg.debug            ~= nil  then setDebug(cfg.debug)                                             end
+		if cfg.dumpStats        == true then dumpStats()                                                     end
+
+		-- PERFORMANCE
+		if cfg.performance      ~= nil  then
+			if cfg.performance == true  then setPerformanceProfile("HIGH")
+			elseif cfg.performance == false then setPerformanceProfile("LOW")
+			else setPerformanceProfile(tostring(cfg.performance):upper()) end
+		end
+		if cfg.tier             ~= nil  then
+			if cfg.tier == true  then setHardwareTier("HIGH")
+			elseif cfg.tier == false then setHardwareTier("LOW")
+			else setHardwareTier(tostring(cfg.tier):upper()) end
+		end
+		if cfg.animThreshold    ~= nil  then setAnimThreshold(cfg.animThreshold)                             end
+		if cfg.memInterval      ~= nil  then setMemInterval(cfg.memInterval)                                 end
+		if cfg.smartAnimations  ~= nil  then setSmartAnimations(cfg.smartAnimations)                         end
+		if cfg.advancedOpt      ~= nil  then enableAdvancedOptimizations(cfg.advancedOpt)                    end
+		if cfg.optimizeMode     ~= nil  then optimizeMode(cfg.optimizeMode)                                  end
+		if cfg.sleepMode        ~= nil  then setSleepMode(cfg.sleepMode)                                     end
+		if cfg.fpsCap           ~= nil  then fpsCap(cfg.fpsCap)                                              end
+
+		-- ANIMATIONS
+		-- FIX-2: "animation" and "animationsEnabled" aliases so the common patterns
+		--   { animation = false }  and  { animationsEnabled = false }  actually work.
+		--   Previously these keys were silently ignored; TweenService still fired.
+		if cfg.animation ~= nil then
+			Compkiller.AnimationsEnabled = (cfg.animation ~= false)
+			if not Compkiller.AnimationsEnabled then pauseAllAnimations() else resumeAllAnimations() end
+		end
+		if cfg.animationsEnabled ~= nil then
+			Compkiller.AnimationsEnabled = (cfg.animationsEnabled ~= false)
+			if not Compkiller.AnimationsEnabled then pauseAllAnimations() else resumeAllAnimations() end
+		end
+		if cfg.pauseAnimations  == true  then pauseAllAnimations()                                           end
+		if cfg.pauseAnimations  == false then resumeAllAnimations()                                          end
+		if cfg.forceGC          == true  then forceGC()                                                      end
+		if cfg.cleanupAll       == true  then cleanupAll()                                                   end
+
+		-- RENDER
+		if cfg.renderManager    == true  then startRenderManager()                                           end
+		if cfg.renderManager    == false then stopRenderManager()                                            end
+		if cfg.renderCull       == true  then renderCull()                                                   end
+		if cfg.renderCull       == false then renderResume()                                                 end
+
+		-- SANDBOX
+		if cfg.safeCall         ~= nil  then setSafeCall(cfg.safeCall)                                       end
+
+		-- GUI SHIELD
+		if cfg.obfuscate        ~= nil  then enableNameObfuscation(cfg.obfuscate)                            end
+		if cfg.hardReset        == true then hardReset()                                                     end
+		if cfg.turboScramble    ~= nil and cfg.turboScrambleGui then
+			enableTurboScramble(cfg.turboScrambleGui, cfg.turboScramble)
+		end
+		if cfg.decoySystem      ~= nil  then enableDecoySystem(cfg.decoySystem)                              end
+		if cfg.ultimateShield   ~= nil  then enableUltimateShield(cfg.ultimateShield)                        end
+
+		-- ADVANCED SHIELD (AS-1 through AS-4)
+		-- These accept a screenGui argument; pass cfg.advancedShieldGui or auto-resolve.
+		local _asg = cfg.advancedShieldGui
+		if cfg.memoryScrambling    ~= nil then enableMemoryScrambling(_asg, cfg.memoryScrambling)            end
+		if cfg.behavioralNoise     ~= nil then enableBehavioralNoise(_asg, cfg.behavioralNoise)              end
+		if cfg.ghostInstances      ~= nil then enableGhostInstances(cfg.ghostInstances)                      end
+		if cfg.fingerprintRotation ~= nil then enableFingerprintRotation(_asg, cfg.fingerprintRotation)      end
+		if cfg.advancedShield      ~= nil then enableUltimateShieldAdvanced(cfg.advancedShield)              end
+
+		-- WINDOW POSITION
+		if cfg.savePosition     ~= nil  then saveWindowPosition(cfg.savePosition)                            end
+		if cfg.loadPosition     == true then loadWindowPosition()                                            end
+
+		-- PRESET runs last so explicit keys take priority
+		if cfg.preset then preset(cfg.preset, cfg.presetOverrides) end
+
+		_CKLog("MasterControl.apply: done.")
+	end
+
+
+	-- ========================================================================
+	-- RETURN CONTROLLER
+	-- Unknown keys -> no-op + warn via __index
+	-- ========================================================================
+	return setmetatable({
+		-- WINDOW CREATION
+		new = Compkiller.new,
+
+		-- DEBUG
+		debug                   = setDebug,
+		dumpStats               = dumpStats,
+		version                 = getVersionInfo,
+		executorProfile         = getExecutorProfile,
+		missingEnv              = getMissingEnv,
+		isStudio                = isStudio,
+
+		-- PERFORMANCE
+		performance             = setPerformanceProfile,
+		tier                    = setHardwareTier,
+		animThreshold           = setAnimThreshold,
+		memInterval             = setMemInterval,
+		fpsCap                  = fpsCap,
+		sleepMode               = setSleepMode,
+		optimizeMode            = optimizeMode,
+		getFPS                  = getFPS,
+		getStats                = getOptimizerStats,
+		isMobile                = isMobileTier,
+
+		-- ANIMATIONS
+		smartAnimations         = setSmartAnimations,
+		advancedOpt             = enableAdvancedOptimizations,
+		pauseAnimations         = pauseAllAnimations,
+		resumeAnimations        = resumeAllAnimations,
+		forceGC                 = forceGC,
+		cleanupAll              = cleanupAll,
+
+		-- RENDER
+		renderManager           = startRenderManager,
+		renderStop              = stopRenderManager,
+		renderCull              = renderCull,
+		renderResume            = renderResume,
+
+		-- GUI SHIELD
+		obfuscate               = enableNameObfuscation,
+		turboScramble           = enableTurboScramble,
+		hardReset               = hardReset,
+		isOpen                  = isWindowOpen,
+		decoySystem             = enableDecoySystem,
+		ultimateShield          = enableUltimateShield,
+
+		-- ADVANCED SHIELD (AS-1 through AS-4)
+		memoryScrambling        = enableMemoryScrambling,
+		behavioralNoise         = enableBehavioralNoise,
+		ghostInstances          = enableGhostInstances,
+		fingerprintRotation     = enableFingerprintRotation,
+		advancedShield          = enableUltimateShieldAdvanced,
+
+		-- SANDBOX
+		safeCall                = setSafeCall,
+		exec                    = safeExec,
+		safeCallFn              = safeCall,
+		wrap                    = wrap,
+		newSandbox              = newSandbox,
+		newJanitor              = newJanitor,
+		newRateLimiter          = newRateLimiter,
+		getSandboxErrors        = getSandboxErrors,
+
+		-- WINDOW POSITION
+		savePosition            = saveWindowPosition,
+		loadPosition            = loadWindowPosition,
+
+		-- CONFIG / THEME
+		getConfig               = getConfig,
+		getTheme                = getTheme,
+		setTheme                = setTheme,
+		refreshColor            = refreshCurrentColor,
+		changeHighlight         = changeHighlightColor,
+		loader                  = loader,
+		preloadIcons            = preloadIcons,
+		cacheImage              = cacheImage,
+		getDate                 = getDate,
+		getTimeNow              = getTimeNow,
+		security                = security,
+		configManager           = configManager,
+
+		-- PRESET & APPLY
+		preset                  = preset,
+		apply                   = apply,
+
+	}, {
+		__index = function(_, key)
+			warn("[CK] MasterControl." .. tostring(key) .. " -- unknown key.")
+			return function() end
+		end,
+	})
+end
 
 
 return Compkiller;
