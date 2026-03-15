@@ -13397,6 +13397,74 @@ Compkiller.MasterControl = function(...)
 		return Compkiller.Colors;
 	end;
 
+	local function refreshCurrentColor()
+		for i,v in next , Compkiller.Elements.Highlight do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.Highlight;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements do
+			if v.Element and v.Property and v.Element:GetAttribute('Enabled') then
+				v.Element[v.Property] = Compkiller.Colors.Highlight;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.Risky do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.Risky;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.BlockColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.BlockColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.BGDBColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.BGDBColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.StrokeColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.StrokeColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.SwitchColor do
+			if v.Element and v.Property and v.Element[v.Property] ~= Compkiller.Colors.MouseEnter then
+				v.Element[v.Property] = Compkiller.Colors.SwitchColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.BlockBackground do
+			if v.Element and v.Property and v.Element[v.Property] then
+				v.Element[v.Property] = Compkiller.Colors.BlockBackground;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.DropColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.DropColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.LineColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.LineColor;
+			end;
+		end;
+
+		for i,v in next , Compkiller.Elements.HighStrokeColor do
+			if v.Element and v.Property then
+				v.Element[v.Property] = Compkiller.Colors.HighStrokeColor;
+			end;
+		end;
+	end;
+
 	local function setTheme(name)
 		if name == "Dark Green" then
 			Compkiller.Colors = {
@@ -13476,74 +13544,6 @@ Compkiller.MasterControl = function(...)
 		end;
 
 		refreshCurrentColor()
-	end;
-
-	local function refreshCurrentColor()
-		for i,v in next , Compkiller.Elements.Highlight do
-			if v.Element and v.Property then
-				v.Element[v.Property] = Compkiller.Colors.Highlight;
-			end;
-		end;
-
-		for i,v in next , Compkiller.Elements do
-			if v.Element and v.Property and v.Element:GetAttribute('Enabled') then
-				v.Element[v.Property] = Compkiller.Colors.Highlight;
-			end;
-		end;
-
-		for i,v in next , Compkiller.Elements.Risky do
-			if v.Element and v.Property then
-				v.Element[v.Property] = Compkiller.Colors.Risky;
-			end;
-		end;
-
-		for i,v in next , Compkiller.Elements.BlockColor do
-			if v.Element and v.Property then
-				v.Element[v.Property] = Compkiller.Colors.BlockColor;
-			end;
-		end;
-
-		for i,v in next , Compkiller.Elements.BGDBColor do
-			if v.Element and v.Property then
-				v.Element[v.Property] = Compkiller.Colors.BGDBColor;
-			end;
-		end;
-
-		for i,v in next , Compkiller.Elements.StrokeColor do
-			if v.Element and v.Property then
-				v.Element[v.Property] = Compkiller.Colors.StrokeColor;
-			end;
-		end;
-
-		for i,v in next , Compkiller.Elements.SwitchColor do
-			if v.Element and v.Property and v.Element[v.Property] ~= Compkiller.Colors.MouseEnter then
-				v.Element[v.Property] = Compkiller.Colors.SwitchColor;
-			end;
-		end;
-
-		for i,v in next , Compkiller.Elements.BlockBackground do
-			if v.Element and v.Property and v.Element[v.Property] then
-				v.Element[v.Property] = Compkiller.Colors.BlockBackground;
-			end;
-		end;
-
-		for i,v in next , Compkiller.Elements.DropColor do
-			if v.Element and v.Property then
-				v.Element[v.Property] = Compkiller.Colors.DropColor;
-			end;
-		end;
-
-		for i,v in next , Compkiller.Elements.LineColor do
-			if v.Element and v.Property then
-				v.Element[v.Property] = Compkiller.Colors.LineColor;
-			end;
-		end;
-
-		for i,v in next , Compkiller.Elements.HighStrokeColor do
-			if v.Element and v.Property then
-				v.Element[v.Property] = Compkiller.Colors.HighStrokeColor;
-			end;
-		end;
 	end;
 
 	local function changeHighlightColor(NewColor)
@@ -14348,11 +14348,48 @@ end
 -- Compkiller.config is a direct alias so users can call it immediately
 -- on the raw Compkiller table before or after calling MasterControl.
 Compkiller.config = function(cfg)
-    -- Get or create the MasterControl instance, then apply
+    -- Get or create the MasterControl instance
     if not Compkiller._MC then
         Compkiller._MC = Compkiller.MasterControl()
     end
-    Compkiller._MC.apply(cfg)
+    local mc = Compkiller._MC
+
+    -- If the window doesn't exist yet, apply immediately for non-window keys,
+    -- then queue the window-dependent keys to re-apply once mc.new() is called.
+    if not Compkiller._ActiveWindow then
+        -- Window keys that need a live window — queue for after mc.new()
+        local _WIN_KEYS = {
+            "open","menuKey","windowName","username","logo",
+            "expireDate","notify","theme","highlightColor",
+            "savePosition","loadPosition"
+        }
+        local _deferred = {}
+        for _, k in ipairs(_WIN_KEYS) do
+            if cfg[k] ~= nil then
+                _deferred[k] = cfg[k]
+                cfg[k] = nil   -- strip so apply() doesn't silently no-op them now
+            end
+        end
+
+        mc.apply(cfg)   -- apply all non-window keys now
+
+        -- Store deferred keys; mc.new() will flush them
+        Compkiller._DeferredConfig = _deferred
+    else
+        mc.apply(cfg)
+    end
+end
+
+-- Hook into mc.new so deferred config keys are applied right after window creation
+local _orig_new = Compkiller.new
+Compkiller.new = function(...)
+    local win = _orig_new(...)
+    -- Flush any config keys that were queued before the window existed
+    if Compkiller._DeferredConfig and Compkiller._MC then
+        Compkiller._MC.apply(Compkiller._DeferredConfig)
+        Compkiller._DeferredConfig = nil
+    end
+    return win
 end
 
 -- Auto-call MasterControl and return it as the module root.
