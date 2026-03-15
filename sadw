@@ -7562,7 +7562,7 @@ function Compkiller.new(Config)
 		SelectedTab = nil,
 		Tabs = {},
 		LastTab = nil,
-		IsOpen = true,
+		IsOpen = false,  -- start closed; first keybind open triggers layout correctly
 		AlwayShowTab = false,
 		THREADS = {},
 		PerformanceMode = false,
