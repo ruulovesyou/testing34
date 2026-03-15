@@ -10593,14 +10593,21 @@ function Compkiller.new(Config)
 			end);
 
 			if config.Closed then
-				-- Defer close: let one render frame pass so AbsoluteContentSize is measured
-				-- before collapsing. Closing immediately causes height=0 and headers stack.
-				task.defer(function()
-					task.wait()
-					IsOpen = false
-					SectionClose.Rotation = -180
-					refresh()
-					refreshScale()
+				-- Closed=true fix: AbsoluteContentSize is 0 while the tab is hidden.
+				-- Hooking TabOpenSignal is the only reliable moment the section is on-screen
+				-- and the layout engine has run, giving us the real height before collapsing.
+				local _closedOnce = false
+				TabOpenSignal:Connect(function(bool)
+					if bool and not _closedOnce then
+						_closedOnce = true
+						task.defer(function()
+							task.wait() -- one frame after visible
+							IsOpen = false
+							SectionClose.Rotation = -180
+							refresh()
+							refreshScale()
+						end)
+					end
 				end)
 			end
 
