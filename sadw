@@ -11342,6 +11342,9 @@ function Compkiller.new(Config)
 		end);
 	end);
 
+	-- Register this window as the active MC window so mc.apply() can find it
+	Compkiller._ActiveWindow = WindowArgs
+
 	return WindowArgs;
 end;
 
@@ -14019,6 +14022,41 @@ Compkiller.MasterControl = function(...)
 	local function apply(cfg)
 		if type(cfg) ~= "table" then return end
 
+		-- Resolve the active window (set by Compkiller.new)
+		local win = Compkiller._ActiveWindow
+
+		-- ── WINDOW / UI ────────────────────────────────────────────────────────
+		if win then
+			-- Open or close the menu
+			if cfg.open ~= nil then
+				win.IsOpen = (cfg.open ~= false)
+				win:Toggle(win.IsOpen)
+			end
+			-- Change the hotkey that opens/closes the menu
+			if cfg.menuKey ~= nil then
+				win:SetMenuKey(cfg.menuKey)
+			end
+			-- Update header info (username, logo, expiry, window name)
+			local _upd = {}
+			local _needsUpdate = false
+			if cfg.username    ~= nil then _upd.Username   = cfg.username;    _needsUpdate = true end
+			if cfg.logo        ~= nil then _upd.Logo       = cfg.logo;        _needsUpdate = true end
+			if cfg.expireDate  ~= nil then _upd.ExpireDate = cfg.expireDate;  _needsUpdate = true end
+			if cfg.windowName  ~= nil then _upd.WindowName = cfg.windowName;  _needsUpdate = true end
+			if _needsUpdate then win:Update(_upd) end
+			-- Notify shorthand: mc.apply({ notify = { Title="Hi", Content="...", Duration=3 } })
+			if cfg.notify ~= nil then
+				pcall(function() win.Notify.new(cfg.notify) end)
+			end
+		end
+
+		-- ── THEME ───────────────────────────────────────────────────────────────
+		if cfg.theme          ~= nil  then setTheme(cfg.theme)                                               end
+		if cfg.highlightColor ~= nil  then
+			Compkiller.Colors.Highlight = cfg.highlightColor
+			refreshCurrentColor()
+		end
+
 		-- DEBUG
 		if cfg.debug            ~= nil  then setDebug(cfg.debug)                                             end
 		if cfg.dumpStats        == true then dumpStats()                                                     end
@@ -14068,7 +14106,6 @@ Compkiller.MasterControl = function(...)
 		if cfg.ultimateShield   ~= nil  then enableUltimateShield(cfg.ultimateShield)                        end
 
 		-- ADVANCED SHIELD (AS-1 through AS-4)
-		-- These accept a screenGui argument; pass cfg.advancedShieldGui or auto-resolve.
 		local _asg = cfg.advancedShieldGui
 		if cfg.memoryScrambling    ~= nil then enableMemoryScrambling(_asg, cfg.memoryScrambling)            end
 		if cfg.behavioralNoise     ~= nil then enableBehavioralNoise(_asg, cfg.behavioralNoise)              end
@@ -14080,7 +14117,7 @@ Compkiller.MasterControl = function(...)
 		if cfg.savePosition     ~= nil  then saveWindowPosition(cfg.savePosition)                            end
 		if cfg.loadPosition     == true then loadWindowPosition()                                            end
 
-		-- PRESET runs last so explicit keys take priority
+		-- PRESET runs last so explicit keys above take priority
 		if cfg.preset then preset(cfg.preset, cfg.presetOverrides) end
 
 		_CKLog("MasterControl.apply: done.")
@@ -14094,6 +14131,42 @@ Compkiller.MasterControl = function(...)
 	return setmetatable({
 		-- WINDOW CREATION
 		new = Compkiller.new,
+
+		-- WINDOW CONTROL (synced to active window created by mc.new())
+		-- All of these operate on Compkiller._ActiveWindow automatically.
+		open  = function()
+			local w = Compkiller._ActiveWindow
+			if w then w.IsOpen = true;  w:Toggle(true)  end
+		end,
+		close = function()
+			local w = Compkiller._ActiveWindow
+			if w then w.IsOpen = false; w:Toggle(false) end
+		end,
+		toggle = function()
+			local w = Compkiller._ActiveWindow
+			if w then w:_ToggleUI() end
+		end,
+		isOpen = function()
+			local w = Compkiller._ActiveWindow
+			return w and w.IsOpen or false
+		end,
+		menuKey = function(key)
+			local w = Compkiller._ActiveWindow
+			if w then w:SetMenuKey(key) end
+		end,
+		update = function(cfg)
+			local w = Compkiller._ActiveWindow
+			if w then w:Update(cfg or {}) end
+		end,
+		notify = function(cfg)
+			local w = Compkiller._ActiveWindow
+			if w then pcall(function() w.Notify.new(cfg) end) end
+		end,
+		theme = setTheme,
+		highlightColor = function(c3)
+			Compkiller.Colors.Highlight = c3
+			refreshCurrentColor()
+		end,
 
 		-- DEBUG
 		debug                   = setDebug,
