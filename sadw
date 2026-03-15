@@ -8438,13 +8438,9 @@ function Compkiller.new(Config)
 			end;
 		end;
 
-		if not WindowArgs.Tabs[1] then
-			TabOpenSignal:Fire(true);
-			TabOpen(true);
-			WindowArgs._OpenTabRemote = TabOpenSignal; -- track initially open tab
-		else
-			TabOpen(false);
-		end;
+		-- Auto-select removed: first tab no longer opens automatically.
+		-- SelectedTab stays nil until the user clicks a tab button.
+		TabOpen(false);
 
 		table.insert(WindowArgs.Tabs , {
 			Root = TabButton,
@@ -8637,10 +8633,9 @@ function Compkiller.new(Config)
 			InternalSignal:Connect(ToggleUI)
 
 
+			-- Auto-select removed: first sub-tab no longer opens automatically.
 			if not TabArgs.Tabs[1] then
-				TabArgs.__Current = Id;
-
-				InternalSignal:Fire(true)
+				TabArgs.__Current = Id; -- track which sub-tab is "current" without opening it
 			end;
 
 			table.insert(TabArgs.Tabs,Id)
@@ -9290,12 +9285,8 @@ function Compkiller.new(Config)
 			end;
 		end;
 
-		if not WindowArgs.Tabs[1] then
-			TabOpenSignal:Fire(true);
-			TabOpen(true);
-		else
-			TabOpen(false);
-		end;
+		-- Auto-select removed: first tab no longer opens automatically.
+		TabOpen(false);
 
 		table.insert(WindowArgs.Tabs , {
 			Root = TabButton,
@@ -10186,12 +10177,8 @@ function Compkiller.new(Config)
 				end;
 			end;
 
-			if not WindowArgs.Tabs[1] then
-				TabOpenSignal:Fire(true);
-				TabOpen(true);
-			else
-				TabOpen(false);
-			end;
+			-- Auto-select removed: first tab no longer opens automatically.
+			TabOpen(false);
 
 			table.insert(WindowArgs.Tabs , {
 				Root = TabButton,
