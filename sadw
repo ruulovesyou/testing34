@@ -10593,9 +10593,12 @@ function Compkiller.new(Config)
 			end);
 
 			if config.Closed then
-				IsOpen = false
-				SectionClose.Rotation = -180  -- chevron already points "up" when open; point down when closed
-				task.delay(0.05, function()
+				-- Defer close: let one render frame pass so AbsoluteContentSize is measured
+				-- before collapsing. Closing immediately causes height=0 and headers stack.
+				task.defer(function()
+					task.wait()
+					IsOpen = false
+					SectionClose.Rotation = -180
 					refresh()
 					refreshScale()
 				end)
