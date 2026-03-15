@@ -959,7 +959,6 @@ pcall(function()
 end)
 
 local function _ShieldParent(screenGui)
-    -- ── 1. Pin DisplayOrder to sampled safe value (not INT32_MAX fingerprint) ───
     _pcall(function()
         if _CK_SAFE_DO and type(_CK_SAFE_DO) == "number" then
             screenGui.DisplayOrder = _CK_SAFE_DO
@@ -2753,7 +2752,6 @@ function Compkiller:_Animation(Self , Info , Property)
 	end
 	local Tween = TweenService:Create(Self , Info or _TI.t025 , Property);
 	Tween:Play();
-	-- FIX-3: pre-compute cleanup keys once — no re-scan of Property in the closure
 	local _cleanupKeys = {}
 	for prop in pairs(Property) do
 		local _k = _instKey .. prop
@@ -5632,8 +5630,6 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 		EventOut:Fire(bool);
 		ToggleDb:Fire(bool);
 
-		-- FIX-3: Window may be nil when BaseParent is in _GetNilFolder() (tab hidden at init).
-		-- Re-resolve every call so we always have the latest reference.
 		local _win = Compkiller:_GetWindowFromElement(BaseParent)
 		local MUL = (_win and _win.AbsoluteSize.Y or 600) / 2;
 
@@ -8345,9 +8341,7 @@ function Compkiller.new(Config)
 		local UIListLayout = Instance.new("UIListLayout")
 
 		ContainerTab.Name = Compkiller:_RandomString()
-		-- BUG-FIX-1: start hidden and off-tree so non-active tabs are never visible
-		ContainerTab.Visible = false
-		ContainerTab.Parent = _GetNilFolder()
+		ContainerTab.Parent = TabMainFrame
 		ContainerTab.AnchorPoint = Vector2.new(0.5, 0.5)
 		ContainerTab.BackgroundTransparency = 1.000
 		ContainerTab.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -8387,13 +8381,14 @@ function Compkiller.new(Config)
 		-- _SetNilP re-parent that rebuilt the entire render tree on every tween frame.
 
 		local TabOpen = function(bool)
-			-- Signal.Fire already has IsSame guard — no Visible debounce needed here.
-			-- A Visible-based debounce causes hide calls to be skipped when ContainerTab
-			-- was already hidden at init, leaving both tabs visible simultaneously.
+			-- Debounce: ignore if already in the correct state
+			local _isOpen = ContainerTab.Visible
+			if bool == _isOpen and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
 
 			if bool then
 				WindowArgs.SelectedTab = TabButton;
 
+				-- Show content immediately (no tween delay, no re-parent cost)
 				ContainerTab.Visible = true
 				ContainerTab.Parent = TabMainFrame
 
@@ -8409,17 +8404,13 @@ function Compkiller.new(Config)
 					BackgroundTransparency = 0.925
 				});
 
-				-- Direct Content management: show active sub-tab, hide all others
 				for i,v in next , TabArgs.Tabs do
-					if TabArgs.__Current and v.Root == TabArgs.__Current.Root then
+					if v.Root == TabArgs.__Current.Root then
 						v.Remote:Fire(true);
-						if v.Content then v.Content.Visible = true; v.Content.Parent = MainFrame end
-					else
-						v.Remote:Fire(false);
-						if v.Content then v.Content.Visible = false; v.Content.Parent = _GetNilFolder() end
 					end;
 				end;
 			else
+				-- Hide content immediately (no tween delay)
 				ContainerTab.Visible = false
 				ContainerTab.Parent = _GetNilFolder()
 
@@ -8435,12 +8426,19 @@ function Compkiller.new(Config)
 					BackgroundTransparency = 1
 				});
 
+				for i,v in next , TabArgs.Tabs do
+					v.Remote:Fire(false);
+				end;
 			end;
 		end;
 
-		-- Auto-select removed: first tab no longer opens automatically.
-		-- SelectedTab stays nil until the user clicks a tab button.
-		TabOpen(false);
+		if not WindowArgs.Tabs[1] then
+			TabOpenSignal:Fire(true);
+			TabOpen(true);
+			WindowArgs._OpenTabRemote = TabOpenSignal; -- track initially open tab
+		else
+			TabOpen(false);
+		end;
 
 		table.insert(WindowArgs.Tabs , {
 			Root = TabButton,
@@ -8485,14 +8483,12 @@ function Compkiller.new(Config)
 		end);
 
 		Compkiller:_Input(TabButton,function()
-			-- Directly call the previous tab's close function to bypass the
-			-- Signal IsSame guard (_value already false → Fire(false) is a no-op).
-			if WindowArgs._OpenTabFn then
-				WindowArgs._OpenTabFn(false);
+			-- Fix 3: fire only prev-close + new-open (was iterating all N tabs)
+			if WindowArgs._OpenTabRemote then
+				WindowArgs._OpenTabRemote:Fire(false);
 			end;
-			TabOpen(true);
+			TabOpenSignal:Fire(true);
 			WindowArgs._OpenTabRemote = TabOpenSignal;
-			WindowArgs._OpenTabFn = TabOpen;
 		end);
 
 		function TabArgs:DrawTab(TabConfig) -- Internal Tab
@@ -8635,9 +8631,10 @@ function Compkiller.new(Config)
 			InternalSignal:Connect(ToggleUI)
 
 
-			-- Auto-select removed: first sub-tab no longer opens automatically.
 			if not TabArgs.Tabs[1] then
-				TabArgs.__Current = Id; -- track which sub-tab is "current" without opening it
+				TabArgs.__Current = Id;
+
+				InternalSignal:Fire(true)
 			end;
 
 			table.insert(TabArgs.Tabs,Id)
@@ -8646,19 +8643,10 @@ function Compkiller.new(Config)
 				for i,v in next , TabArgs.Tabs do
 					if v.Root == Frame then
 						TabArgs.__Current = v;
+
 						v.Remote:Fire(true);
-						-- Directly show this sub-tab's content frame
-						if v.Content then
-							v.Content.Visible = true
-							v.Content.Parent = MainFrame
-						end
 					else
 						v.Remote:Fire(false);
-						-- Directly hide every other sub-tab's content frame
-						if v.Content then
-							v.Content.Visible = false
-							v.Content.Parent = _GetNilFolder()
-						end
 					end;
 				end;
 			end);
@@ -9122,7 +9110,7 @@ function Compkiller.new(Config)
 		local Tween = _TI.t035q;
 
 		local TabOpen = function(bool)
-			-- Signal.Fire IsSame guard handles dedup — Visible debounce removed.
+			if bool == TabConfig.Visible and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
 
 			if bool then
 
@@ -9287,8 +9275,12 @@ function Compkiller.new(Config)
 			end;
 		end;
 
-		-- Auto-select removed: first tab no longer opens automatically.
-		TabOpen(false);
+		if not WindowArgs.Tabs[1] then
+			TabOpenSignal:Fire(true);
+			TabOpen(true);
+		else
+			TabOpen(false);
+		end;
 
 		table.insert(WindowArgs.Tabs , {
 			Root = TabButton,
@@ -9333,12 +9325,12 @@ function Compkiller.new(Config)
 		end);
 
 		Compkiller:_Input(TabButton,function()
-			if WindowArgs._OpenTabFn then
-				WindowArgs._OpenTabFn(false);
+			-- Fix 3: fire only prev-close + new-open (was iterating all N tabs)
+			if WindowArgs._OpenTabRemote then
+				WindowArgs._OpenTabRemote:Fire(false);
 			end;
-			TabOpen(true);
+			TabOpenSignal:Fire(true);
 			WindowArgs._OpenTabRemote = TabOpenSignal;
-			WindowArgs._OpenTabFn = TabOpen;
 		end);
 
 		function TabArgs:_DrawConfig()
@@ -9878,11 +9870,7 @@ function Compkiller.new(Config)
 			local UIListLayout_2 = Instance.new("UIListLayout")
 
 			TabContent.Name = Compkiller:_RandomString()
-			-- Born hidden — avoids flash-visible stacking
-			TabContent.Visible = false
-			TabContent.Parent = _GetNilFolder()
-			-- Store direct reference on Id so the click handler can manage it without signals
-			if Internal.ID then Internal.ID.Content = TabContent end
+			TabContent.Parent = Internal.Parent;
 			TabContent.AnchorPoint = Vector2.new(0.5, 0.5)
 			TabContent.BackgroundTransparency = 1.000
 			TabContent.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -9963,14 +9951,25 @@ function Compkiller.new(Config)
 			-- not via tween-frame threshold polling.
 			TabOpenSignal = Internal.Signal;
 
-			-- Initial state: always start hidden.
-			-- The ContainerTab TabOpen handler (Step 4) will show the correct sub-tab
-			-- when the container opens. Direct management, no signal races.
-			TabContent.Visible = false
-			TabContent.Parent = _GetNilFolder()
+			-- Set initial visibility directly based on current signal state
+			if not TabOpenSignal:GetValue() then
+				TabContent.Visible = false
+				TabContent.Parent = _GetNilFolder()
+			else
+				TabContent.Visible = true
+				TabContent.Parent = Internal.Parent
+			end
 
-			-- TabContent visibility is now managed DIRECTLY by the click handler (Step 3).
-			-- No signal-based Connect needed here for parenting — avoids all race conditions.
+			-- React to future open/close events immediately
+			TabOpenSignal:Connect(function(visible)
+				if visible then
+					TabContent.Visible = true
+					TabContent.Parent = Internal.Parent
+				else
+					TabContent.Visible = false
+					TabContent.Parent = _GetNilFolder()
+				end
+			end)
 		else
 			-- Button --
 			local TabButton = Instance.new("Frame")
@@ -10047,9 +10046,7 @@ function Compkiller.new(Config)
 			local UIListLayout_2 = Instance.new("UIListLayout")
 
 			TabContent.Name = Compkiller:_RandomString()
-			-- BUG-FIX-5: born hidden, not parented yet — avoids flash-visible stacking
-			TabContent.Visible = false
-			TabContent.Parent = _GetNilFolder()
+			TabContent.Parent = TabMainFrame;
 			TabContent.AnchorPoint = Vector2.new(0.5, 0.5)
 			TabContent.BackgroundTransparency = 1.000
 			TabContent.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -10137,9 +10134,7 @@ function Compkiller.new(Config)
 			-- per-frame and triggered an expensive _SetNilP re-parent each switch.
 
 			local TabOpen = function(bool)
-				-- Signal.Fire has IsSame guard — Visible debounce removed.
-				-- Visible-based debounce skips hide when content was already hidden at init,
-				-- causing both tabs to show simultaneously on first switch.
+				if bool == TabContent.Visible and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
 
 				if bool then
 
@@ -10179,8 +10174,12 @@ function Compkiller.new(Config)
 				end;
 			end;
 
-			-- Auto-select removed: first tab no longer opens automatically.
-			TabOpen(false);
+			if not WindowArgs.Tabs[1] then
+				TabOpenSignal:Fire(true);
+				TabOpen(true);
+			else
+				TabOpen(false);
+			end;
 
 			table.insert(WindowArgs.Tabs , {
 				Root = TabButton,
@@ -10225,12 +10224,12 @@ function Compkiller.new(Config)
 			end);
 
 			Compkiller:_Input(TabButton,function()
-				if WindowArgs._OpenTabFn then
-					WindowArgs._OpenTabFn(false);
+				-- Fix 3: fire only prev-close + new-open (was iterating all N tabs)
+				if WindowArgs._OpenTabRemote then
+					WindowArgs._OpenTabRemote:Fire(false);
 				end;
-				TabOpen(true);
+				TabOpenSignal:Fire(true);
 				WindowArgs._OpenTabRemote = TabOpenSignal;
-				WindowArgs._OpenTabFn = TabOpen;
 			end);
 		end;
 
@@ -10582,15 +10581,12 @@ function Compkiller.new(Config)
 			end);
 
 			if config.Closed then
-				-- Closed=true fix: AbsoluteContentSize is 0 while the tab is hidden.
-				-- Hooking TabOpenSignal is the only reliable moment the section is on-screen
-				-- and the layout engine has run, giving us the real height before collapsing.
 				local _closedOnce = false
 				TabOpenSignal:Connect(function(bool)
 					if bool and not _closedOnce then
 						_closedOnce = true
 						task.defer(function()
-							task.wait() -- one frame after visible
+							task.wait()
 							IsOpen = false
 							SectionClose.Rotation = -180
 							refresh()
@@ -13061,27 +13057,12 @@ Compkiller.MasterControl = function(...)
 
 
 	-- ========================================================================
-	-- RENDER MANAGER
-	-- FIX-6: _CULL_KEY / _RENDER_CONN / _SaveCameraState / _SuppressRender /
-	-- _RestoreRender are all locals inside a do-end block above and are OUT OF
-	-- SCOPE here — referencing them returns nil and crashes on any call.
-	-- Delegate to the real Compkiller:StartRenderManager() methods instead.
+	-- RENDER MANAGER — delegates to real Compkiller methods (out-of-scope fix)
 	-- ========================================================================
-	local function startRenderManager()
-		pcall(function() Compkiller:StartRenderManager() end)
-	end
-
-	local function stopRenderManager()
-		pcall(function() Compkiller:StopRenderManager() end)
-	end
-
-	local function renderCull()
-		pcall(function() Compkiller:RenderCull() end)
-	end
-
-	local function renderResume()
-		pcall(function() Compkiller:RenderResume() end)
-	end
+	local function startRenderManager() pcall(function() Compkiller:StartRenderManager() end) end
+	local function stopRenderManager()  pcall(function() Compkiller:StopRenderManager()  end) end
+	local function renderCull()         pcall(function() Compkiller:RenderCull()          end) end
+	local function renderResume()       pcall(function() Compkiller:RenderResume()        end) end
 
 
 	-- ========================================================================
@@ -13980,7 +13961,6 @@ Compkiller.MasterControl = function(...)
 		if cfg.fpsCap           ~= nil  then fpsCap(cfg.fpsCap)                                              end
 
 		-- ANIMATIONS
-		-- FIX-2: animation=false / animationsEnabled=false now actually kill tweens
 		if cfg.animation ~= nil then
 			Compkiller.AnimationsEnabled = (cfg.animation ~= false)
 			if not Compkiller.AnimationsEnabled then pauseAllAnimations() else resumeAllAnimations() end
@@ -14006,48 +13986,34 @@ Compkiller.MasterControl = function(...)
 		-- GUI SHIELD
 		if cfg.obfuscate        ~= nil  then enableNameObfuscation(cfg.obfuscate)                            end
 		if cfg.hardReset        == true then hardReset()                                                     end
-		-- FIX-5b: turboScrambleGui = true → auto-resolve ScreenGui from Compkiller.Windows[1]
 		if cfg.turboScramble ~= nil then
 			local _tsg = cfg.turboScrambleGui
-			if type(_tsg) ~= "userdata" then
-				pcall(function() _tsg = Compkiller.Windows and Compkiller.Windows[1] end)
-			end
+			if type(_tsg) ~= "userdata" then pcall(function() _tsg = Compkiller.Windows and Compkiller.Windows[1] end) end
 			if _tsg then enableTurboScramble(_tsg, cfg.turboScramble) end
 		end
-		if cfg.decoySystem      ~= nil  then enableDecoySystem(cfg.decoySystem)                              end
-		-- FIX-4a: ultimateShield = true → normalise to {} so config.level indexing doesn't crash
+		if cfg.decoySystem ~= nil then enableDecoySystem(cfg.decoySystem) end
 		if cfg.ultimateShield ~= nil then
-			enableUltimateShield((type(cfg.ultimateShield) == "table") and cfg.ultimateShield or {})
+			enableUltimateShield((type(cfg.ultimateShield)=="table") and cfg.ultimateShield or {})
 		end
 
-		-- ADVANCED SHIELD (AS-1 through AS-4)
-		-- FIX-5: advancedShieldGui = true → auto-resolve from Compkiller.Windows[1]
+		-- ADVANCED SHIELD
 		local _asg = cfg.advancedShieldGui
-		if type(_asg) ~= "userdata" then
-			pcall(function() _asg = Compkiller.Windows and Compkiller.Windows[1] end)
-		end
-		-- FIX-4b: memoryScrambling — _EnableMemoryScrambling is undefined in v27, guard it
+		if type(_asg) ~= "userdata" then pcall(function() _asg = Compkiller.Windows and Compkiller.Windows[1] end) end
 		if cfg.memoryScrambling ~= nil then
-			if type(_EnableMemoryScrambling) == "function" then
-				enableMemoryScrambling(_asg, cfg.memoryScrambling)
-			end
+			if type(_EnableMemoryScrambling) == "function" then enableMemoryScrambling(_asg, cfg.memoryScrambling) end
 		end
 		if cfg.behavioralNoise     ~= nil then enableBehavioralNoise(_asg, cfg.behavioralNoise)              end
 		if cfg.ghostInstances      ~= nil then enableGhostInstances(cfg.ghostInstances)                      end
 		if cfg.fingerprintRotation ~= nil then enableFingerprintRotation(_asg, cfg.fingerprintRotation)      end
-		-- FIX-4c: advancedShield = true → normalise to {} + inject resolved ScreenGui
 		if cfg.advancedShield ~= nil then
-			local _ascfg = (type(cfg.advancedShield) == "table") and cfg.advancedShield or {}
+			local _ascfg = (type(cfg.advancedShield)=="table") and cfg.advancedShield or {}
 			if _asg and not _ascfg.screenGui then _ascfg.screenGui = _asg end
 			enableUltimateShieldAdvanced(_ascfg)
 		end
 
 		-- WINDOW POSITION
-		-- FIX-7: savePosition = true crashes pos.X.Scale — only forward a real UDim2
-		if cfg.savePosition ~= nil and type(cfg.savePosition) == "userdata" then
-			saveWindowPosition(cfg.savePosition)
-		end
-		if cfg.loadPosition     == true then loadWindowPosition()                                            end
+		if cfg.savePosition ~= nil and type(cfg.savePosition) == "userdata" then saveWindowPosition(cfg.savePosition) end
+		if cfg.loadPosition == true then loadWindowPosition() end
 
 		-- PRESET runs last so explicit keys take priority
 		if cfg.preset then preset(cfg.preset, cfg.presetOverrides) end
