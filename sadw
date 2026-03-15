@@ -14040,16 +14040,36 @@ Compkiller.MasterControl = function(...)
 			enableTurboScramble(cfg.turboScrambleGui, cfg.turboScramble)
 		end
 		if cfg.decoySystem      ~= nil  then enableDecoySystem(cfg.decoySystem)                              end
-		if cfg.ultimateShield   ~= nil  then enableUltimateShield(cfg.ultimateShield)                        end
+		if cfg.ultimateShield   ~= nil  then
+			-- FIX-4a: normalise true/false → table so _EnableUltimateShield never
+			-- crashes on config.level (indexing a boolean).
+			local _uscfg = (type(cfg.ultimateShield) == "table") and cfg.ultimateShield or {}
+			enableUltimateShield(_uscfg)
+		end
 
 		-- ADVANCED SHIELD (AS-1 through AS-4)
-		-- These accept a screenGui argument; pass cfg.advancedShieldGui or auto-resolve.
+		-- cfg.advancedShieldGui (Window.Root) is forwarded to every AS function.
 		local _asg = cfg.advancedShieldGui
-		if cfg.memoryScrambling    ~= nil then enableMemoryScrambling(_asg, cfg.memoryScrambling)            end
+		-- FIX-4b: _EnableMemoryScrambling is not defined in v27 — guard the call so
+		-- memoryScrambling = true with advancedShieldGui = Window.Root doesn't nil-crash.
+		if cfg.memoryScrambling ~= nil then
+			if type(_EnableMemoryScrambling) == "function" then
+				enableMemoryScrambling(_asg, cfg.memoryScrambling)
+			else
+				_CKLog("apply: memoryScrambling skipped — _EnableMemoryScrambling undefined in this build.")
+			end
+		end
 		if cfg.behavioralNoise     ~= nil then enableBehavioralNoise(_asg, cfg.behavioralNoise)              end
 		if cfg.ghostInstances      ~= nil then enableGhostInstances(cfg.ghostInstances)                      end
 		if cfg.fingerprintRotation ~= nil then enableFingerprintRotation(_asg, cfg.fingerprintRotation)      end
-		if cfg.advancedShield      ~= nil then enableUltimateShieldAdvanced(cfg.advancedShield)              end
+		if cfg.advancedShield      ~= nil then
+			-- FIX-4c: normalise true/false → table; inject advancedShieldGui as
+			-- config.screenGui so _EnableUltimateShieldAdvanced gets the right GUI
+			-- and doesn't crash on config.screenGui (indexing a boolean).
+			local _ascfg = (type(cfg.advancedShield) == "table") and cfg.advancedShield or {}
+			if _asg and not _ascfg.screenGui then _ascfg.screenGui = _asg end
+			enableUltimateShieldAdvanced(_ascfg)
+		end
 
 		-- WINDOW POSITION
 		if cfg.savePosition     ~= nil  then saveWindowPosition(cfg.savePosition)                            end
