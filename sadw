@@ -8367,21 +8367,22 @@ function Compkiller.new(Config)
 		UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 		UIListLayout.Padding = UDim.new(0, 10)
 
-		-- Functions --
-		do -- Fix 1: fire visibility change once on threshold cross
-			local _tabVis = Highlight.BackgroundTransparency <= 0.99
-			Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
-				local _nowVis = Highlight.BackgroundTransparency <= 0.99
-				if _nowVis == _tabVis then return end
-				_tabVis = _nowVis
-				ContainerTab.Visible = _nowVis
-				Compkiller:_SetNilP(ContainerTab, _nowVis and TabMainFrame or nil)
-			end)
-		end
+		-- SMART TAB SWITCH: ContainerTab visibility is now set directly in TabOpen
+		-- instead of waiting for the Highlight tween to cross 0.99 transparency.
+		-- This eliminates per-frame GetPropertyChangedSignal firing and the costly
+		-- _SetNilP re-parent that rebuilt the entire render tree on every tween frame.
 
 		local TabOpen = function(bool)
+			-- Debounce: ignore if already in the correct state
+			local _isOpen = ContainerTab.Visible
+			if bool == _isOpen and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
+
 			if bool then
 				WindowArgs.SelectedTab = TabButton;
+
+				-- Show content immediately (no tween delay, no re-parent cost)
+				ContainerTab.Visible = true
+				ContainerTab.Parent = TabMainFrame
 
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0,
@@ -8401,6 +8402,10 @@ function Compkiller.new(Config)
 					end;
 				end;
 			else
+				-- Hide content immediately (no tween delay)
+				ContainerTab.Visible = false
+				ContainerTab.Parent = _GetNilFolder()
+
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0.5
 				});
@@ -9093,23 +9098,19 @@ function Compkiller.new(Config)
 			Property = 'TextColor3'
 		});
 
+		-- SMART TAB SWITCH: TabConfig visibility is now set directly in TabOpen.
 		local Tween = _TI.t035q;
 
-		do -- Fix 1: fire visibility change once on threshold cross
-			local _tabVis = Highlight.BackgroundTransparency <= 0.99
-			Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
-				local _nowVis = Highlight.BackgroundTransparency <= 0.99
-				if _nowVis == _tabVis then return end
-				_tabVis = _nowVis
-				TabConfig.Visible = _nowVis
-				Compkiller:_SetNilP(TabConfig, _nowVis and TabMainFrame or nil)
-			end)
-		end
-
 		local TabOpen = function(bool)
+			if bool == TabConfig.Visible and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
+
 			if bool then
 
 				WindowArgs.SelectedTab = TabButton;
+
+				-- Show content immediately (no tween delay, no re-parent cost)
+				TabConfig.Visible = true
+				TabConfig.Parent = TabMainFrame
 
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0,
@@ -9186,6 +9187,10 @@ function Compkiller.new(Config)
 					ImageTransparency = 0.5,
 				});
 			else
+
+				-- Hide content immediately
+				TabConfig.Visible = false
+				TabConfig.Parent = _GetNilFolder()
 
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0.5
@@ -9934,42 +9939,29 @@ function Compkiller.new(Config)
 
 			local Tween = _TI.t035q;
 
-			do -- Fix 1: fire visibility change once on threshold cross
-				local _tabVis = Internal.Highlight.BackgroundTransparency <= 0.99
-				Internal.Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
-					local _nowVis = Internal.Highlight.BackgroundTransparency <= 0.99
-					if _nowVis == _tabVis then return end
-					_tabVis = _nowVis
-					TabContent.Visible = _nowVis
-					Compkiller:_SetNilP(TabContent, _nowVis and Internal.Parent or nil)
-				end)
-			end
-
-			Upvalue.Left = Left;
-			Upvalue.Right = Right;
-
-			if Compkiller:_IsMobile() then
-				Compkiller:_AddDragBlacklist(Left);
-				Compkiller:_AddDragBlacklist(Right);
-			end;
-
+			-- SMART TAB SWITCH: TabContent shown/hidden immediately via signal value,
+			-- not via tween-frame threshold polling.
 			TabOpenSignal = Internal.Signal;
 
+			-- Set initial visibility directly based on current signal state
 			if not TabOpenSignal:GetValue() then
-				TabContent.Visible = false;
+				TabContent.Visible = false
+				TabContent.Parent = _GetNilFolder()
 			else
-				TabContent.Visible = true;
-			end;
+				TabContent.Visible = true
+				TabContent.Parent = Internal.Parent
+			end
 
-			if Compkiller.PerformanceMode then
-				if TabContent.Visible then
-					Compkiller:_SetNilP(TabContent , Internal.Parent);
+			-- React to future open/close events immediately
+			TabOpenSignal:Connect(function(visible)
+				if visible then
+					TabContent.Visible = true
+					TabContent.Parent = Internal.Parent
 				else
-					Compkiller:_SetNilP(TabContent , nil);
-				end;
-			else
-				Compkiller:_SetNilP(TabContent , Internal.Parent);
-			end;
+					TabContent.Visible = false
+					TabContent.Parent = _GetNilFolder()
+				end
+			end)
 		else
 			-- Button --
 			local TabButton = Instance.new("Frame")
@@ -10129,21 +10121,20 @@ function Compkiller.new(Config)
 
 			local Tween = _TI.t035q;
 
-			do -- Fix 1: fire visibility change once on threshold cross, not every tween frame
-				local _tabVis = Highlight.BackgroundTransparency <= 0.99
-				Highlight:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
-					local _nowVis = Highlight.BackgroundTransparency <= 0.99
-					if _nowVis == _tabVis then return end
-					_tabVis = _nowVis
-					TabContent.Visible = _nowVis
-					Compkiller:_SetNilP(TabContent, _nowVis and TabMainFrame or nil)
-				end)
-			end
+			-- SMART TAB SWITCH: TabContent shown/hidden instantly in TabOpen.
+			-- Removed tween-driven GetPropertyChangedSignal approach that fired
+			-- per-frame and triggered an expensive _SetNilP re-parent each switch.
 
 			local TabOpen = function(bool)
+				if bool == TabContent.Visible and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
+
 				if bool then
 
 					WindowArgs.SelectedTab = TabButton;
+
+					-- Show content immediately — no render-tree rebuild delay
+					TabContent.Visible = true
+					TabContent.Parent = TabMainFrame
 
 					Compkiller:_Animation(Icon,Tween,{
 						ImageTransparency = 0,
@@ -10157,6 +10148,10 @@ function Compkiller.new(Config)
 						BackgroundTransparency = 0.925
 					});
 				else
+					-- Hide content immediately
+					TabContent.Visible = false
+					TabContent.Parent = _GetNilFolder()
+
 					Compkiller:_Animation(Icon,Tween,{
 						ImageTransparency = 0.5
 					});
