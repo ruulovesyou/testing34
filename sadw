@@ -14038,7 +14038,8 @@ Compkiller.MasterControl = function(...)
 		end
 
 		-- WINDOW POSITION
-		if cfg.savePosition     ~= nil  then saveWindowPosition(cfg.savePosition)                            end
+		-- FIX-7: savePosition=true crashes pos.X.Scale — only forward a real UDim2
+		if cfg.savePosition ~= nil and type(cfg.savePosition) == "userdata" then saveWindowPosition(cfg.savePosition) end
 		if cfg.loadPosition     == true then loadWindowPosition()                                            end
 
 		-- PRESET runs last so explicit keys take priority
