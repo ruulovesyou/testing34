@@ -2695,72 +2695,182 @@ function Compkiller:_Rounding(num, numDecimalPlaces)
 	return math.floor(num * mult + 0.5) / mult;
 end;
 
--- Per-instance-per-property tween cache: cancels previous before starting new.
--- Prevents dozens of conflicting Tweens piling up during spam tab switches.
+-- ════════════════════════════════════════════════════════════════════════════
+-- CK ANIMATION ENGINE  v2.0
+-- ════════════════════════════════════════════════════════════════════════════
+--
+-- Two modes controlled by Compkiller.AnimationsEnabled (default: true):
+--
+--   ENABLED  → Full optimized tween pipeline:
+--                • Memoised tostring() per instance (weak table, auto-GC'd)
+--                • Value-equality skip: if target already matches, no tween created
+--                • Per-instance-per-property dedup: cancels in-flight tween before
+--                  creating a new one — no stacked competing tweens
+--                • Shared TweenInfo constants: zero allocation for the common cases
+--                • FPS-adaptive scaling: duration shrinks proportionally when FPS
+--                  drops below 60 so animations still feel snappy at low framerates
+--                • Hard threshold: below AnimThreshold FPS → instant direct write,
+--                  TweenService is never called
+--                • Completion cleanup via :Once() — no connection registry growth
+--
+--   DISABLED → Every _Animation call becomes an instant direct property write.
+--              Zero TweenService involvement. Maximum FPS.
+--
+-- API:
+--   Compkiller.AnimationsEnabled = false   -- kill all animations globally
+--   Compkiller.AnimationsEnabled = true    -- restore all animations
+--   Compkiller:SetAnimThreshold(fps)       -- FPS floor for instant-set fallback
+-- ════════════════════════════════════════════════════════════════════════════
+
+-- ── Instance-string memoisation ─────────────────────────────────────────────
+-- tostring() on a Roblox userdata is unexpectedly expensive when called
+-- hundreds of times per second across hundreds of UI elements.
+-- Weak keys ensure dead instances are collected automatically.
+local _CK_INST_STR = setmetatable({}, { __mode = "k" })
+local function _istr(obj)
+    local s = _CK_INST_STR[obj]
+    if not s then
+        s = tostring(obj)
+        _CK_INST_STR[obj] = s
+    end
+    return s
+end
+
+-- ── Value-equality check ─────────────────────────────────────────────────────
+-- Before creating any tween, verify the target value differs from the current one.
+-- Roblox value types support == for UDim2, Color3, Vector2, etc.
+local function _valEq(a, b)
+    if type(a) ~= type(b) then return false end
+    if type(a) == "number" then return math.abs(a - b) < 0.0005 end
+    return a == b
+end
+
+-- ── Per-instance-per-property tween dedup cache ─────────────────────────────
+-- Key: instanceString .. propertyName  →  active Tween object
+-- Cancels previous before a new one is created on the same target.
 local _TW_CACHE = {}
 
--- Shared TweenInfo constants: defined once at module level, used everywhere.
--- Eliminates hundreds of TweenInfo.new() allocations across element hover/click handlers.
+-- ── Shared TweenInfo constants ───────────────────────────────────────────────
+-- Created once at module level; never reallocated.
 local _TI = {
-    t010 = TweenInfo.new(0.10),
-    t015 = TweenInfo.new(0.15),
-    t020 = TweenInfo.new(0.20),
-    t025 = TweenInfo.new(0.25),
-    t030 = TweenInfo.new(0.30),
-    t035 = TweenInfo.new(0.35),
-    t040 = TweenInfo.new(0.40),
-    t045q = TweenInfo.new(0.45, Enum.EasingStyle.Quint),
-    t035q = TweenInfo.new(0.35, Enum.EasingStyle.Quint),
-    t020q = TweenInfo.new(0.20, Enum.EasingStyle.Quad),
+    t010  = TweenInfo.new(0.10),
+    t015  = TweenInfo.new(0.15),
+    t020  = TweenInfo.new(0.20),
+    t025  = TweenInfo.new(0.25),
+    t030  = TweenInfo.new(0.30),
+    t035  = TweenInfo.new(0.35),
+    t040  = TweenInfo.new(0.40),
+    t045q = TweenInfo.new(0.45,  Enum.EasingStyle.Quint),
+    t035q = TweenInfo.new(0.35,  Enum.EasingStyle.Quint),
+    t020q = TweenInfo.new(0.20,  Enum.EasingStyle.Quad),
     t027q = TweenInfo.new(0.275, Enum.EasingStyle.Quad),
-    t040q = TweenInfo.new(0.40, Enum.EasingStyle.Quint),
+    t040q = TweenInfo.new(0.40,  Enum.EasingStyle.Quint),
     t021  = TweenInfo.new(0.21),
     t032  = TweenInfo.new(0.32),
-    t100  = TweenInfo.new(1.0,  Enum.EasingStyle.Quint, Enum.EasingDirection.InOut),
+    t100  = TweenInfo.new(1.0,   Enum.EasingStyle.Quint, Enum.EasingDirection.InOut),
 }
 
-function Compkiller:_Animation(Self , Info , Property)
-	-- Global animation kill-switch. Set Compkiller.AnimationsEnabled = false to skip
-	-- all tweens and write properties instantly. Useful for low-end devices / FPS boost.
-	if not Compkiller.AnimationsEnabled then
-		for prop, val in pairs(Property) do
-			pcall(function() Self[prop] = val end)
-		end
-		return _OPT and _OPT._DummyTween
-	end
-	if _OPT and _OPT._AnimPaused then
-		for prop, val in pairs(Property) do
-			pcall(function() Self[prop] = val end)
-		end
-		return _OPT._DummyTween
-	end
-	if _OPT and _OPT.Enabled then
-		return self:_SmartAnimation(Self, Info, Property)
-	end
-	-- Cancel any running tween on the same instance+property before creating a new one
-	local _instKey = tostring(Self)
-	for prop in pairs(Property) do
-		local _k = _instKey .. prop
-		local _prev = _TW_CACHE[_k]
-		if _prev then
-			_prev:Cancel()
-			_TW_CACHE[_k] = nil
-		end
-	end
-	local Tween = TweenService:Create(Self , Info or _TI.t025 , Property);
-	Tween:Play();
-	-- Cache; auto-clear via shared handler (no per-tween closure allocation)
-	for prop in pairs(Property) do
-		_TW_CACHE[_instKey .. prop] = Tween
-	end
-	Tween.Completed:Once(function()
-		for prop in pairs(Property) do
-			local _k = _instKey .. prop
-			if _TW_CACHE[_k] == Tween then _TW_CACHE[_k] = nil end
-		end
-	end)
-	return Tween;
-end;
+-- ── FPS-scaled TweenInfo cache ───────────────────────────────────────────────
+-- Keyed by "duration|easingOrdinal" so we never allocate the same scaled info twice.
+local _TW_SCALED_CACHE = {}
+
+local function _getScaledInfo(Info, fpsScale)
+    local base = (Info and Info.Time) or 0.25
+    local dur  = math.max(0.05, base * fpsScale)
+    -- Reuse unscaled info when FPS is healthy (>= 57fps → scale >= 0.95)
+    if fpsScale >= 0.95 then return Info or _TI.t025 end
+    local eStyle = (Info and Info.EasingStyle)    or Enum.EasingStyle.Linear
+    local eDir   = (Info and Info.EasingDirection) or Enum.EasingDirection.Out
+    local key    = string.format("%.3f|%d|%d", dur, eStyle.Value, eDir.Value)
+    local cached = _TW_SCALED_CACHE[key]
+    if not cached then
+        cached = TweenInfo.new(dur, eStyle, eDir,
+            (Info and Info.RepeatCount) or 0,
+            (Info and Info.Reverses)    or false,
+            (Info and Info.DelayTime)   or 0)
+        _TW_SCALED_CACHE[key] = cached
+    end
+    return cached
+end
+
+-- ── Core _Animation function ──────────────────────────────────────────────────
+function Compkiller:_Animation(Self, Info, Property)
+
+    -- ── FAST PATH: animations disabled ────────────────────────────────────
+    if not Compkiller.AnimationsEnabled then
+        for prop, val in pairs(Property) do
+            pcall(function() Self[prop] = val end)
+        end
+        return _OPT and _OPT._DummyTween
+    end
+
+    -- ── FAST PATH: global pause (e.g. hide-window) ────────────────────────
+    if _OPT and _OPT._AnimPaused then
+        for prop, val in pairs(Property) do
+            pcall(function() Self[prop] = val end)
+        end
+        return _OPT._DummyTween
+    end
+
+    -- ── VALUE-EQUALITY SKIP ──────────────────────────────────────────────
+    -- If every property already matches the target, skip entirely.
+    -- This is the single biggest win: hover/signal re-fires on unchanged state
+    -- previously created a tween for nothing.
+    local allMatch = true
+    for prop, val in pairs(Property) do
+        local ok, cur = pcall(function() return Self[prop] end)
+        if not ok or not _valEq(cur, val) then
+            allMatch = false
+            break
+        end
+    end
+    if allMatch then return _OPT and _OPT._DummyTween end
+
+    -- ── FPS CHECK: below threshold → instant write ────────────────────────
+    local fps = (_OPT and _OPT.FPS) or 60
+    local threshold = (_OPT and _OPT.AnimThreshold) or 30
+    if fps < threshold then
+        for prop, val in pairs(Property) do
+            pcall(function() Self[prop] = val end)
+        end
+        if _OPT then _OPT.Stats.InstantSets = _OPT.Stats.InstantSets + 1 end
+        return _OPT and _OPT._DummyTween
+    end
+
+    -- ── SELECT TWEENINFO ─────────────────────────────────────────────────
+    local fpsScale = math.clamp(fps / 60, 0.5, 1.0)
+    local tweenInfo = _getScaledInfo(Info, fpsScale)
+
+    -- ── DEDUP: cancel previous tween on same instance+property ──────────
+    local ikey = _istr(Self)
+    for prop in pairs(Property) do
+        local cacheKey = ikey .. prop
+        local prev = _TW_CACHE[cacheKey]
+        if prev then
+            prev:Cancel()
+            _TW_CACHE[cacheKey] = nil
+            if _OPT then _OPT.Stats.DedupCancels = _OPT.Stats.DedupCancels + 1 end
+        end
+    end
+
+    -- ── CREATE AND PLAY ──────────────────────────────────────────────────
+    local tween = TweenService:Create(Self, tweenInfo, Property)
+    tween:Play()
+
+    -- Cache for dedup; self-cleans on completion (no connection registry growth)
+    for prop in pairs(Property) do
+        _TW_CACHE[ikey .. prop] = tween
+    end
+    tween.Completed:Once(function()
+        for prop in pairs(Property) do
+            local k = ikey .. prop
+            if _TW_CACHE[k] == tween then _TW_CACHE[k] = nil end
+        end
+    end)
+
+    return tween
+end
+
 
 function Compkiller:_Input(Frame , Callback)
 	local Button = Instance.new('TextButton',Frame);
@@ -11967,68 +12077,9 @@ end
 --
 --
 function Compkiller:_SmartAnimation(Self, Info, Property)
-    local currentFPS = _OPT.FPS
-    local threshold  = _OPT.AnimThreshold
-
-    if currentFPS < threshold then
-        for prop, val in pairs(Property) do
-            pcall(function() Self[prop] = val end)
-        end
-        _OPT.Stats.InstantSets = _OPT.Stats.InstantSets + 1
-        return _OPT._DummyTween
-    end
-
-
-    local baseDuration = (Info and Info.Time) or 0.25
-    local fpsScale     = math.clamp(currentFPS / 60, 0.5, 1.0)
-    local newDuration  = math.max(0.05, baseDuration * fpsScale)
-
-    local newInfo
-    if Info then
-        newInfo = TweenInfo.new(
-            newDuration,
-            Info.EasingStyle,
-            Info.EasingDirection,
-            Info.RepeatCount,
-            Info.Reverses,
-            Info.DelayTime
-        )
-    else
-        newInfo = TweenInfo.new(newDuration)
-    end
-
-    for prop in pairs(Property) do
-        local dedupKey = tostring(Self) .. "|" .. prop
-        local existing = _OPT.ActiveTweenMap[dedupKey]
-        if existing then
-            local ok, playing = pcall(function() return existing.PlaybackState end)
-            if ok and playing == Enum.PlaybackState.Playing then
-                pcall(function() existing:Cancel() end)
-                _OPT.Stats.DedupCancels = _OPT.Stats.DedupCancels + 1
-            end
-            _OPT.ActiveTweenMap[dedupKey] = nil
-        end
-    end
-
-    local tween = TweenService:Create(Self, newInfo, Property)
-    table.insert(_OPT.ActiveTweens, tween)
-    for prop in pairs(Property) do
-        _OPT.ActiveTweenMap[tostring(Self) .. "|" .. prop] = tween
-    end
-    tween:Play()
-
-    _TrackConn(tween.Completed:Connect(function()
-        local idx = table.find(_OPT.ActiveTweens, tween)
-        if idx then table.remove(_OPT.ActiveTweens, idx) end
-        for prop in pairs(Property) do
-            local key = tostring(Self) .. "|" .. prop
-            if _OPT.ActiveTweenMap[key] == tween then
-                _OPT.ActiveTweenMap[key] = nil
-            end
-        end
-    end))
-
-    return tween
+    -- _SmartAnimation is now a direct alias for _Animation.
+    -- All intelligence (FPS scaling, dedup, value-skip, threshold) lives in _Animation.
+    return self:_Animation(Self, Info, Property)
 end
 
 function Compkiller:_SweepMemory()
@@ -13992,6 +14043,7 @@ Compkiller.MasterControl = function(...)
 		if cfg.fpsCap           ~= nil  then fpsCap(cfg.fpsCap)                                              end
 
 		-- ANIMATIONS
+		if cfg.animations       ~= nil  then Compkiller.AnimationsEnabled = (cfg.animations ~= false)        end
 		if cfg.pauseAnimations  == true  then pauseAllAnimations()                                           end
 		if cfg.pauseAnimations  == false then resumeAllAnimations()                                          end
 		if cfg.forceGC          == true  then forceGC()                                                      end
@@ -14064,6 +14116,14 @@ Compkiller.MasterControl = function(...)
 		isMobile                = isMobileTier,
 
 		-- ANIMATIONS
+		-- mc.animations = false  →  kills all tweens globally, instant direct writes only
+		-- mc.animations = true   →  restores full optimized tween pipeline
+		animations = function(enabled)
+			Compkiller.AnimationsEnabled = (enabled ~= false)
+			_CKLog("Animations: " .. (Compkiller.AnimationsEnabled and "ENABLED" or "DISABLED"))
+			return Compkiller.AnimationsEnabled
+		end,
+		getAnimationsEnabled    = function() return Compkiller.AnimationsEnabled end,
 		smartAnimations         = setSmartAnimations,
 		advancedOpt             = enableAdvancedOptimizations,
 		pauseAnimations         = pauseAllAnimations,
