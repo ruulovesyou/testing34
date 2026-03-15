@@ -13045,70 +13045,24 @@ Compkiller.MasterControl = function(...)
 
 	-- ========================================================================
 	-- RENDER MANAGER
+	-- FIX-6: _SuppressRender / _RestoreRender / _SaveCameraState are local to
+	-- a do-block above — they are out of scope here and always nil.
+	-- Delegate to the real Compkiller:StartRenderManager() methods instead.
 	-- ========================================================================
 	local function startRenderManager()
-		stopRenderManager()
-
-		local conns = {}
-
-		local c1 = _TrackConn(UserInputService.WindowFocusReleased:Connect(function()
-			if not getgenv()[_CULL_KEY] then
-				getgenv()[_CULL_KEY] = _SaveCameraState()
-			end
-			_SuppressRender()
-			_CKLog("RenderManager: focus lost -- 3D suppressed, FPS capped.")
-		end))
-		table.insert(conns, c1)
-
-		local c2 = _TrackConn(UserInputService.WindowFocused:Connect(function()
-			local state = getgenv()[_CULL_KEY]
-			if state then
-				_RestoreRender(state)
-				getgenv()[_CULL_KEY] = nil
-			end
-			_CKLog("RenderManager: focus gained -- 3D restored.")
-		end))
-		table.insert(conns, c2)
-
-		getgenv()[_RENDER_CONN] = conns
-		_CKLog("StartRenderManager: active.")
+		pcall(function() Compkiller:StartRenderManager() end)
 	end
 
 	local function stopRenderManager()
-		local state = getgenv()[_CULL_KEY]
-		if state then
-			_RestoreRender(state)
-			getgenv()[_CULL_KEY] = nil
-		end
-		local conns = getgenv()[_RENDER_CONN]
-		if type(conns) == "table" then
-			for _, c in ipairs(conns) do
-				pcall(function() c:Disconnect() end)
-			end
-		end
-		getgenv()[_RENDER_CONN] = nil
-		_CKLog("StopRenderManager: stopped, 3D restored.")
+		pcall(function() Compkiller:StopRenderManager() end)
 	end
 
 	local function renderCull()
-		if getgenv()[_CULL_KEY] then
-			_CKLog("RenderCull: already active.")
-			return
-		end
-		getgenv()[_CULL_KEY] = _SaveCameraState()
-		_SuppressRender()
-		_CKLog("RenderCull: 3D suppressed.")
+		pcall(function() Compkiller:RenderCull() end)
 	end
 
 	local function renderResume()
-		local state = getgenv()[_CULL_KEY]
-		if not state then
-			_CKLog("RenderResume: nothing to resume.")
-			return
-		end
-		_RestoreRender(state)
-		getgenv()[_CULL_KEY] = nil
-		_CKLog("RenderResume: 3D restored.")
+		pcall(function() Compkiller:RenderResume() end)
 	end
 
 
