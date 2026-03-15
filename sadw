@@ -7644,9 +7644,12 @@ function Compkiller.new(Config)
 		end;
 	end)
 
-	Compkiller:_Animation(MainFrame,_TI.t100,{
-		Size = Config.Scale
-	});
+	-- Start hidden to match IsOpen=false — first keybind press opens cleanly.
+	MainFrame.BackgroundTransparency = 1
+	MainFrame.Size = UDim2.new(
+		math.max(Config.Scale.X.Scale-0.05,0), Config.Scale.X.Offset-10,
+		math.max(Config.Scale.Y.Scale-0.05,0), Config.Scale.Y.Offset-10)
+	MainFrame.Visible = false
 
 	UICorner.Parent = MainFrame
 
