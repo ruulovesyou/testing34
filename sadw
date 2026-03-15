@@ -8378,9 +8378,9 @@ function Compkiller.new(Config)
 		-- _SetNilP re-parent that rebuilt the entire render tree on every tween frame.
 
 		local TabOpen = function(bool)
-			-- BUG-FIX-2: debounce only on Visible state — the SelectedTab compound
-			-- check caused non-first tabs to skip hiding on creation
-			if bool == ContainerTab.Visible then return end
+			-- Signal.Fire already has IsSame guard — no Visible debounce needed here.
+			-- A Visible-based debounce causes hide calls to be skipped when ContainerTab
+			-- was already hidden at init, leaving both tabs visible simultaneously.
 
 			if bool then
 				WindowArgs.SelectedTab = TabButton;
@@ -9104,7 +9104,7 @@ function Compkiller.new(Config)
 		local Tween = _TI.t035q;
 
 		local TabOpen = function(bool)
-			if bool == TabConfig.Visible and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
+			-- Signal.Fire IsSame guard handles dedup — Visible debounce removed.
 
 			if bool then
 
@@ -10141,8 +10141,9 @@ function Compkiller.new(Config)
 			-- per-frame and triggered an expensive _SetNilP re-parent each switch.
 
 			local TabOpen = function(bool)
-				-- BUG-FIX-6: compound debounce was wrong for non-first tabs; simple Visible check only
-				if bool == TabContent.Visible then return end
+				-- Signal.Fire has IsSame guard — Visible debounce removed.
+				-- Visible-based debounce skips hide when content was already hidden at init,
+				-- causing both tabs to show simultaneously on first switch.
 
 				if bool then
 
