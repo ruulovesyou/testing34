@@ -9956,8 +9956,17 @@ function Compkiller.new(Config)
 				TabContent.Parent = Internal.Parent
 			end
 
-			-- React to future open/close events immediately
+			-- React to FUTURE open/close events only — skip the immediate Connect fire.
+			-- Binds:Connect calls the callback instantly with the current value,
+			-- which causes every sub-tab to re-parent to Internal.Parent when the
+			-- first tab's Signal is true, stacking all content frames at once.
+			-- We use a plain boolean guard so only real state-change fires move the frame.
+			local _tabContentSeenFirst = false
 			TabOpenSignal:Connect(function(visible)
+				if not _tabContentSeenFirst then
+					_tabContentSeenFirst = true
+					return  -- skip the immediate fire; initial state set above
+				end
 				if visible then
 					TabContent.Visible = true
 					TabContent.Parent = Internal.Parent
