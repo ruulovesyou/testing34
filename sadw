@@ -8451,6 +8451,7 @@ function Compkiller.new(Config)
 		ContainerTab.Position = UDim2.new(0.5, 0, 0.5, 0)
 		ContainerTab.Size = UDim2.new(1, -15, 1, -15)
 		ContainerTab.ZIndex = 6
+		ContainerTab.Visible = false  -- hidden until TabOpen(true) fires
 
 		MainFrame.Name = Compkiller:_RandomString()
 		MainFrame.Parent = ContainerTab
@@ -8483,9 +8484,8 @@ function Compkiller.new(Config)
 		-- _SetNilP re-parent that rebuilt the entire render tree on every tween frame.
 
 		local TabOpen = function(bool)
-			-- Debounce: ignore if already in the correct state
-			local _isOpen = ContainerTab.Visible
-			if bool == _isOpen and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
+			-- Guard: only act when visibility actually needs to change
+			if bool == ContainerTab.Visible then return end
 
 			if bool then
 				WindowArgs.SelectedTab = TabButton;
@@ -9210,7 +9210,8 @@ function Compkiller.new(Config)
 		local Tween = _TI.t035q;
 
 		local TabOpen = function(bool)
-			if bool == TabConfig.Visible and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
+			-- Guard: only act when visibility actually needs to change
+				if bool == TabConfig.Visible then return end
 
 			if bool then
 
@@ -10148,6 +10149,7 @@ function Compkiller.new(Config)
 			TabContent.Position = UDim2.new(0.5, 0, 0.5, 0)
 			TabContent.Size = UDim2.new(1, -15, 1, -15)
 			TabContent.ZIndex = 6
+			TabContent.Visible = false  -- hidden by default; TabOpen(true) reveals the active tab
 
 			Left.Name = Compkiller:_RandomString()
 			Left.Parent = TabContent
@@ -10228,7 +10230,8 @@ function Compkiller.new(Config)
 			-- per-frame and triggered an expensive _SetNilP re-parent each switch.
 
 			local TabOpen = function(bool)
-				if bool == TabContent.Visible and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
+				-- Guard: only act when visibility actually needs to change
+				if bool == TabContent.Visible then return end
 
 				if bool then
 
@@ -10334,7 +10337,8 @@ function Compkiller.new(Config)
 			local Offset = ListLayout.Padding.Offset;
 			local Childrens = Frame:GetChildren();
 
-			for i,v in next ,Childrens do task.wait();
+			-- task.wait() removed from loop — was causing O(n) yields per layout update
+			for i,v in next ,Childrens do
 				if v:IsA('Frame') then
 					if v.LayoutOrder > last then
 						scale = scale + v.AbsoluteSize.Y + Offset
@@ -14017,58 +14021,107 @@ Compkiller.MasterControl = function(...)
 
 
 	-- ========================================================================
-	-- APPLY -- fire everything from one config table
+	-- ========================================================================
+	-- APPLY  ─  smart config table with alias keys
+	-- Supports both mc.apply({...}) and mc({...}) directly
 	-- ========================================================================
 	local function apply(cfg)
 		if type(cfg) ~= "table" then return end
 
-		-- Resolve the active window (set by Compkiller.new)
 		local win = Compkiller._ActiveWindow
 
-		-- ── WINDOW / UI ────────────────────────────────────────────────────────
+		-- ════════════════════════════════════════════════════════════════════
+		-- SMART ALIAS EXPANSION  (resolved before individual keys are read)
+		-- ════════════════════════════════════════════════════════════════════
+
+		-- allBypasses = true  →  arms every available shield/bypass layer
+		if cfg.allBypasses == true then
+			cfg.obfuscate           = cfg.obfuscate           ~= false and true
+			cfg.safeCall            = cfg.safeCall            ~= false and true
+			cfg.decoySystem         = cfg.decoySystem         ~= false and true
+			cfg.ultimateShield      = cfg.ultimateShield      ~= false and true
+			cfg.memoryScrambling    = cfg.memoryScrambling    ~= false and true
+			cfg.behavioralNoise     = cfg.behavioralNoise     ~= false and true
+			cfg.ghostInstances      = cfg.ghostInstances      ~= false and true
+			cfg.fingerprintRotation = cfg.fingerprintRotation ~= false and true
+			cfg.advancedShield      = cfg.advancedShield      ~= false and true
+		end
+
+		-- shield = true  →  shorthand for obfuscate + safeCall + ultimateShield
+		if cfg.shield == true then
+			cfg.obfuscate      = cfg.obfuscate      ~= false and true
+			cfg.safeCall       = cfg.safeCall       ~= false and true
+			cfg.ultimateShield = cfg.ultimateShield ~= false and true
+		end
+
+		-- antiKick = true  →  safeCall sandbox stops errors reaching AC kick checks
+		if cfg.antiKick == true then cfg.safeCall = true end
+
+		-- antiAfk = true  →  sleep mode keeps the script alive with no render cost
+		if cfg.antiAfk == true then cfg.sleepMode = true end
+
+		-- integrityTest = true  →  dump live stats to confirm optimizer is running
+		if cfg.integrityTest == true then cfg.dumpStats = true end
+
+		-- noAnimations = true  →  kill all tweens, max FPS
+		if cfg.noAnimations == true then cfg.animations = false end
+
+		-- perf = "HIGH"  →  alias for performance (shorter to type)
+		if cfg.perf ~= nil and cfg.performance == nil then cfg.performance = cfg.perf end
+
+		-- turboScramble = true without a GUI →  auto-resolve from active window
+		if cfg.turboScramble == true and cfg.turboScrambleGui == nil then
+			cfg.turboScrambleGui = win and win.Root or nil
+		end
+
+		-- advancedShieldGui: auto-resolve from active window if omitted
+		if cfg.advancedShieldGui == nil and win then
+			cfg.advancedShieldGui = win.Root
+		end
+
+		-- ════════════════════════════════════════════════════════════════════
+		-- WINDOW / UI
+		-- ════════════════════════════════════════════════════════════════════
 		if win then
-			-- Open or close the menu
 			if cfg.open ~= nil then
 				win.IsOpen = (cfg.open ~= false)
 				win:Toggle(win.IsOpen)
 			end
-			-- Change the hotkey that opens/closes the menu
-			if cfg.menuKey ~= nil then
-				win:SetMenuKey(cfg.menuKey)
-			end
-			-- Update header info (username, logo, expiry, window name)
-			local _upd = {}
-			local _needsUpdate = false
-			if cfg.username    ~= nil then _upd.Username   = cfg.username;    _needsUpdate = true end
-			if cfg.logo        ~= nil then _upd.Logo       = cfg.logo;        _needsUpdate = true end
-			if cfg.expireDate  ~= nil then _upd.ExpireDate = cfg.expireDate;  _needsUpdate = true end
-			if cfg.windowName  ~= nil then _upd.WindowName = cfg.windowName;  _needsUpdate = true end
+			if cfg.menuKey ~= nil then win:SetMenuKey(cfg.menuKey) end
+			local _upd, _needsUpdate = {}, false
+			if cfg.username   ~= nil then _upd.Username   = cfg.username;   _needsUpdate = true end
+			if cfg.logo       ~= nil then _upd.Logo       = cfg.logo;       _needsUpdate = true end
+			if cfg.expireDate ~= nil then _upd.ExpireDate = cfg.expireDate; _needsUpdate = true end
+			if cfg.windowName ~= nil then _upd.WindowName = cfg.windowName; _needsUpdate = true end
 			if _needsUpdate then win:Update(_upd) end
-			-- Notify shorthand: mc.apply({ notify = { Title="Hi", Content="...", Duration=3 } })
-			if cfg.notify ~= nil then
-				pcall(function() win.Notify.new(cfg.notify) end)
-			end
+			if cfg.notify ~= nil then pcall(function() win.Notify.new(cfg.notify) end) end
 		end
 
-		-- ── THEME ───────────────────────────────────────────────────────────────
+		-- ════════════════════════════════════════════════════════════════════
+		-- THEME
+		-- ════════════════════════════════════════════════════════════════════
 		if cfg.theme          ~= nil  then setTheme(cfg.theme)                                               end
 		if cfg.highlightColor ~= nil  then
 			Compkiller.Colors.Highlight = cfg.highlightColor
 			refreshCurrentColor()
 		end
 
+		-- ════════════════════════════════════════════════════════════════════
 		-- DEBUG
+		-- ════════════════════════════════════════════════════════════════════
 		if cfg.debug            ~= nil  then setDebug(cfg.debug)                                             end
 		if cfg.dumpStats        == true then dumpStats()                                                     end
 
+		-- ════════════════════════════════════════════════════════════════════
 		-- PERFORMANCE
+		-- ════════════════════════════════════════════════════════════════════
 		if cfg.performance      ~= nil  then
-			if cfg.performance == true  then setPerformanceProfile("HIGH")
+			if   cfg.performance == true  then setPerformanceProfile("HIGH")
 			elseif cfg.performance == false then setPerformanceProfile("LOW")
 			else setPerformanceProfile(tostring(cfg.performance):upper()) end
 		end
 		if cfg.tier             ~= nil  then
-			if cfg.tier == true  then setHardwareTier("HIGH")
+			if   cfg.tier == true  then setHardwareTier("HIGH")
 			elseif cfg.tier == false then setHardwareTier("LOW")
 			else setHardwareTier(tostring(cfg.tier):upper()) end
 		end
@@ -14080,23 +14133,31 @@ Compkiller.MasterControl = function(...)
 		if cfg.sleepMode        ~= nil  then setSleepMode(cfg.sleepMode)                                     end
 		if cfg.fpsCap           ~= nil  then fpsCap(cfg.fpsCap)                                              end
 
+		-- ════════════════════════════════════════════════════════════════════
 		-- ANIMATIONS
+		-- ════════════════════════════════════════════════════════════════════
 		if cfg.animations       ~= nil  then Compkiller.AnimationsEnabled = (cfg.animations ~= false)        end
 		if cfg.pauseAnimations  == true  then pauseAllAnimations()                                           end
 		if cfg.pauseAnimations  == false then resumeAllAnimations()                                          end
 		if cfg.forceGC          == true  then forceGC()                                                      end
 		if cfg.cleanupAll       == true  then cleanupAll()                                                   end
 
+		-- ════════════════════════════════════════════════════════════════════
 		-- RENDER
+		-- ════════════════════════════════════════════════════════════════════
 		if cfg.renderManager    == true  then startRenderManager()                                           end
 		if cfg.renderManager    == false then stopRenderManager()                                            end
 		if cfg.renderCull       == true  then renderCull()                                                   end
 		if cfg.renderCull       == false then renderResume()                                                 end
 
+		-- ════════════════════════════════════════════════════════════════════
 		-- SANDBOX
+		-- ════════════════════════════════════════════════════════════════════
 		if cfg.safeCall         ~= nil  then setSafeCall(cfg.safeCall)                                       end
 
+		-- ════════════════════════════════════════════════════════════════════
 		-- GUI SHIELD
+		-- ════════════════════════════════════════════════════════════════════
 		if cfg.obfuscate        ~= nil  then enableNameObfuscation(cfg.obfuscate)                            end
 		if cfg.hardReset        == true then hardReset()                                                     end
 		if cfg.turboScramble    ~= nil and cfg.turboScrambleGui then
@@ -14105,7 +14166,9 @@ Compkiller.MasterControl = function(...)
 		if cfg.decoySystem      ~= nil  then enableDecoySystem(cfg.decoySystem)                              end
 		if cfg.ultimateShield   ~= nil  then enableUltimateShield(cfg.ultimateShield)                        end
 
-		-- ADVANCED SHIELD (AS-1 through AS-4)
+		-- ════════════════════════════════════════════════════════════════════
+		-- ADVANCED SHIELD
+		-- ════════════════════════════════════════════════════════════════════
 		local _asg = cfg.advancedShieldGui
 		if cfg.memoryScrambling    ~= nil then enableMemoryScrambling(_asg, cfg.memoryScrambling)            end
 		if cfg.behavioralNoise     ~= nil then enableBehavioralNoise(_asg, cfg.behavioralNoise)              end
@@ -14113,7 +14176,9 @@ Compkiller.MasterControl = function(...)
 		if cfg.fingerprintRotation ~= nil then enableFingerprintRotation(_asg, cfg.fingerprintRotation)      end
 		if cfg.advancedShield      ~= nil then enableUltimateShieldAdvanced(cfg.advancedShield)              end
 
+		-- ════════════════════════════════════════════════════════════════════
 		-- WINDOW POSITION
+		-- ════════════════════════════════════════════════════════════════════
 		if cfg.savePosition     ~= nil  then saveWindowPosition(cfg.savePosition)                            end
 		if cfg.loadPosition     == true then loadWindowPosition()                                            end
 
@@ -14129,8 +14194,17 @@ Compkiller.MasterControl = function(...)
 	-- Unknown keys -> no-op + warn via __index
 	-- ========================================================================
 	return setmetatable({
-		-- WINDOW CREATION
-		new = Compkiller.new,
+		-- CORE LIBRARY PASS-THROUGHS
+		-- These let you use mc exactly like you used to use Compkiller directly.
+		new          = Compkiller.new,
+		newNotify    = Compkiller.newNotify,
+		ConfigManager= function(...) return Compkiller:ConfigManager(...) end,
+		Loader       = function(...) return Compkiller:Loader(...) end,
+		Security     = function(...) return Compkiller:Security(...) end,
+		Colors       = Compkiller.Colors,       -- mc.Colors.Highlight etc.
+		Scale        = Compkiller.Scale,        -- mc.Scale.Window
+		Flags        = Compkiller.Flags,        -- mc.Flags["My_Flag"]
+		Elements     = Compkiller.Elements,
 
 		-- WINDOW CONTROL (synced to active window created by mc.new())
 		-- All of these operate on Compkiller._ActiveWindow automatically.
@@ -14258,12 +14332,34 @@ Compkiller.MasterControl = function(...)
 		apply                   = apply,
 
 	}, {
+		-- Unknown key → silent no-op + console warning
 		__index = function(_, key)
 			warn("[CK] MasterControl." .. tostring(key) .. " -- unknown key.")
 			return function() end
+		end,
+		-- mc({...}) is identical to mc.apply({...})
+		__call = function(_, cfg)
+			apply(cfg)
 		end,
 	})
 end
 
 
-return Compkiller;
+-- Compkiller.config is a direct alias so users can call it immediately
+-- on the raw Compkiller table before or after calling MasterControl.
+Compkiller.config = function(cfg)
+    -- Get or create the MasterControl instance, then apply
+    if not Compkiller._MC then
+        Compkiller._MC = Compkiller.MasterControl()
+    end
+    Compkiller._MC.apply(cfg)
+end
+
+-- Auto-call MasterControl and return it as the module root.
+-- This means: local mc = loadstring(game:HttpGet("..."))()
+-- mc.apply, mc.new, mc.animations etc. all work immediately.
+-- mc.config({...}) also works as a direct alias.
+local _MC = Compkiller.MasterControl()
+Compkiller._MC = _MC
+_MC.config = _MC.apply  -- mc.config({...}) == mc.apply({...}) == mc({...})
+return _MC;
