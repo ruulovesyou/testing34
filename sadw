@@ -14036,8 +14036,13 @@ Compkiller.MasterControl = function(...)
 		-- GUI SHIELD
 		if cfg.obfuscate        ~= nil  then enableNameObfuscation(cfg.obfuscate)                            end
 		if cfg.hardReset        == true then hardReset()                                                     end
-		if cfg.turboScramble    ~= nil and cfg.turboScrambleGui then
-			enableTurboScramble(cfg.turboScrambleGui, cfg.turboScramble)
+		if cfg.turboScramble ~= nil then
+			-- FIX-5b: turboScrambleGui = true/nil → auto-resolve from Compkiller.Windows
+			local _tsg = cfg.turboScrambleGui
+			if type(_tsg) ~= "userdata" then
+				pcall(function() _tsg = Compkiller.Windows and Compkiller.Windows[1] end)
+			end
+			if _tsg then enableTurboScramble(_tsg, cfg.turboScramble) end
 		end
 		if cfg.decoySystem      ~= nil  then enableDecoySystem(cfg.decoySystem)                              end
 		if cfg.ultimateShield   ~= nil  then
@@ -14048,8 +14053,15 @@ Compkiller.MasterControl = function(...)
 		end
 
 		-- ADVANCED SHIELD (AS-1 through AS-4)
-		-- cfg.advancedShieldGui (Window.Root) is forwarded to every AS function.
+		-- FIX-5: if advancedShieldGui = true/nil/non-Instance, auto-resolve from
+		-- Compkiller.Windows so the user can safely write any truthy value without
+		-- triggering "attempt to index nil with 'Root'" crash.
 		local _asg = cfg.advancedShieldGui
+		if type(_asg) ~= "userdata" then
+			pcall(function()
+				_asg = Compkiller.Windows and Compkiller.Windows[1]
+			end)
+		end
 		-- FIX-4b: _EnableMemoryScrambling is not defined in v27 — guard the call so
 		-- memoryScrambling = true with advancedShieldGui = Window.Root doesn't nil-crash.
 		if cfg.memoryScrambling ~= nil then
