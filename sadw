@@ -9864,7 +9864,9 @@ function Compkiller.new(Config)
 			local UIListLayout_2 = Instance.new("UIListLayout")
 
 			TabContent.Name = Compkiller:_RandomString()
-			TabContent.Parent = Internal.Parent;
+			-- BUG-FIX-4: born hidden, not parented yet — avoids flash-visible stacking
+			TabContent.Visible = false
+			TabContent.Parent = _GetNilFolder()
 			TabContent.AnchorPoint = Vector2.new(0.5, 0.5)
 			TabContent.BackgroundTransparency = 1.000
 			TabContent.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -10040,7 +10042,9 @@ function Compkiller.new(Config)
 			local UIListLayout_2 = Instance.new("UIListLayout")
 
 			TabContent.Name = Compkiller:_RandomString()
-			TabContent.Parent = TabMainFrame;
+			-- BUG-FIX-5: born hidden, not parented yet — avoids flash-visible stacking
+			TabContent.Visible = false
+			TabContent.Parent = _GetNilFolder()
 			TabContent.AnchorPoint = Vector2.new(0.5, 0.5)
 			TabContent.BackgroundTransparency = 1.000
 			TabContent.BorderColor3 = Color3.fromRGB(0, 0, 0)
@@ -10128,7 +10132,8 @@ function Compkiller.new(Config)
 			-- per-frame and triggered an expensive _SetNilP re-parent each switch.
 
 			local TabOpen = function(bool)
-				if bool == TabContent.Visible and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
+				-- BUG-FIX-6: compound debounce was wrong for non-first tabs; simple Visible check only
+				if bool == TabContent.Visible then return end
 
 				if bool then
 
