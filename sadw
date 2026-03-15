@@ -8485,12 +8485,14 @@ function Compkiller.new(Config)
 		end);
 
 		Compkiller:_Input(TabButton,function()
-			-- Fix 3: fire only prev-close + new-open (was iterating all N tabs)
-			if WindowArgs._OpenTabRemote then
-				WindowArgs._OpenTabRemote:Fire(false);
+			-- Directly call the previous tab's close function to bypass the
+			-- Signal IsSame guard (_value already false → Fire(false) is a no-op).
+			if WindowArgs._OpenTabFn then
+				WindowArgs._OpenTabFn(false);
 			end;
-			TabOpenSignal:Fire(true);
+			TabOpen(true);
 			WindowArgs._OpenTabRemote = TabOpenSignal;
+			WindowArgs._OpenTabFn = TabOpen;
 		end);
 
 		function TabArgs:DrawTab(TabConfig) -- Internal Tab
@@ -9331,12 +9333,12 @@ function Compkiller.new(Config)
 		end);
 
 		Compkiller:_Input(TabButton,function()
-			-- Fix 3: fire only prev-close + new-open (was iterating all N tabs)
-			if WindowArgs._OpenTabRemote then
-				WindowArgs._OpenTabRemote:Fire(false);
+			if WindowArgs._OpenTabFn then
+				WindowArgs._OpenTabFn(false);
 			end;
-			TabOpenSignal:Fire(true);
+			TabOpen(true);
 			WindowArgs._OpenTabRemote = TabOpenSignal;
+			WindowArgs._OpenTabFn = TabOpen;
 		end);
 
 		function TabArgs:_DrawConfig()
@@ -10223,12 +10225,12 @@ function Compkiller.new(Config)
 			end);
 
 			Compkiller:_Input(TabButton,function()
-				-- Fix 3: fire only prev-close + new-open (was iterating all N tabs)
-				if WindowArgs._OpenTabRemote then
-					WindowArgs._OpenTabRemote:Fire(false);
+				if WindowArgs._OpenTabFn then
+					WindowArgs._OpenTabFn(false);
 				end;
-				TabOpenSignal:Fire(true);
+				TabOpen(true);
 				WindowArgs._OpenTabRemote = TabOpenSignal;
+				WindowArgs._OpenTabFn = TabOpen;
 			end);
 		end;
 
