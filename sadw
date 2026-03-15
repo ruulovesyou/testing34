@@ -2722,8 +2722,6 @@ local _TI = {
 function Compkiller:_Animation(Self , Info , Property)
 	-- Global animation kill-switch. Set Compkiller.AnimationsEnabled = false to skip
 	-- all tweens and write properties instantly. Useful for low-end devices / FPS boost.
-	-- FIX-1: PerformanceMode=true (performance="LOW") also hard-bypasses TweenService,
-	-- regardless of measured FPS, so LOW-tier devices never create tweens.
 	if not Compkiller.AnimationsEnabled or Compkiller.PerformanceMode then
 		for prop, val in pairs(Property) do
 			pcall(function() Self[prop] = val end)
@@ -2751,8 +2749,7 @@ function Compkiller:_Animation(Self , Info , Property)
 	end
 	local Tween = TweenService:Create(Self , Info or _TI.t025 , Property);
 	Tween:Play();
-	-- FIX-3: Pre-compute cache keys once; avoids re-iterating Property inside the closure
-	-- and eliminates per-tween capture overhead on hover/tab-switch spam.
+	-- FIX-3: pre-compute cleanup keys once — no re-scan of Property in the closure
 	local _cleanupKeys = {}
 	for prop in pairs(Property) do
 		local _k = _instKey .. prop
@@ -13045,8 +13042,9 @@ Compkiller.MasterControl = function(...)
 
 	-- ========================================================================
 	-- RENDER MANAGER
-	-- FIX-6: _SuppressRender / _RestoreRender / _SaveCameraState are local to
-	-- a do-block above — they are out of scope here and always nil.
+	-- FIX-6: _CULL_KEY / _RENDER_CONN / _SaveCameraState / _SuppressRender /
+	-- _RestoreRender are all locals inside a do-end block above and are OUT OF
+	-- SCOPE here — referencing them returns nil and crashes on any call.
 	-- Delegate to the real Compkiller:StartRenderManager() methods instead.
 	-- ========================================================================
 	local function startRenderManager()
@@ -13962,9 +13960,7 @@ Compkiller.MasterControl = function(...)
 		if cfg.fpsCap           ~= nil  then fpsCap(cfg.fpsCap)                                              end
 
 		-- ANIMATIONS
-		-- FIX-2: "animation" and "animationsEnabled" aliases so the common patterns
-		--   { animation = false }  and  { animationsEnabled = false }  actually work.
-		--   Previously these keys were silently ignored; TweenService still fired.
+		-- FIX-2: animation=false / animationsEnabled=false now actually kill tweens
 		if cfg.animation ~= nil then
 			Compkiller.AnimationsEnabled = (cfg.animation ~= false)
 			if not Compkiller.AnimationsEnabled then pauseAllAnimations() else resumeAllAnimations() end
@@ -13990,8 +13986,8 @@ Compkiller.MasterControl = function(...)
 		-- GUI SHIELD
 		if cfg.obfuscate        ~= nil  then enableNameObfuscation(cfg.obfuscate)                            end
 		if cfg.hardReset        == true then hardReset()                                                     end
+		-- FIX-5b: turboScrambleGui = true → auto-resolve ScreenGui from Compkiller.Windows[1]
 		if cfg.turboScramble ~= nil then
-			-- FIX-5b: turboScrambleGui = true/nil → auto-resolve from Compkiller.Windows
 			local _tsg = cfg.turboScrambleGui
 			if type(_tsg) ~= "userdata" then
 				pcall(function() _tsg = Compkiller.Windows and Compkiller.Windows[1] end)
@@ -13999,47 +13995,38 @@ Compkiller.MasterControl = function(...)
 			if _tsg then enableTurboScramble(_tsg, cfg.turboScramble) end
 		end
 		if cfg.decoySystem      ~= nil  then enableDecoySystem(cfg.decoySystem)                              end
-		if cfg.ultimateShield   ~= nil  then
-			-- FIX-4a: normalise true/false → table so _EnableUltimateShield never
-			-- crashes on config.level (indexing a boolean).
-			local _uscfg = (type(cfg.ultimateShield) == "table") and cfg.ultimateShield or {}
-			enableUltimateShield(_uscfg)
+		-- FIX-4a: ultimateShield = true → normalise to {} so config.level indexing doesn't crash
+		if cfg.ultimateShield ~= nil then
+			enableUltimateShield((type(cfg.ultimateShield) == "table") and cfg.ultimateShield or {})
 		end
 
 		-- ADVANCED SHIELD (AS-1 through AS-4)
-		-- FIX-5: if advancedShieldGui = true/nil/non-Instance, auto-resolve from
-		-- Compkiller.Windows so the user can safely write any truthy value without
-		-- triggering "attempt to index nil with 'Root'" crash.
+		-- FIX-5: advancedShieldGui = true → auto-resolve from Compkiller.Windows[1]
 		local _asg = cfg.advancedShieldGui
 		if type(_asg) ~= "userdata" then
-			pcall(function()
-				_asg = Compkiller.Windows and Compkiller.Windows[1]
-			end)
+			pcall(function() _asg = Compkiller.Windows and Compkiller.Windows[1] end)
 		end
-		-- FIX-4b: _EnableMemoryScrambling is not defined in v27 — guard the call so
-		-- memoryScrambling = true with advancedShieldGui = Window.Root doesn't nil-crash.
+		-- FIX-4b: memoryScrambling — _EnableMemoryScrambling is undefined in v27, guard it
 		if cfg.memoryScrambling ~= nil then
 			if type(_EnableMemoryScrambling) == "function" then
 				enableMemoryScrambling(_asg, cfg.memoryScrambling)
-			else
-				_CKLog("apply: memoryScrambling skipped — _EnableMemoryScrambling undefined in this build.")
 			end
 		end
 		if cfg.behavioralNoise     ~= nil then enableBehavioralNoise(_asg, cfg.behavioralNoise)              end
 		if cfg.ghostInstances      ~= nil then enableGhostInstances(cfg.ghostInstances)                      end
 		if cfg.fingerprintRotation ~= nil then enableFingerprintRotation(_asg, cfg.fingerprintRotation)      end
-		if cfg.advancedShield      ~= nil then
-			-- FIX-4c: normalise true/false → table; inject advancedShieldGui as
-			-- config.screenGui so _EnableUltimateShieldAdvanced gets the right GUI
-			-- and doesn't crash on config.screenGui (indexing a boolean).
+		-- FIX-4c: advancedShield = true → normalise to {} + inject resolved ScreenGui
+		if cfg.advancedShield ~= nil then
 			local _ascfg = (type(cfg.advancedShield) == "table") and cfg.advancedShield or {}
 			if _asg and not _ascfg.screenGui then _ascfg.screenGui = _asg end
 			enableUltimateShieldAdvanced(_ascfg)
 		end
 
 		-- WINDOW POSITION
-		-- FIX-7: savePosition=true crashes pos.X.Scale — only forward a real UDim2
-		if cfg.savePosition ~= nil and type(cfg.savePosition) == "userdata" then saveWindowPosition(cfg.savePosition) end
+		-- FIX-7: savePosition = true crashes pos.X.Scale — only forward a real UDim2
+		if cfg.savePosition ~= nil and type(cfg.savePosition) == "userdata" then
+			saveWindowPosition(cfg.savePosition)
+		end
 		if cfg.loadPosition     == true then loadWindowPosition()                                            end
 
 		-- PRESET runs last so explicit keys take priority
