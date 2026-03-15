@@ -7557,7 +7557,7 @@ function Compkiller.new(Config)
 	});
 
 	local TabHover = Compkiller.__SIGNAL(false);
-	local WindowOpen = Compkiller.__SIGNAL(true);
+	local WindowOpen = Compkiller.__SIGNAL(false);
 	local WindowArgs = {
 		SelectedTab = nil,
 		Tabs = {},
@@ -8432,13 +8432,8 @@ function Compkiller.new(Config)
 			end;
 		end;
 
-		if not WindowArgs.Tabs[1] then
-			TabOpenSignal:Fire(true);
-			TabOpen(true);
-			WindowArgs._OpenTabRemote = TabOpenSignal; -- track initially open tab
-		else
-			TabOpen(false);
-		end;
+		-- Auto-select disabled: all tabs start hidden, SelectedTab stays nil.
+		TabOpen(false);
 
 		table.insert(WindowArgs.Tabs , {
 			Root = TabButton,
@@ -8631,10 +8626,9 @@ function Compkiller.new(Config)
 			InternalSignal:Connect(ToggleUI)
 
 
+			-- Auto-select disabled: track __Current without opening it.
 			if not TabArgs.Tabs[1] then
 				TabArgs.__Current = Id;
-
-				InternalSignal:Fire(true)
 			end;
 
 			table.insert(TabArgs.Tabs,Id)
@@ -9275,12 +9269,8 @@ function Compkiller.new(Config)
 			end;
 		end;
 
-		if not WindowArgs.Tabs[1] then
-			TabOpenSignal:Fire(true);
-			TabOpen(true);
-		else
-			TabOpen(false);
-		end;
+		-- Auto-select disabled: all tabs start hidden.
+		TabOpen(false);
 
 		table.insert(WindowArgs.Tabs , {
 			Root = TabButton,
@@ -10174,12 +10164,8 @@ function Compkiller.new(Config)
 				end;
 			end;
 
-			if not WindowArgs.Tabs[1] then
-				TabOpenSignal:Fire(true);
-				TabOpen(true);
-			else
-				TabOpen(false);
-			end;
+			-- Auto-select disabled: all tabs start hidden.
+			TabOpen(false);
 
 			table.insert(WindowArgs.Tabs , {
 				Root = TabButton,
