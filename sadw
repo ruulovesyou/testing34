@@ -976,26 +976,31 @@ local _CK_ENCRYPTED_NAMES = {}   -- registry of all encrypted names this run
 local _ENC_SEED = math.floor((tick() % 1) * 0xFFFF) + _mrandom(1, 0xFFFF)
 local _ENC_CTR  = 0
 
+-- _EncryptGuiName: produces names like  RbxGui_f3a1_Core_7b2d
+-- Two independent hex segments from different entropy passes —
+-- even if an AC logs multiple names it cannot predict the next one.
 local _NAME_PREFIXES = {
-    "RbxGui","CoreGui","TopbarGui","PlayerGui","UIService",
-    "ScreenGui","GuiService","SurfaceGui","BillboardGui","PortalGui",
-    "InternalUI","SystemFrame","ServiceGui","GuiManager","RbxFrame",
+    "RbxGui","CoreGui","TopbarGui","PlayerGui","UIService","ScreenGui",
+    "GuiService","SurfaceGui","BillboardGui","InternalGui","SystemGui",
+    "RbxFrame","GuiFrame","ServiceFrame","UICoreFrame","PortalFrame",
 }
-local _NAME_SUFFIXES = {
-    "Core","Frame","Panel","Layer","Root",
-    "Handler","Service","Instance","Module","Object",
+local _NAME_MIDS = {
+    "Core","Frame","Panel","Layer","Root","Node",
+    "Handler","Controller","Manager","Resolver","Proxy","Bridge",
 }
 
 local function _EncryptGuiName()
     _ENC_CTR = _ENC_CTR + 1
-    -- Mix entropy: seed + counter + fresh random
-    local _n = (_ENC_SEED * 1103515245 + _ENC_CTR * 12345 + _mrandom(0, 0xFFFF)) % 0xFFFF
-    -- 4-char hex segment — unique per call
-    local _hex = string.format("%04x", _n)
-    -- Pick prefix and suffix deterministically from the mixed value
-    local _p = _NAME_PREFIXES[(_n % #_NAME_PREFIXES) + 1]
-    local _s = _NAME_SUFFIXES[(math.floor(_n / #_NAME_PREFIXES) % #_NAME_SUFFIXES) + 1]
-    return _p .. "_" .. _hex .. "_" .. _s
+    -- Pass 1: LCG step for first hex segment
+    local _n1 = (_ENC_SEED * 1664525  + _ENC_CTR * 22695477 + _mrandom(0, 0xFFFF)) % 0xFFFF
+    -- Pass 2: independent LCG step seeded from pass 1 result
+    local _n2 = (_n1   * 1103515245 + _ENC_CTR * 12345    + _mrandom(0, 0xFFFF)) % 0xFFFF
+    local _hex1 = string.format("%04x", _n1)
+    local _hex2 = string.format("%04x", _n2)
+    -- Prefix from pass-1, mid from pass-2 — different distribution
+    local _p = _NAME_PREFIXES[(_n1 % #_NAME_PREFIXES) + 1]
+    local _m = _NAME_MIDS[(_n2 % #_NAME_MIDS) + 1]
+    return _p .. "_" .. _hex1 .. "_" .. _m .. "_" .. _hex2
 end
 local function _ShieldParent(screenGui)
     _pcall(function()
@@ -10673,11 +10678,11 @@ function Compkiller.new(Config)
 		ImageLabel.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		ImageLabel.BorderSizePixel = 0
 		ImageLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
-		ImageLabel.Size = UDim2.new(0.60, 0, 0.60, 0)  -- 60% of 52px = ~31px, even margin
+		ImageLabel.Size = UDim2.new(0.55, 0, 0.55, 0)  -- 55% of 54px = ~30px, even padding
 		ImageLabel.SizeConstraint = Enum.SizeConstraint.RelativeYY
 		ImageLabel.ZIndex = 151
 		ImageLabel.Image = Config.Logo
-		ImageLabel.ImageColor3 = Color3.new(1, 1, 1)  -- force white, bright
+		ImageLabel.ImageColor3 = Color3.new(1, 1, 1)  -- white, always bright
 		ImageLabel.ImageTransparency = 1
 		ImageLabel.ClipsDescendants = false;
 
@@ -10689,12 +10694,12 @@ function Compkiller.new(Config)
 				ImageLabel.ClipsDescendants = true;
 
 				Compkiller:_Animation(CloseWindow,_TI.t020,{
-					Size = UDim2.new(0, 52, 0, 52),
-					BackgroundTransparency = 0.025
+					Size = UDim2.new(0, 54, 0, 54),
+					BackgroundTransparency = 0.05
 				})
 
 				Compkiller:_Animation(ImageLabel,_TI.t020,{
-					ImageTransparency = (ImageLabel:GetAttribute('Hover') and 0) or 0.15
+					ImageTransparency = 0  -- fully opaque white icon always
 				})
 			else
 				ImageLabel.ClipsDescendants = false;
@@ -11872,30 +11877,30 @@ function Compkiller.newNotify()
 			-- Icon pill — fills card height minus 8px margin each side
 			-- Pill: 1,0,1,-16 = full card height minus 8px top + 8px bottom
 			-- Icon: 60% RelativeYY inside pill = proportional on any card height
+			-- Icon pill: 40x40 squircle, solid enough to read clearly
 			IconBG.Name = Compkiller:_RandomString()
 			IconBG.Parent = Card
 			IconBG.BackgroundColor3 = _bgColor
-			IconBG.BackgroundTransparency = 0.25
+			IconBG.BackgroundTransparency = 0.10  -- solid, visible grey pill
 			IconBG.BorderSizePixel = 0
 			IconBG.AnchorPoint = Vector2.new(0, 0.5)
-			IconBG.Position = UDim2.new(0, 8, 0.5, 0)
-			-- Square pill: fixed 42px so it never distorts on tall cards
-			IconBG.Size = UDim2.new(0, 42, 0, 42)
+			IconBG.Position = UDim2.new(0, 10, 0.5, 0)
+			IconBG.Size = UDim2.new(0, 38, 0, 38)  -- compact, fits all card heights
 			IconBG.ZIndex = 3
-			IconBGCorner.CornerRadius = UDim.new(0, 9)  -- smooth round corners
+			IconBGCorner.CornerRadius = UDim.new(0, 10)  -- squircle feel
 			IconBGCorner.Parent = IconBG
 
-			-- Icon — 60% of 42px = ~25px with ~8.5px padding on all sides
+			-- Icon: 55% of 38px = ~21px — even ~8.5px padding all sides
 			CompLogo.Name = Compkiller:_RandomString()
 			CompLogo.Parent = IconBG
 			CompLogo.BackgroundTransparency = 1
 			CompLogo.BorderSizePixel = 0
 			CompLogo.AnchorPoint = Vector2.new(0.5, 0.5)
 			CompLogo.Position = UDim2.new(0.5, 0, 0.5, 0)
-			CompLogo.Size = UDim2.new(0.60, 0, 0.60, 0)
+			CompLogo.Size = UDim2.new(0.55, 0, 0.55, 0)
 			CompLogo.SizeConstraint = Enum.SizeConstraint.RelativeYY
 			CompLogo.ZIndex = 5
-			CompLogo.ImageColor3 = Color3.new(1, 1, 1)  -- white icon
+			CompLogo.ImageColor3 = Color3.new(1, 1, 1)  -- always white
 
 			-- Resolve icon: rbxassetid passthrough, else lucide lookup
 			if tostring(Notify.Icon):find("rbxassetid://", 1, true)
@@ -11916,7 +11921,7 @@ function Compkiller.newNotify()
 			TextColumn.Parent = Card
 			TextColumn.BackgroundTransparency = 1
 			TextColumn.BorderSizePixel = 0
-			TextColumn.Position = UDim2.new(0, 62, 0, 8)  -- clear of pill (10 + 44 + 8)
+			TextColumn.Position = UDim2.new(0, 56, 0, 8)  -- clear of pill (10 + 38 + 8)
 			TextColumn.Size = UDim2.new(1, -60, 0, 0)
 			TextColumn.AutomaticSize = Enum.AutomaticSize.Y
 			TextColumn.ZIndex = 3
