@@ -21,11 +21,8 @@ _G.CK_LOADED = true
 getgenv().CK_LOADED = getgenv().CK_LOADED or {}
 if getgenv().CK_LOADED.__ran then return end
 getgenv().CK_LOADED.__ran = true
-
-
-
-
 do
+    -- Opaque keys — null-byte prefix makes them invisible to standard key scans
     local _FLAG_KEY  = "__ck_f_"  .. tostring(math.random(1e8, 9e8))
     local _KILL_KEY  = "__ck_k_"  .. tostring(math.random(1e8, 9e8))
     local _TS_KEY    = "__ck_t_"      .. tostring(math.random(1e8, 9e8))
@@ -2774,6 +2771,15 @@ local _TI = {
     t040q = TweenInfo.new(0.40, Enum.EasingStyle.Quint),
     t021  = TweenInfo.new(0.21),
     t032  = TweenInfo.new(0.32),
+    -- Upgraded animation presets
+    tToggle   = TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+    tToggleC  = TweenInfo.new(0.18, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out),
+    tSlider   = TweenInfo.new(0.15, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+    tBtn      = TweenInfo.new(0.12, Enum.EasingStyle.Quad,  Enum.EasingDirection.Out),
+    tBtnHover = TweenInfo.new(0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+    tWinOpen  = TweenInfo.new(0.45, Enum.EasingStyle.Back,  Enum.EasingDirection.Out),
+    tWinClose = TweenInfo.new(0.32, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+    tFade     = TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
     t100  = TweenInfo.new(1.0,  Enum.EasingStyle.Quint, Enum.EasingDirection.InOut),
 }
 
@@ -3194,14 +3200,14 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 
 			if bool then
 				Toggle:SetAttribute('Enabled',true);
-
-				ToggleValue.Position = UDim2.new(0.75, 0, 0.5, 0)
-				Toggle.BackgroundColor3 = Compkiller.Colors.Toggle
+				-- Pill slides right + track color transitions
+				Compkiller:_Animation(ToggleValue, _TI.tToggle, { Position = UDim2.new(0.75, 0, 0.5, 0) })
+				Compkiller:_Animation(Toggle, _TI.tToggleC, { BackgroundColor3 = Compkiller.Colors.Toggle })
 			else
 				Toggle:SetAttribute('Enabled',false);
-
-				ToggleValue.Position = UDim2.new(0.25, 0, 0.5, 0)
-				Toggle.BackgroundColor3 = Compkiller.Colors.DropColor
+				-- Pill slides left + track color transitions
+				Compkiller:_Animation(ToggleValue, _TI.tToggle, { Position = UDim2.new(0.25, 0, 0.5, 0) })
+				Compkiller:_Animation(Toggle, _TI.tToggleC, { BackgroundColor3 = Compkiller.Colors.DropColor })
 			end;
 		end;
 
@@ -6307,19 +6313,32 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Compkiller:_Hover(Frame,function(...)
 			if Signal:GetValue() then
-				Compkiller:_Animation(Frame,_TI.t020,{
-					BackgroundTransparency = 0
+				Compkiller:_Animation(Frame, _TI.tBtnHover, {
+					BackgroundTransparency = 0,
+					Size = UDim2.new(1, -3, 0, 28)  -- subtle shrink inward
 				})
 			end;
 		end,function()
 			if Signal:GetValue() then
-				Compkiller:_Animation(Frame,_TI.t020,{
-					BackgroundTransparency = 0.1
+				Compkiller:_Animation(Frame, _TI.tBtnHover, {
+					BackgroundTransparency = 0.1,
+					Size = UDim2.new(1, -1, 0, 30)
 				})
 			end;
 		end);
 
 		Compkiller:_Input(Frame,function()
+			-- Press: flash highlight then restore
+			Compkiller:_Animation(Frame, _TI.tBtn, {
+				BackgroundColor3 = Compkiller.Colors.Highlight,
+				Size = UDim2.new(1, -5, 0, 26)
+			})
+			task.delay(0.12, function()
+				Compkiller:_Animation(Frame, _TI.tBtnHover, {
+					BackgroundColor3 = Compkiller.Colors.MouseEnter,
+					Size = UDim2.new(1, -1, 0, 30)
+				})
+			end)
 			Config.Callback();
 		end);
 
@@ -6561,7 +6580,9 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 			local Size = (Value - Config.Min) / (Config.Max - Config.Min);
 
-			SliderInput.Size = UDim2.new(math.clamp(Size,0.045,1), 0, 1, 0)
+			Compkiller:_Animation(SliderInput, _TI.tSlider, {
+				Size = UDim2.new(math.clamp(Size,0.045,1), 0, 1, 0)
+			})
 
 			Config.Default = Value;
 
@@ -7967,35 +7988,48 @@ function Compkiller.new(Config)
 		end;
 
 		if v then
-			Compkiller:_Animation(MainFrame,_TW_FAST,{ Size = Config.Scale })
-			Compkiller:_Animation(TabButtonScrollingFrame,_TW_SLIDE,{ Position = UDim2.new(0.5,0,0.5,0) })
-			Compkiller:_Animation(CompLogo,_TW_FAST,{ ImageTransparency = 0 })
-			Compkiller:_Animation(WindowLabel,_TW_FAST,{ TextTransparency = 0 })
-			Compkiller:_Animation(UserProfile,_TW_FAST,{ ImageTransparency = 0 })
-			Compkiller:_Animation(UserText,_TW_FAST,{ TextTransparency = 0 })
-			Compkiller:_Animation(ExpireText,_TW_FAST,{ TextTransparency = 0.5 })
+			-- ── OPEN: spring scale from slightly smaller + fade in ─────────
+			MainFrame.Size = UDim2.new(
+				Config.Scale.X.Scale, Config.Scale.X.Offset - 18,
+				Config.Scale.Y.Scale, Config.Scale.Y.Offset - 18)
+			MainFrame.BackgroundTransparency = 0.6
+			Compkiller:_Animation(MainFrame, _TI.tWinOpen, { Size = Config.Scale, BackgroundTransparency = 0 })
+			-- Sidebar slides in from left
+			TabButtonScrollingFrame.Position = UDim2.new(-0.3, 0, 0.5, 0)
+			Compkiller:_Animation(TabButtonScrollingFrame, _TI.tWinOpen, { Position = UDim2.new(0.5,0,0.5,0) })
+			-- TabFrame fades in
+			Compkiller:_Animation(TabFrame, _TI.tFade, { BackgroundTransparency = TabFrameBaseTrans })
+			-- Accent line grows
+			Compkiller:_Animation(LineFrame1, _TI.tWinOpen, { BackgroundTransparency = 0, Size = UDim2.new(0,20,1,0) })
+			-- Header elements stagger in
+			Compkiller:_Animation(CompLogo,    _TI.tFade, { ImageTransparency = 0 })
+			Compkiller:_Animation(WindowLabel, _TI.tFade, { TextTransparency = 0 })
+			Compkiller:_Animation(UserProfile, _TI.tFade, { ImageTransparency = 0 })
+			Compkiller:_Animation(UserText,    _TI.tFade, { TextTransparency = 0 })
+			Compkiller:_Animation(ExpireText,  _TI.tFade, { TextTransparency = 0.5 })
 			if WindowArgs._PillActive and WindowArgs._PremiumBadge and TabHover:GetValue() then
-				Compkiller:_Animation(WindowArgs._PremiumBadge,_TW_FAST,{ TextTransparency = 0 })
+				Compkiller:_Animation(WindowArgs._PremiumBadge, _TI.tFade, { TextTransparency = 0 })
 			end
-			Compkiller:_Animation(MainFrame,_TW_FAST,{ BackgroundTransparency = 0 })
-			Compkiller:_Animation(LineFrame1,_TW_MED,{ BackgroundTransparency = 0, Size = UDim2.new(0,20,1,0) })
-			Compkiller:_Animation(TabFrame,_TW_FAST,{ BackgroundTransparency = TabFrameBaseTrans })
 		else
-			Compkiller:_Animation(MainFrame,_TW_FAST,{
-				Size = UDim2.new(math.max(Config.Scale.X.Scale-0.05,0),Config.Scale.X.Offset-10,math.max(Config.Scale.Y.Scale-0.05,0),Config.Scale.Y.Offset-10)
-			})
-			Compkiller:_Animation(TabButtonScrollingFrame,_TW_SLIDE,{ Position = UDim2.new(1.5,100,0.5,0) })
-			Compkiller:_Animation(LineFrame1,_TW_SNAP,{ BackgroundTransparency = 1, Size = UDim2.new(0,1,1,0) })
-			Compkiller:_Animation(CompLogo,_TW_FAST,{ ImageTransparency = 1 })
-			Compkiller:_Animation(WindowLabel,_TW_FAST,{ TextTransparency = 1 })
-			Compkiller:_Animation(UserProfile,_TW_FAST,{ ImageTransparency = 1 })
-			Compkiller:_Animation(UserText,_TW_FAST,{ TextTransparency = 1 })
-			Compkiller:_Animation(ExpireText,_TW_FAST,{ TextTransparency = 1 })
+			-- ── CLOSE: shrink down + fade out ─────────────────────────────
+			Compkiller:_Animation(TabButtonScrollingFrame, _TI.tWinClose, { Position = UDim2.new(1.5,100,0.5,0) })
+			Compkiller:_Animation(LineFrame1, _TI.t010, { BackgroundTransparency = 1, Size = UDim2.new(0,1,1,0) })
+			Compkiller:_Animation(CompLogo,    _TI.tWinClose, { ImageTransparency = 1 })
+			Compkiller:_Animation(WindowLabel, _TI.tWinClose, { TextTransparency = 1 })
+			Compkiller:_Animation(UserProfile, _TI.tWinClose, { ImageTransparency = 1 })
+			Compkiller:_Animation(UserText,    _TI.tWinClose, { TextTransparency = 1 })
+			Compkiller:_Animation(ExpireText,  _TI.tWinClose, { TextTransparency = 1 })
 			if WindowArgs._PremiumBadge then
-				Compkiller:_Animation(WindowArgs._PremiumBadge,_TW_FAST,{ TextTransparency = 1 })
+				Compkiller:_Animation(WindowArgs._PremiumBadge, _TI.tWinClose, { TextTransparency = 1 })
 			end
-			Compkiller:_Animation(MainFrame,_TW_FAST,{ BackgroundTransparency = 1 })
-			Compkiller:_Animation(TabFrame,_TW_SNAP,{ BackgroundTransparency = 1 })
+			Compkiller:_Animation(TabFrame, _TI.t010, { BackgroundTransparency = 1 })
+			-- Main frame shrinks and fades out
+			Compkiller:_Animation(MainFrame, _TI.tWinClose, {
+				BackgroundTransparency = 1,
+				Size = UDim2.new(
+					Config.Scale.X.Scale, Config.Scale.X.Offset - 20,
+					Config.Scale.Y.Scale, Config.Scale.Y.Offset - 20)
+			})
 		end;
 	end);
 
@@ -11700,24 +11734,37 @@ function Compkiller:Loader(IconId, Duration)
 		end
 	end
 
-	Compkiller:_Animation(Loader, TweenInfo.new(0.55, Enum.EasingStyle.Quint), {
-		BackgroundTransparency = 0.5
-	});
+	if Compkiller.AnimationsEnabled then
+		Compkiller:_Animation(Loader, TweenInfo.new(0.55, Enum.EasingStyle.Quint), {
+			BackgroundTransparency = 0.5
+		})
+	else
+		Loader.BackgroundTransparency = 0.5
+	end
 
 	local Event = Instance.new('BindableEvent');
 
 	task.delay(0.5, function(...)
-		Compkiller:_Animation(Icon, TweenInfo.new(0.75, Enum.EasingStyle.Quint), {
-			ImageTransparency = 0.01,
-			Size = UDim2.new(0, _iconSize, 0, _iconSize)
-		});
+		if Compkiller.AnimationsEnabled then
+			Compkiller:_Animation(Icon, TweenInfo.new(0.75, Enum.EasingStyle.Quint), {
+				ImageTransparency = 0.01,
+				Size = UDim2.new(0, _iconSize, 0, _iconSize)
+			})
+		else
+			Icon.ImageTransparency = 0
+			Icon.Size = UDim2.new(0, _iconSize, 0, _iconSize)
+		end
 
 		if _spin then task.delay(0.75, _startSpin) end
 
 		task.delay(0.25, function(...)
-			Compkiller:_Animation(Vignette, TweenInfo.new(5), {
-				ImageTransparency = 0.2
-			});
+			if Compkiller.AnimationsEnabled then
+				Compkiller:_Animation(Vignette, TweenInfo.new(5), {
+					ImageTransparency = 0.2
+				})
+			else
+				Vignette.ImageTransparency = 0.2
+			end;
 
 			task.wait(_duration)
 			_stopSpin()
@@ -12047,19 +12094,21 @@ function Compkiller.newNotify()
 
 			local Close = function()
 				if _stopSpin then _stopSpin(); _stopSpin = nil end
-				Compkiller:_Animation(Card, TweenInfo.new(0.45, Enum.EasingStyle.Quint), {
-					Position = UDim2.new(1, 300, 0, 0)
+				-- Slide out right + collapse height
+				Compkiller:_Animation(Card, TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+					Position = UDim2.new(1, 320, 0, 0)
 				})
-				task.wait(0.25)
-				Compkiller:_Animation(BlockFrame, TweenInfo.new(0.3, Enum.EasingStyle.Quint), {
+				task.wait(0.2)
+				Compkiller:_Animation(BlockFrame, TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
 					Size = UDim2.new(1, 0, 0, 0)
 				})
-				task.wait(0.35)
+				task.wait(0.28)
 				BlockFrame:Destroy()
 			end
 
 			local Show = function()
-				Compkiller:_Animation(Card, TweenInfo.new(0.5, Enum.EasingStyle.Quint), {
+				-- Slide in from right with spring
+				Compkiller:_Animation(Card, TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 					Position = UDim2.new(0, 0, 0, 0)
 				})
 			end
