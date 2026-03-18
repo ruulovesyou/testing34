@@ -1,20 +1,31 @@
--- ============================================================================
--- EXECUTION GUARD  v2  (3-layer hardened)
---
--- L1  getgenv() opaque flag  — survives loadstring re-runs, persists across
---                               require() calls, written under null-prefixed key
---                               that ACs cannot enumerate by name scanning.
--- L2  kill-fn check          — if a previous run registered a teardown fn,
---                               call it first to cleanly destroy old GUIs,
---                               threads and connections before the new run starts.
--- L3  _G timestamp           — written at boot, checked on re-entry so a script
---                               that somehow bypasses L1 still cannot double-run
---                               within the same session tick window.
---
--- Debug bypass: set  _G.CK_DEBUG = true  before executing to force a fresh run.
--- ============================================================================
+if not game:IsLoaded() then
+    game.Loaded:Wait()
+end
+
+
+if _G.CK_DEBUG then
+    print("[CK] Debug mode → allowing reload")
+else
+    if _G.CK_LOADED then
+        print("[CK] Already loaded — exiting")
+        return
+    end
+end
+function missing(t, f, fallback)
+    if type(f) == t then return f end
+    return fallback
+end
+
+_G.CK_LOADED = true
+
+getgenv().CK_LOADED = getgenv().CK_LOADED or {}
+if getgenv().CK_LOADED.__ran then return end
+getgenv().CK_LOADED.__ran = true
+
+
+
+
 do
-    -- Opaque keys — null-byte prefix makes them invisible to standard key scans
     local _FLAG_KEY  = "__ck_f_"  .. tostring(math.random(1e8, 9e8))
     local _KILL_KEY  = "__ck_k_"  .. tostring(math.random(1e8, 9e8))
     local _TS_KEY    = "__ck_t_"      .. tostring(math.random(1e8, 9e8))
@@ -10687,32 +10698,62 @@ function Compkiller.new(Config)
 		ImageLabel.ClipsDescendants = false;
 
 
+		-- Make icon bigger and always white
+		ImageLabel.Size = UDim2.new(0.62, 0, 0.62, 0)
+		ImageLabel.ImageColor3 = Color3.new(1, 1, 1)
+
 		local ToggleCloseUI = function(v)
-			ImageLabel.Image = Config.Logo;
+			ImageLabel.Image = Config.Logo
 
 			if v then
-				ImageLabel.ClipsDescendants = true;
+				ImageLabel.ClipsDescendants = true
 
-				Compkiller:_Animation(CloseWindow,_TI.t020,{
-					Size = UDim2.new(0, 54, 0, 54),
-					BackgroundTransparency = 0.05
-				})
-
-				Compkiller:_Animation(ImageLabel,_TI.t020,{
-					ImageTransparency = 0  -- fully opaque white icon always
-				})
+				if Compkiller.AnimationsEnabled then
+					-- ── Cool entrance: scale up from 0 with spring overshoot ─────
+					CloseWindow.Size = UDim2.new(0, 0, 0, 0)
+					CloseWindow.BackgroundTransparency = 0
+					-- Step 1: grow to slightly over target (spring feel)
+					Compkiller:_Animation(CloseWindow, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+						Size = UDim2.new(0, 58, 0, 58),
+						BackgroundTransparency = 0.05
+					})
+					-- Step 2: icon fades + spins in
+					ImageLabel.Rotation = -45
+					ImageLabel.ImageTransparency = 1
+					Compkiller:_Animation(ImageLabel, TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+						ImageTransparency = 0,
+						Rotation = 0
+					})
+				else
+					-- Animations off: instant show
+					CloseWindow.Size = UDim2.new(0, 54, 0, 54)
+					CloseWindow.BackgroundTransparency = 0.05
+					ImageLabel.ImageTransparency = 0
+					ImageLabel.Rotation = 0
+				end
 			else
-				ImageLabel.ClipsDescendants = false;
+				ImageLabel.ClipsDescendants = false
 
-				Compkiller:_Animation(CloseWindow,_TI.t020,{
-					Size = UDim2.new(0, 0, 0, 23),
-					BackgroundTransparency = 1
-				})
-
-				Compkiller:_Animation(ImageLabel,_TI.t020,{
-					ImageTransparency = 1
-				})
-			end;
+				if Compkiller.AnimationsEnabled then
+					-- ── Cool exit: icon spins out then circle shrinks ────────────
+					Compkiller:_Animation(ImageLabel, TweenInfo.new(0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+						ImageTransparency = 1,
+						Rotation = 45
+					})
+					task.delay(0.15, function()
+						Compkiller:_Animation(CloseWindow, TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+							Size = UDim2.new(0, 0, 0, 0),
+							BackgroundTransparency = 1
+						})
+					end)
+				else
+					-- Animations off: instant hide
+					CloseWindow.Size = UDim2.new(0, 0, 0, 0)
+					CloseWindow.BackgroundTransparency = 1
+					ImageLabel.ImageTransparency = 1
+					ImageLabel.Rotation = 0
+				end
+			end
 		end;
 
 		function WindowArgs:Watermark()
@@ -14160,17 +14201,20 @@ Compkiller.MasterControl = function(...)
 		if cfg.sleepMode        ~= nil  then setSleepMode(cfg.sleepMode)                                     end
 		if cfg.fpsCap           ~= nil  then fpsCap(cfg.fpsCap)                                              end
 
-		-- ANIMATIONS
+		-- ── ANIMATIONS ──────────────────────────────────────────────────────────
+		-- animation        = bool   master switch for ALL UI animations
+		--                           true  = tweens enabled (default)
+		--                           false = instant property sets, no tweens
+		-- smartAnimations  = bool   FPS-adaptive tween durations
+		-- pauseAnimations  = bool   temporary pause without disabling (true/false)
+		-- ─────────────────────────────────────────────────────────────────────────
 		if cfg.animation ~= nil then
 			Compkiller.AnimationsEnabled = (cfg.animation ~= false)
 			if not Compkiller.AnimationsEnabled then pauseAllAnimations() else resumeAllAnimations() end
 		end
-		if cfg.animationsEnabled ~= nil then
-			Compkiller.AnimationsEnabled = (cfg.animationsEnabled ~= false)
-			if not Compkiller.AnimationsEnabled then pauseAllAnimations() else resumeAllAnimations() end
-		end
-		if cfg.pauseAnimations  == true  then pauseAllAnimations()                                           end
-		if cfg.pauseAnimations  == false then resumeAllAnimations()                                          end
+		-- animationsEnabled removed — use animation = true/false instead
+		if cfg.pauseAnimations == true  then pauseAllAnimations()  end
+		if cfg.pauseAnimations == false then resumeAllAnimations() end
 		if cfg.forceGC          == true  then forceGC()                                                      end
 		if cfg.cleanupAll       == true  then cleanupAll()                                                   end
 
