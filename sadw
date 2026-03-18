@@ -11829,28 +11829,28 @@ function Compkiller.newNotify()
 			AccentCorner.CornerRadius = UDim.new(1, 0)
 			AccentCorner.Parent = AccentBar
 
-			-- Icon background circle
+			-- Icon pill — grey bg, icon centred with even padding
 			IconBG.Name = Compkiller:_RandomString()
 			IconBG.Parent = Card
 			IconBG.BackgroundColor3 = _bgColor
-			IconBG.BackgroundTransparency = 0.78
+			IconBG.BackgroundTransparency = 0.25
 			IconBG.BorderSizePixel = 0
-			IconBG.Position = UDim2.new(0, 10, 0, 10)
-			IconBG.Size = UDim2.new(0, 32, 0, 32)
+			IconBG.AnchorPoint = Vector2.new(0, 0.5)
+			IconBG.Position = UDim2.new(0, 10, 0.5, 0)
+			IconBG.Size = UDim2.new(0, 34, 0, 34)
 			IconBG.ZIndex = 3
-			IconBGCorner.CornerRadius = UDim.new(0, 7)
+			IconBGCorner.CornerRadius = UDim.new(0, 8)
 			IconBGCorner.Parent = IconBG
 
-			-- Icon
+			-- Icon inside pill — 58% fill leaves even visible margin
 			CompLogo.Name = Compkiller:_RandomString()
-			-- CompLogo parented to IconBG (see above)
+			CompLogo.Parent = IconBG
 			CompLogo.BackgroundTransparency = 1
 			CompLogo.BorderSizePixel = 0
 			CompLogo.AnchorPoint = Vector2.new(0.5, 0.5)
-			CompLogo.Position = UDim2.new(0.5, 0, 0.5, 0)  -- centred inside IconBG
-			CompLogo.Size = UDim2.new(0.65, 0, 0.65, 0)    -- 65% of pill size
+			CompLogo.Position = UDim2.new(0.5, 0, 0.5, 0)
+			CompLogo.Size = UDim2.new(0.58, 0, 0.58, 0)
 			CompLogo.SizeConstraint = Enum.SizeConstraint.RelativeYY
-			CompLogo.Parent = IconBG  -- parent to pill so size is relative to it
 			CompLogo.ZIndex = 5
 			CompLogo.ImageColor3 = _barColor
 
