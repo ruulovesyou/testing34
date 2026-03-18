@@ -6338,28 +6338,24 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Compkiller:_Hover(Frame,function(...)
 			if Signal:GetValue() then
-				Compkiller:_Animation(Frame,TweenInfo.new(0.2),{
+				Compkiller:_Animation(Frame,TweenInfo.new(0.15,Enum.EasingStyle.Quint),{
 					BackgroundTransparency = 0
 				})
 			end;
 		end,function()
 			if Signal:GetValue() then
-				Compkiller:_Animation(Frame,TweenInfo.new(0.2),{
+				Compkiller:_Animation(Frame,TweenInfo.new(0.15,Enum.EasingStyle.Quint),{
 					BackgroundTransparency = 0.1
 				})
 			end;
 		end);
 
 		Compkiller:_Input(Frame,function()
-			-- Press: quick highlight flash
-			Compkiller:_Animation(Frame,TweenInfo.new(0.12),{
-				BackgroundColor3 = Compkiller.Colors.Highlight
+			-- Press: instant transparency dip then restore — no color mutation
+			Frame.BackgroundTransparency = 0
+			Compkiller:_Animation(Frame,TweenInfo.new(0.25,Enum.EasingStyle.Quint,Enum.EasingDirection.Out),{
+				BackgroundTransparency = 0.1
 			})
-			task.delay(0.18, function()
-				Compkiller:_Animation(Frame,TweenInfo.new(0.2),{
-					BackgroundColor3 = Compkiller.Colors.MouseEnter
-				})
-			end)
 			Config.Callback();
 		end);
 
@@ -8003,84 +7999,78 @@ function Compkiller.new(Config)
 
 		if v then
 			-- ── OPEN ─────────────────────────────────────────────────────────
-			-- Make visible immediately so tweens are actually seen
+			-- Show frame immediately — all tweens fire at t=0, no delays
 			MainFrame.Visible = true
 			MainFrame.Size    = Config.Scale
 			MainFrame.BackgroundTransparency = 1
 
-			-- Sidebar starts off-screen right, flies in with spring
-			TabButtonScrollingFrame.Position = UDim2.new(1.5, 0, 0.5, 0)
+			-- Reset sidebar to its hidden position instantly before tweening
+			TabButtonScrollingFrame.Position = UDim2.new(1.2, 0, 0.5, 0)
 
-			-- All header elements start transparent
-			CompLogo.ImageTransparency    = 1
-			WindowLabel.TextTransparency  = 1
-			UserProfile.ImageTransparency = 1
-			UserText.TextTransparency     = 1
-			ExpireText.TextTransparency   = 1
+			-- Reset header to invisible instantly
+			CompLogo.ImageTransparency        = 1
+			WindowLabel.TextTransparency      = 1
+			UserProfile.ImageTransparency     = 1
+			UserText.TextTransparency         = 1
+			ExpireText.TextTransparency       = 1
 			LineFrame1.BackgroundTransparency = 1
-			LineFrame1.Size = UDim2.new(0, 1, 1, 0)
+			LineFrame1.Size                   = UDim2.new(0, 1, 1, 0)
 
-			-- Step 1: frame fades in (0.22s)
-			Compkiller:_Animation(MainFrame,
-				TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-				{ BackgroundTransparency = 0 })
+			-- Everything fires at exactly t=0 — tight durations, no queuing
+			local _tOpen = TweenInfo.new(0.20, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+			local _tSlide = TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 
-			-- Step 2: sidebar springs in (0.38s Back Out)
-			Compkiller:_Animation(TabButtonScrollingFrame,
-				TweenInfo.new(0.38, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-				{ Position = UDim2.new(0.5, 0, 0.5, 0) })
-
-			-- Step 3: accent line grows (0.35s Quint Out)
-			Compkiller:_Animation(LineFrame1,
-				TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-				{ BackgroundTransparency = 0, Size = UDim2.new(0, 20, 1, 0) })
-
-			-- Step 4: TabFrame + header fade in (0.25s)
-			Compkiller:_Animation(TabFrame,
-				TweenInfo.new(0.25, Enum.EasingStyle.Quint),
-				{ BackgroundTransparency = TabFrameBaseTrans })
-			Compkiller:_Animation(CompLogo,    TweenInfo.new(0.25), { ImageTransparency = 0 })
-			Compkiller:_Animation(WindowLabel, TweenInfo.new(0.25), { TextTransparency = 0 })
-			Compkiller:_Animation(UserProfile, TweenInfo.new(0.25), { ImageTransparency = 0 })
-			Compkiller:_Animation(UserText,    TweenInfo.new(0.25), { TextTransparency = 0 })
-			Compkiller:_Animation(ExpireText,  TweenInfo.new(0.25), { TextTransparency = 0.5 })
+			Compkiller:_Animation(MainFrame,                 _tOpen,  { BackgroundTransparency = 0 })
+			Compkiller:_Animation(TabButtonScrollingFrame,   _tSlide, { Position = UDim2.new(0.5, 0, 0.5, 0) })
+			Compkiller:_Animation(TabFrame,                  _tOpen,  { BackgroundTransparency = TabFrameBaseTrans })
+			Compkiller:_Animation(LineFrame1,                _tSlide, { BackgroundTransparency = 0, Size = UDim2.new(0, 20, 1, 0) })
+			Compkiller:_Animation(CompLogo,                  _tOpen,  { ImageTransparency = 0 })
+			Compkiller:_Animation(WindowLabel,               _tOpen,  { TextTransparency = 0 })
+			Compkiller:_Animation(UserProfile,               _tOpen,  { ImageTransparency = 0 })
+			Compkiller:_Animation(UserText,                  _tOpen,  { TextTransparency = 0 })
+			Compkiller:_Animation(ExpireText,                _tOpen,  { TextTransparency = 0.5 })
 
 			if WindowArgs._PillActive and WindowArgs._PremiumBadge and TabHover:GetValue() then
-				Compkiller:_Animation(WindowArgs._PremiumBadge, TweenInfo.new(0.25), { TextTransparency = 0 })
+				Compkiller:_Animation(WindowArgs._PremiumBadge, _tOpen, { TextTransparency = 0 })
 			end
 
 		else
-			-- ── CLOSE: 3-layer cascade ───────────────────────────────────────
+			-- ── CLOSE — content out + frame scales down and fades ───────────
+			local _tOut = TweenInfo.new(0.16, Enum.EasingStyle.Quint, Enum.EasingDirection.In)
 
-			-- Layer 1 (instant): sidebar sweeps away + line shrinks
-			Compkiller:_Animation(TabButtonScrollingFrame,
-				TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
-				{ Position = UDim2.new(1.5, 100, 0.5, 0) })
-			Compkiller:_Animation(LineFrame1,
-				TweenInfo.new(0.12, Enum.EasingStyle.Quint),
-				{ BackgroundTransparency = 1, Size = UDim2.new(0, 1, 1, 0) })
+			-- Sidebar sweeps right, line shrinks
+			Compkiller:_Animation(TabButtonScrollingFrame, _tOut, { Position = UDim2.new(1.2, 0, 0.5, 0) })
+			Compkiller:_Animation(LineFrame1,              _tOut, { BackgroundTransparency = 1, Size = UDim2.new(0, 1, 1, 0) })
 
-			-- Layer 2 (slight delay): header elements fade out
-			task.delay(0.05, function()
-				Compkiller:_Animation(CompLogo,    TweenInfo.new(0.18), { ImageTransparency = 1 })
-				Compkiller:_Animation(WindowLabel, TweenInfo.new(0.18), { TextTransparency = 1 })
-				Compkiller:_Animation(UserProfile, TweenInfo.new(0.18), { ImageTransparency = 1 })
-				Compkiller:_Animation(UserText,    TweenInfo.new(0.18), { TextTransparency = 1 })
-				Compkiller:_Animation(ExpireText,  TweenInfo.new(0.18), { TextTransparency = 1 })
-				if WindowArgs._PremiumBadge then
-					Compkiller:_Animation(WindowArgs._PremiumBadge, TweenInfo.new(0.18), { TextTransparency = 1 })
-				end
-				Compkiller:_Animation(TabFrame, TweenInfo.new(0.12), { BackgroundTransparency = 1 })
-			end)
+			-- All content fades simultaneously
+			Compkiller:_Animation(TabFrame,     _tOut, { BackgroundTransparency = 1 })
+			Compkiller:_Animation(CompLogo,     _tOut, { ImageTransparency = 1 })
+			Compkiller:_Animation(WindowLabel,  _tOut, { TextTransparency = 1 })
+			Compkiller:_Animation(UserProfile,  _tOut, { ImageTransparency = 1 })
+			Compkiller:_Animation(UserText,     _tOut, { TextTransparency = 1 })
+			Compkiller:_Animation(ExpireText,   _tOut, { TextTransparency = 1 })
+			if WindowArgs._PremiumBadge then
+				Compkiller:_Animation(WindowArgs._PremiumBadge, _tOut, { TextTransparency = 1 })
+			end
 
-			-- Layer 3: main frame collapses — Quint In snap, then hide
-			task.delay(0.10, function()
-				Compkiller:_Animation(MainFrame,
-					TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
-					{ BackgroundTransparency = 1 })
-				task.delay(0.30, function()
-					MainFrame.Visible = false
-				end)
+			-- Frame shrinks slightly downward and fades — "drop away" feel
+			Compkiller:_Animation(MainFrame,
+				TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+					BackgroundTransparency = 1,
+					Size = UDim2.new(
+						Config.Scale.X.Scale, Config.Scale.X.Offset,
+						Config.Scale.Y.Scale, Config.Scale.Y.Offset - 10),
+					Position = UDim2.new(
+						MainFrame.Position.X.Scale, MainFrame.Position.X.Offset,
+						MainFrame.Position.Y.Scale, MainFrame.Position.Y.Offset + 6)
+				})
+			task.delay(0.23, function()
+				MainFrame.Visible = false
+				-- Reset position so next open starts clean
+				MainFrame.Size     = Config.Scale
+				MainFrame.Position = UDim2.new(
+					MainFrame.Position.X.Scale, MainFrame.Position.X.Offset,
+					MainFrame.Position.Y.Scale, MainFrame.Position.Y.Offset - 6)
 			end)
 		end
 	end);
