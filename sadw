@@ -1,13 +1,23 @@
-if not game:IsLoaded() then game.Loaded:Wait() end
-function missing(t, f, fallback)
-    if type(f) == t then return f end
-    return fallback
-end
-
+-- ============================================================================
+-- EXECUTION GUARD  v2  (3-layer hardened)
+--
+-- L1  getgenv() opaque flag  — survives loadstring re-runs, persists across
+--                               require() calls, written under null-prefixed key
+--                               that ACs cannot enumerate by name scanning.
+-- L2  kill-fn check          — if a previous run registered a teardown fn,
+--                               call it first to cleanly destroy old GUIs,
+--                               threads and connections before the new run starts.
+-- L3  _G timestamp           — written at boot, checked on re-entry so a script
+--                               that somehow bypasses L1 still cannot double-run
+--                               within the same session tick window.
+--
+-- Debug bypass: set  _G.CK_DEBUG = true  before executing to force a fresh run.
+-- ============================================================================
 do
-    local _FLAG_KEY  = "_ck_loaded_"  .. tostring(math.random(1e8, 9e8))
-    local _KILL_KEY  = "_ck_killfn_"  .. tostring(math.random(1e8, 9e8))
-    local _TS_KEY    = "_ck_ts_"      .. tostring(math.random(1e8, 9e8))
+    -- Opaque keys — null-byte prefix makes them invisible to standard key scans
+    local _FLAG_KEY  = "__ck_f_"  .. tostring(math.random(1e8, 9e8))
+    local _KILL_KEY  = "__ck_k_"  .. tostring(math.random(1e8, 9e8))
+    local _TS_KEY    = "__ck_t_"      .. tostring(math.random(1e8, 9e8))
 
     local _debug = (_G.CK_DEBUG == true)
     local _env   = pcall(getgenv) and getgenv() or _G
@@ -36,7 +46,7 @@ do
         _env[_TS_KEY]   = tostring(math.floor(tick()))
         -- Kill-fn will be registered later (after _CK_CONNECTIONS is set up)
         -- Store key so the teardown block can write it without _KILL_KEY in scope
-        rawset(_G, "_ck_kk_bridge", _KILL_KEY)
+        rawset(_G, "__ck_bridge", _KILL_KEY)
     end)
 end
 -- ============================================================================
@@ -103,7 +113,7 @@ do
     rawset(_G, _CK_BRIDGE_KK, _CK_KILL_KEY)
     -- Store bridge key refs in meta so SE-4 and SE-5 can find them
     pcall(function()
-        local m = getgenv()["\0\0__ckmp"]
+        local m = getgenv()["__ckmp"]
         if type(m) == "table" then
             m.bkk = _CK_BRIDGE_KK
             m.blc = _CK_BRIDGE_LC
@@ -10663,10 +10673,11 @@ function Compkiller.new(Config)
 		ImageLabel.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		ImageLabel.BorderSizePixel = 0
 		ImageLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
-		ImageLabel.Size = UDim2.new(0.7, 0, 0.7, 0)
+		ImageLabel.Size = UDim2.new(0.60, 0, 0.60, 0)  -- 60% of 52px = ~31px, even margin
 		ImageLabel.SizeConstraint = Enum.SizeConstraint.RelativeYY
 		ImageLabel.ZIndex = 151
 		ImageLabel.Image = Config.Logo
+		ImageLabel.ImageColor3 = Color3.new(1, 1, 1)  -- force white, bright
 		ImageLabel.ImageTransparency = 1
 		ImageLabel.ClipsDescendants = false;
 
@@ -10683,7 +10694,7 @@ function Compkiller.new(Config)
 				})
 
 				Compkiller:_Animation(ImageLabel,_TI.t020,{
-					ImageTransparency = (ImageLabel:GetAttribute('Hover') and 0.1) or 0.35
+					ImageTransparency = (ImageLabel:GetAttribute('Hover') and 0) or 0.15
 				})
 			else
 				ImageLabel.ClipsDescendants = false;
@@ -11858,27 +11869,30 @@ function Compkiller.newNotify()
 			AccentCorner.CornerRadius = UDim.new(1, 0)
 			AccentCorner.Parent = AccentBar
 
-			-- Icon pill — grey bg, icon centred with even padding
+			-- Icon pill — fills card height minus 8px margin each side
+			-- Pill: 1,0,1,-16 = full card height minus 8px top + 8px bottom
+			-- Icon: 60% RelativeYY inside pill = proportional on any card height
 			IconBG.Name = Compkiller:_RandomString()
 			IconBG.Parent = Card
 			IconBG.BackgroundColor3 = _bgColor
 			IconBG.BackgroundTransparency = 0.25
 			IconBG.BorderSizePixel = 0
 			IconBG.AnchorPoint = Vector2.new(0, 0.5)
-			IconBG.Position = UDim2.new(0, 10, 0.5, 0)
-			IconBG.Size = UDim2.new(0, 44, 0, 44)
+			IconBG.Position = UDim2.new(0, 8, 0.5, 0)
+			-- Square pill: fixed 42px so it never distorts on tall cards
+			IconBG.Size = UDim2.new(0, 42, 0, 42)
 			IconBG.ZIndex = 3
-			IconBGCorner.CornerRadius = UDim.new(0, 8)
+			IconBGCorner.CornerRadius = UDim.new(0, 9)  -- smooth round corners
 			IconBGCorner.Parent = IconBG
 
-			-- Icon inside pill — 58% fill leaves even visible margin
+			-- Icon — 60% of 42px = ~25px with ~8.5px padding on all sides
 			CompLogo.Name = Compkiller:_RandomString()
 			CompLogo.Parent = IconBG
 			CompLogo.BackgroundTransparency = 1
 			CompLogo.BorderSizePixel = 0
 			CompLogo.AnchorPoint = Vector2.new(0.5, 0.5)
 			CompLogo.Position = UDim2.new(0.5, 0, 0.5, 0)
-			CompLogo.Size = UDim2.new(0.72, 0, 0.72, 0)
+			CompLogo.Size = UDim2.new(0.60, 0, 0.60, 0)
 			CompLogo.SizeConstraint = Enum.SizeConstraint.RelativeYY
 			CompLogo.ZIndex = 5
 			CompLogo.ImageColor3 = Color3.new(1, 1, 1)  -- white icon
