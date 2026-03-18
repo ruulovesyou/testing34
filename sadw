@@ -5243,7 +5243,12 @@ end;
 
 function Compkiller:_LoadOption(Value , TabSignal)
 	local Args = {};
-	local Window = Compkiller:_GetWindowFromElement(Value.Root);
+	local function _resolveWindow(el)
+		local w = Compkiller:_GetWindowFromElement(el)
+		if w then return w end
+		return Compkiller.Windows and Compkiller.Windows[1]
+	end
+	local Window = _resolveWindow(Value.Root);
 	local Tween = _TI.t035q;
 
 	function Args:AddKeybind(Config)
@@ -5328,7 +5333,14 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		local Helper = Value:AddLink("Helper" , Config.Default);
 		local Button: ImageButton = Helper.InfoButton;
 
-		Helper.Text.Parent = Window;
+		-- Parent tooltip to window — resolve lazily in case tab was hidden at creation
+		local function _getHelperWin()
+			local w = Window or _resolveWindow(Value.Root)
+			Window = w  -- cache for future calls
+			return w
+		end
+		local _hw = _getHelperWin()
+		if _hw then Helper.Text.Parent = _hw end
 
 		Helper.UIStroke:GetPropertyChangedSignal('Transparency'):Connect(function()
 			if Helper.UIStroke.Transparency > 0.9 then
@@ -5380,6 +5392,9 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 		local Hold = function()
 			local scale = Update()
+			-- Ensure tooltip is parented to the window (may have been nil at creation)
+			local _hw = _getHelperWin()
+			if _hw and Helper.Text.Parent ~= _hw then Helper.Text.Parent = _hw end
 
 			if not Helper.Text.Visible then
 				Helper.Text.Position = UDim2.fromOffset(Button.AbsolutePosition.X,Button.AbsolutePosition.Y + (45))
@@ -5538,7 +5553,12 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			if bool then
 				Signal:Fire(true);
-				ExtractElement.Visible = true;  -- always show regardless of anim state
+				-- Re-resolve window now that the tab is visible
+				local _w = _getOptWin()
+				if _w and ExtractElement.Parent ~= _w then
+					ExtractElement.Parent = _w
+				end
+				ExtractElement.Visible = true
 
 				if not IsSameValue then
 					ExtractElement.Position = DropPosition
@@ -5586,17 +5606,15 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		ExtractElement.BackgroundTransparency = 1
 		ExtractElement.Visible = false
 		ExtractElement.ClipsDescendants = true
-		-- Parent directly to Window — the transparency toggle shows/hides it
-		local _optWindow = Compkiller:_GetWindowFromElement(Element)
-		ExtractElement.Parent = _optWindow or game:GetService("CoreGui")
-
-		-- Visibility: track transparency to set Visible flag
-		Compkiller:_AddPropertyEvent(ExtractElement, function(bool)
-			ExtractElement.Visible = bool
-			if _optWindow then
-				Compkiller:_SetNilP(ExtractElement, bool and _optWindow or nil)
-			end
-		end)
+		-- Resolve window lazily — element may be in NilFolder at creation time
+		local function _getOptWin()
+			local w = Compkiller:_GetWindowFromElement(Element)
+			if w then return w end
+			return Compkiller.Windows and Compkiller.Windows[1]
+		end
+		-- Parent to Windows[1] (always valid after Compkiller.new())
+		local _optWindow = _getOptWin()
+		ExtractElement.Parent = _optWindow
 
 		table.insert(Compkiller.Elements.BlockBackground,{
 			Element = ExtractElement,
@@ -5650,7 +5668,12 @@ function Compkiller:_LoadOption(Value , TabSignal)
 end;
 
 function Compkiller:_LoadDropdown(BaseParent , Callback)
-	local Window = Compkiller:_GetWindowFromElement(BaseParent);
+	local function _resolveWindow(el)
+		local w = Compkiller:_GetWindowFromElement(el)
+		if w then return w end
+		return Compkiller.Windows and Compkiller.Windows[1]
+	end
+	local Window = _resolveWindow(BaseParent);
 
 	local BaseZ_Index = BaseParent.ZIndex + (math.random(1,15) * 100);
 
@@ -5746,6 +5769,12 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 		end;
 
 		if bool then
+			-- Re-resolve window now that the user opened the dropdown (tab is visible)
+			local _dw = _resolveWindow(BaseParent)
+			if _dw and DropdownWindow.Parent ~= _dw then
+				DropdownWindow.Parent = _dw
+			end
+			DropdownWindow.Visible = true
 			if not IsSame then
 				DropdownWindow.Position = DropPosition;
 			end;
