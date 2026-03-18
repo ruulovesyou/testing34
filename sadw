@@ -1,19 +1,22 @@
+-- ============================================================================
+-- EXECUTION GUARD
+-- ============================================================================
 if not game:IsLoaded() then
-    game.Loaded:Wait()
+	game.Loaded:Wait()
 end
-
 
 if _G.CK_DEBUG then
-    print("[CK] Debug mode → allowing reload")
+	print("[CK] Debug mode → allowing reload")
 else
-    if _G.CK_LOADED then
-        print("[CK] Already loaded — exiting")
-        return
-    end
+	if _G.CK_LOADED then
+		print("[CK] Already loaded — exiting")
+		return
+	end
 end
+
 function missing(t, f, fallback)
-    if type(f) == t then return f end
-    return fallback
+	if type(f) == t then return f end
+	return fallback
 end
 
 _G.CK_LOADED = true
@@ -23,7 +26,7 @@ if getgenv().CK_LOADED.__ran then return end
 getgenv().CK_LOADED.__ran = true
 
 -- ============================================================================
--- EXECUTION GUARD  v2  (3-layer hardened)
+-- INTERNAL GUARD  (Shield Layer 0)
 --
 -- L1  getgenv() opaque flag  — survives loadstring re-runs, persists across
 --                               require() calls, written under null-prefixed key
@@ -10781,60 +10784,69 @@ function Compkiller.new(Config)
 		ImageLabel.ClipsDescendants = false;
 
 
-		-- Make icon bigger and always white
-		ImageLabel.Size = UDim2.new(0.62, 0, 0.62, 0)
+		-- Icon: white, fills 62% of circle
+		ImageLabel.Size        = UDim2.new(0.62, 0, 0.62, 0)
 		ImageLabel.ImageColor3 = Color3.new(1, 1, 1)
+
+		-- State tracker — prevents animation from restarting on every poll tick
+		local _closeUIState = nil  -- nil = never shown yet
 
 		local ToggleCloseUI = function(v)
 			ImageLabel.Image = Config.Logo
+			-- Guard: skip if state unchanged (polling calls this every 0.15s)
+			if _closeUIState == v then return end
+			_closeUIState = v
 
 			if v then
 				ImageLabel.ClipsDescendants = true
-
 				if Compkiller.AnimationsEnabled then
-					-- ── Cool entrance: scale up from 0 with spring overshoot ─────
-					CloseWindow.Size = UDim2.new(0, 0, 0, 0)
-					CloseWindow.BackgroundTransparency = 0
-					-- Step 1: grow to slightly over target (spring feel)
-					Compkiller:_Animation(CloseWindow, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
-						Size = UDim2.new(0, 58, 0, 58),
-						BackgroundTransparency = 0.05
+					-- OPEN button: pop in with Back spring + icon rotates in
+					CloseWindow.Size                 = UDim2.new(0, 32, 0, 32)
+					CloseWindow.BackgroundTransparency = 0.4
+					ImageLabel.ImageTransparency     = 1
+					ImageLabel.Rotation              = -90
+					-- Circle expands with spring overshoot
+					Compkiller:_Animation(CloseWindow,
+						TweenInfo.new(0.40, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+							Size                 = UDim2.new(0, 54, 0, 54),
+							BackgroundTransparency = 0.05
 					})
-					-- Step 2: icon fades + spins in
-					ImageLabel.Rotation = -45
-					ImageLabel.ImageTransparency = 1
-					Compkiller:_Animation(ImageLabel, TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
-						ImageTransparency = 0,
-						Rotation = 0
+					-- Icon spins in and fades
+					Compkiller:_Animation(ImageLabel,
+						TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {
+							ImageTransparency = 0,
+							Rotation          = 0
 					})
 				else
-					-- Animations off: instant show
-					CloseWindow.Size = UDim2.new(0, 54, 0, 54)
+					CloseWindow.Size                 = UDim2.new(0, 54, 0, 54)
 					CloseWindow.BackgroundTransparency = 0.05
-					ImageLabel.ImageTransparency = 0
-					ImageLabel.Rotation = 0
+					ImageLabel.ImageTransparency     = 0
+					ImageLabel.Rotation              = 0
 				end
 			else
 				ImageLabel.ClipsDescendants = false
-
 				if Compkiller.AnimationsEnabled then
-					-- ── Cool exit: icon spins out then circle shrinks ────────────
-					Compkiller:_Animation(ImageLabel, TweenInfo.new(0.2, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
-						ImageTransparency = 1,
-						Rotation = 45
+					-- HIDE button: icon rotates out, circle shrinks away
+					Compkiller:_Animation(ImageLabel,
+						TweenInfo.new(0.18, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+							ImageTransparency = 1,
+							Rotation          = 90
 					})
-					task.delay(0.15, function()
-						Compkiller:_Animation(CloseWindow, TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
-							Size = UDim2.new(0, 0, 0, 0),
-							BackgroundTransparency = 1
+					task.delay(0.12, function()
+						Compkiller:_Animation(CloseWindow,
+							TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {
+								Size                 = UDim2.new(0, 32, 0, 32),
+								BackgroundTransparency = 1
 						})
+						task.delay(0.24, function()
+							CloseWindow.Size = UDim2.new(0, 0, 0, 0)
+						end)
 					end)
 				else
-					-- Animations off: instant hide
-					CloseWindow.Size = UDim2.new(0, 0, 0, 0)
+					CloseWindow.Size                 = UDim2.new(0, 0, 0, 0)
 					CloseWindow.BackgroundTransparency = 1
-					ImageLabel.ImageTransparency = 1
-					ImageLabel.Rotation = 0
+					ImageLabel.ImageTransparency     = 1
+					ImageLabel.Rotation              = 0
 				end
 			end
 		end;
@@ -11084,28 +11096,16 @@ function Compkiller.new(Config)
 		table.insert(WindowArgs.THREADS,_TrackThread(task.spawn(function()
 			while true do task.wait(0.15)
 				if Compkiller:_IsMobile() then
-					ToggleCloseUI(true);
-
-					if WindowArgs.IsOpen then
-						Compkiller:_Animation(ImageLabel,_TI.t020,{
-							ImageTransparency = 0.35
-						});
-
-						ImageLabel:GetAttribute("Hover",false);
-					else
-						ImageLabel:GetAttribute("Hover",true);
-
-						Compkiller:_Animation(ImageLabel,_TI.t020,{
-							ImageTransparency = 0.1
-						});
-					end;
+					-- Mobile: button always visible, icon opacity reflects open state
+					ToggleCloseUI(true)
+					Compkiller:_Animation(ImageLabel,_TI.t020,{
+						ImageTransparency = WindowArgs.IsOpen and 0.35 or 0.1
+					})
 				else
-					if not WindowArgs.IsOpen then
-						ToggleCloseUI(true);
-					else
-						ToggleCloseUI(false);
-					end
-				end;
+					-- Desktop: button shows when UI is CLOSED (keybind reminder)
+					--          button hides when UI is OPEN
+					ToggleCloseUI(not WindowArgs.IsOpen)
+				end
 			end
 		end)));
 
