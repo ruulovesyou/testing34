@@ -2803,8 +2803,10 @@ local _TI = {
 }
 
 function Compkiller:_Animation(Self , Info , Property)
-	-- Global animation kill-switch. Set Compkiller.AnimationsEnabled = false to skip
-	-- all tweens and write properties instantly. Useful for low-end devices / FPS boost.
+	-- ── Master animation gate ─────────────────────────────────────────────────
+	-- animation=false OR PerformanceMode=true → instant property set, no tween.
+	-- This single check controls ALL UI tweens: window, tabs, toggles, buttons,
+	-- dropdowns, sections, loader, notification — everything.
 	if not Compkiller.AnimationsEnabled or Compkiller.PerformanceMode then
 		for prop, val in pairs(Property) do
 			pcall(function() Self[prop] = val end)
@@ -5556,24 +5558,9 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			end;
 		end;
 
-		Compkiller:_AddPropertyEvent(ExtractElement,function(bool)
-			ExtractElement.Visible = bool;
-
-			if Compkiller.PerformanceMode then
-				if ExtractElement.Visible then
-					Compkiller:_SetNilP(ExtractElement , Window);
-				else
-					Compkiller:_SetNilP(ExtractElement , nil);
-				end;
-			else
-				Compkiller:_SetNilP(ExtractElement , Window);
-			end;
-		end);
-
 		Compkiller:_AddDragBlacklist(ExtractElement);
 
 		ExtractElement.Name = Compkiller:_RandomString()
-		ExtractElement.Parent = Window
 		ExtractElement.BackgroundColor3 = Compkiller.Colors.BlockBackground
 		ExtractElement.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		ExtractElement.BorderSizePixel = 0
@@ -5581,8 +5568,20 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		ExtractElement.Position = UDim2.new(123, 0, 123, 0)
 		ExtractElement.Size = UDim2.new(0, 225, 0, 35)
 		ExtractElement.ZIndex = BaseZ_Index
+		ExtractElement.BackgroundTransparency = 1
 		ExtractElement.Visible = false
 		ExtractElement.ClipsDescendants = true
+		-- Parent directly to Window — the transparency toggle shows/hides it
+		local _optWindow = Compkiller:_GetWindowFromElement(Element)
+		ExtractElement.Parent = _optWindow or game:GetService("CoreGui")
+
+		-- Visibility: track transparency to set Visible flag
+		Compkiller:_AddPropertyEvent(ExtractElement, function(bool)
+			ExtractElement.Visible = bool
+			if _optWindow then
+				Compkiller:_SetNilP(ExtractElement, bool and _optWindow or nil)
+			end
+		end)
 
 		table.insert(Compkiller.Elements.BlockBackground,{
 			Element = ExtractElement,
@@ -11751,6 +11750,7 @@ function Compkiller:Loader(IconId, Duration)
 	local _spinThread = nil
 
 	local function _startSpin()
+		if not Compkiller.AnimationsEnabled then return end  -- respect master switch
 		_spinActive = true
 		_spinThread = _ckSpawn(function()
 			local STEP       = 0.016
@@ -11888,10 +11888,14 @@ function Compkiller.newNotify()
 
 	-- ── Shared spin helper ─────────────────────────────────────────────────
 	local function _makeSpin(img)
+		-- Spin respects animation master switch
+		if not Compkiller.AnimationsEnabled then
+			return function() end  -- no-op stopper
+		end
 		local active = true
 		local t = _ckSpawn(function()
 			local rot = 0
-			while active and img and img.Parent do
+			while active and img and img.Parent and Compkiller.AnimationsEnabled do
 				rot = (rot + 4) % 360
 				img.Rotation = rot
 				task.wait(0.02)
@@ -14289,38 +14293,50 @@ Compkiller.MasterControl = function(...)
 		if cfg.sleepMode        ~= nil  then setSleepMode(cfg.sleepMode)                                     end
 		if cfg.fpsCap           ~= nil  then fpsCap(cfg.fpsCap)                                              end
 
-		-- ── ANIMATION API ────────────────────────────────────────────────────────
+		-- ══════════════════════════════════════════════════════════════════════
+		-- GUI PERFORMANCE & ANIMATION — MASTER CONTROL
 		--
-		--  animation       = bool    Master on/off for ALL UI tweens.
-		--                            false → every Compkiller:_Animation() call
-		--                            instantly sets properties, zero TweenService.
-		--                            Affects: window, tabs, toggles, buttons,
-		--                                     dropdowns, notifications, loader.
+		--  animation       = bool   ★ MASTER SWITCH for every tween in the UI.
+		--                           false = all tweens (window, tabs, toggles,
+		--                                   buttons, dropdowns, sections,
+		--                                   Loader spin, Notifier spin & slide)
+		--                                   become instant property sets.
+		--                           Compkiller:_Animation(), _makeSpin(),
+		--                           _startSpin() all check this first.
 		--
-		--  optimizeMode    = bool    Performance mode — disables tweens AND reduces
-		--                            rendering overhead (blur, extra GUI layers).
-		--                            Designed for very low-end devices.
-		--                            Use animation=false to only kill tweens.
+		--  optimize        = bool   ★ MASTER PERFORMANCE switch.
+		--                           true  = PerformanceMode ON (kills tweens)
+		--                                 + FPS monitor thread ON
+		--                                 + FPS-adaptive durations ON
+		--                                 + memory sweeper ON
+		--                           false = normal mode (no monitoring overhead).
+		--                           Designed for low-end / exploit executor devices.
 		--
-		--  smartAnimations = bool    FPS-adaptive tween duration scaling.
-		--                            At high FPS → full duration.
-		--                            At low FPS  → shorter tweens to avoid jank.
-		--                            Requires advancedOpt=true to take effect.
-		--
-		--  advancedOpt     = bool    Starts the background FPS monitor thread
-		--                            that feeds smartAnimations + memory sweeper.
-		--                            Safe to leave enabled; negligible overhead.
-		--
-		--  pauseAnimations = bool    Temporarily suspend tweens without disabling.
-		--                            true  → pause (sets in progress instantly).
-		--                            false → resume from paused state.
-		--                            Does NOT change the animation master switch.
-		-- ─────────────────────────────────────────────────────────────────────────
+		--  pauseAnimations = bool   Temporarily freeze all tweens mid-session.
+		--                           true  → freeze (instant sets until resumed).
+		--                           false → unfreeze. Does not touch the master.
+		-- ══════════════════════════════════════════════════════════════════════
+		-- animation master — propagates to Loader, Notifier, and all UI tweens
 		if cfg.animation ~= nil then
 			Compkiller.AnimationsEnabled = (cfg.animation ~= false)
-			if not Compkiller.AnimationsEnabled then pauseAllAnimations() else resumeAllAnimations() end
+			if not Compkiller.AnimationsEnabled then
+				pauseAllAnimations()
+				Compkiller.PerformanceMode = false  -- don't double-kill; anim flag is enough
+			else
+				resumeAllAnimations()
+			end
 		end
-		if cfg.optimizeMode ~= nil then optimizeMode(cfg.optimizeMode) end
+		-- optimize: single key replaces optimizeMode + advancedOpt + smartAnimations
+		if cfg.optimize ~= nil then
+			local on = (cfg.optimize == true)
+			optimizeMode(on)              -- sets PerformanceMode (kills tweens at _Animation level)
+			setSmartAnimations(on)        -- FPS-adaptive durations
+			enableAdvancedOptimizations(on) -- FPS monitor + memory sweep thread
+		end
+		-- legacy keys still honoured for backwards compatibility
+		if cfg.optimizeMode    ~= nil then optimizeMode(cfg.optimizeMode) end
+		if cfg.smartAnimations ~= nil then setSmartAnimations(cfg.smartAnimations) end
+		if cfg.advancedOpt     ~= nil then enableAdvancedOptimizations(cfg.advancedOpt) end
 		if cfg.pauseAnimations == true  then pauseAllAnimations()  end
 		if cfg.pauseAnimations == false then resumeAllAnimations() end
 		if cfg.forceGC          == true  then forceGC()                                                      end
