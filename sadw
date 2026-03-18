@@ -2810,6 +2810,11 @@ function Compkiller:_Animation(Self , Info , Property)
 	if not Compkiller.AnimationsEnabled or Compkiller.PerformanceMode then
 		for prop, val in pairs(Property) do
 			pcall(function() Self[prop] = val end)
+			-- Trigger visibility callbacks that _GetPropertyChangedSignal would miss
+			if prop == "BackgroundTransparency" and Compkiller._PropertyCallbacks then
+				local cb = Compkiller._PropertyCallbacks[Self]
+				if cb then pcall(cb, val) end
+			end
 		end
 		return (_OPT and _OPT._DummyTween) or nil
 	end
@@ -5226,6 +5231,11 @@ function Compkiller:_KeybindHandler(Parent , ObjectType , ElementAPI , Signal , 
 end;
 
 function Compkiller:_AddPropertyEvent(Target , Callback)
+	-- Store callback so _Animation can call it when instant-setting
+	if not Compkiller._PropertyCallbacks then Compkiller._PropertyCallbacks = {} end
+	Compkiller._PropertyCallbacks[Target] = function(trans)
+		Callback(trans <= 0.9)
+	end
 	Target:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
 		Callback(Target.BackgroundTransparency <= 0.9)
 	end)
@@ -5528,6 +5538,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			if bool then
 				Signal:Fire(true);
+				ExtractElement.Visible = true;  -- always show regardless of anim state
 
 				if not IsSameValue then
 					ExtractElement.Position = DropPosition
@@ -5555,6 +5566,10 @@ function Compkiller:_LoadOption(Value , TabSignal)
 				Compkiller:_Animation(UIStroke , Tween , {
 					Transparency = 1
 				});
+
+				task.delay(Tween.Time + 0.05, function()
+					if not Toggl then ExtractElement.Visible = false end
+				end);
 			end;
 		end;
 
@@ -11404,6 +11419,18 @@ function Compkiller.new(Config)
 	end);
 
 	return WindowArgs;
+end;
+
+function Compkiller:SetAllText(size)
+	for _, v in next, Compkiller.Elements.SwitchColor or {} do
+		if v.Element and v.Property then
+			pcall(function()
+				if v.Element:IsA("TextLabel") or v.Element:IsA("TextButton") or v.Element:IsA("TextBox") then
+					v.Element.TextSize = size
+				end
+			end)
+		end
+	end
 end;
 
 function Compkiller:GetDate(Time)
