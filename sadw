@@ -13513,48 +13513,35 @@ Compkiller.MasterControl = function(...)
 		end;
 	end;
 
-	local function loader(Config, Duration)
+	local function loader(IconId, Duration)
 		-- ── API ──────────────────────────────────────────────────────────────
-		-- Legacy:  loader("rbxassetid://...", 4.5)
-		-- Table:   loader({ ... }):yield()
+		-- loader("rbxassetid://...", 4.5)           legacy positional form
+		-- loader({ Icon, Duration, SpinIcon, SpinSpeed, SpinEasing })
 		--
-		-- Icon            = string    rbxassetid or lucide name     (default: Logo)
-		-- Duration        = number    seconds before auto-dismiss   (default: 4.5)
-		-- BackgroundColor = Color3    overlay fill                  (default: black)
-		-- VignetteColor   = Color3    glow ring tint                (default: Highlight)
-		-- IconColor       = Color3    icon tint                     (default: original)
-		-- IconSize        = number    final icon size in px         (default: 200)
-		--
-		-- SpinIcon        = bool      spin the icon while loading   (default: false)
-		-- SpinSpeed       = number    degrees per second            (default: 120)
-		--                             higher = faster  (30=very slow, 360=very fast)
-		-- SpinEasing      = Enum.EasingStyle  easing per step       (default: Linear)
-		--                             Linear   = constant smooth rotation
-		--                             Sine     = gentle breathing pulse feel
-		--                             Quint    = ease in/out per step (chunky)
+		-- Icon        = string            rbxassetid or lucide name  (default: Logo)
+		-- Duration    = number            seconds before auto-dismiss (default: 4.5)
+		-- SpinIcon    = bool              rotate icon while loading   (default: false)
+		-- SpinSpeed   = number            degrees per second          (default: 120)
+		--              30=very slow | 90=gentle | 120=default | 240=fast | 360=1rev/s
+		-- SpinEasing  = Enum.EasingStyle  easing per step             (default: Linear)
+		--              Linear=constant smooth | Sine=pulse | Quint=chunky tick
 		-- ──────────────────────────────────────────────────────────────────────
 
 		local cfg = {}
-		if type(Config) == "string" then
-			cfg.Icon     = Config
+		if type(IconId) == "string" then
+			cfg.Icon     = IconId
 			cfg.Duration = Duration
-		elseif type(Config) == "table" then
-			cfg = Config
+		elseif type(IconId) == "table" then
+			cfg = IconId
 		else
 			cfg = {}
 		end
 
-		local _icon          = cfg.Icon            or Compkiller.Logo
-		local _duration      = cfg.Duration        or Duration or 4.5
-		local _bgColor       = cfg.BackgroundColor or Color3.fromRGB(0, 0, 0)
-		local _vignetteColor = cfg.VignetteColor   or Compkiller.Colors.Highlight
-		local _iconColor     = cfg.IconColor
-		local _iconSize      = cfg.IconSize        or 200
-		local _spin          = cfg.SpinIcon        or false
-		-- SpinSpeed: degrees/sec. step interval = 0.016s (≈60fps).
-		-- degreesPerStep = SpinSpeed / 60
-		local _spinSpeed     = cfg.SpinSpeed       or 120   -- 120°/s default
-		local _spinEasing    = cfg.SpinEasing      or Enum.EasingStyle.Linear
+		local _icon       = cfg.Icon      or Compkiller.Logo
+		local _duration   = cfg.Duration  or Duration or 4.5
+		local _spin       = cfg.SpinIcon  or false
+		local _spinSpeed  = cfg.SpinSpeed or 120
+		local _spinEasing = cfg.SpinEasing or Enum.EasingStyle.Linear
 
 		local CompKiller = Instance.new("ScreenGui")
 		CompKiller.Name = Compkiller:_RandomString()
@@ -13564,15 +13551,16 @@ Compkiller.MasterControl = function(...)
 		CompKiller.IgnoreGuiInset = true
 		CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global
 
-		local Loader   = Instance.new("Frame")
-		local Icon     = Instance.new("ImageLabel")
+		local Loader = Instance.new("Frame")
+		local Icon = Instance.new("ImageLabel")
 		local Vignette = Instance.new("ImageLabel")
 
 		Loader.Name = Compkiller:_RandomString()
 		Loader.Parent = CompKiller
 		Loader.AnchorPoint = Vector2.new(0.5, 0.5)
-		Loader.BackgroundColor3 = _bgColor
+		Loader.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 		Loader.BackgroundTransparency = 1
+		Loader.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		Loader.BorderSizePixel = 0
 		Loader.Position = UDim2.new(0.5, 0, 0.5, 0)
 		Loader.Size = UDim2.new(1, 0, 1, 0)
@@ -13581,44 +13569,41 @@ Compkiller.MasterControl = function(...)
 		Icon.Parent = Loader
 		Icon.AnchorPoint = Vector2.new(0.5, 0.5)
 		Icon.BackgroundTransparency = 1.000
+		Icon.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		Icon.BorderSizePixel = 0
 		Icon.Position = UDim2.new(0.5, 0, 0.5, 0)
 		Icon.Size = UDim2.new(0, 750, 0, 750)
 		Icon.ZIndex = 100
 		Icon.Image = _icon
 		Icon.ImageTransparency = 1
-		if _iconColor then Icon.ImageColor3 = _iconColor end
 
 		Vignette.Name = Compkiller:_RandomString()
 		Vignette.Parent = Loader
 		Vignette.BackgroundTransparency = 1.000
+		Vignette.BorderColor3 = Color3.fromRGB(27, 42, 53)
 		Vignette.BorderSizePixel = 0
 		Vignette.Size = UDim2.new(1, 0, 1, 0)
 		Vignette.Image = cacheImage("rbxassetid://18720640102")
-		Vignette.ImageColor3 = _vignetteColor
+		Vignette.ImageColor3 = Compkiller.Colors.Highlight
 		Vignette.ImageTransparency = 1
 		Vignette.AnchorPoint = Vector2.new(0.5, 0.5)
 		Vignette.Position = UDim2.fromScale(0.5, 0.5)
 
 		-- ── Spin engine ───────────────────────────────────────────────────────
-		-- Uses TweenService for each step so SpinEasing applies per-step.
-		-- stepInterval: how often we fire a new tween step.
-		-- A shorter interval = more steps = smoother (at the cost of more tweens).
-		-- SpinSpeed controls how many degrees each step covers.
 		local _spinThread = nil
 		local _spinActive = false
 
 		local function _startSpin()
 			_spinActive = true
 			_spinThread = _ckSpawn(function()
-				local STEP_INTERVAL = 0.016   -- ~60fps tick
-				local degreesPerStep = _spinSpeed * STEP_INTERVAL
-				local stepTI = TweenInfo.new(STEP_INTERVAL, _spinEasing)
+				local STEP = 0.016
+				local degPerStep = _spinSpeed * STEP
+				local stepTI = TweenInfo.new(STEP, _spinEasing)
 				local rot = 0
 				while _spinActive and Icon and Icon.Parent do
-					rot = (rot + degreesPerStep) % 360
+					rot = (rot + degPerStep) % 360
 					Compkiller:_Animation(Icon, stepTI, { Rotation = rot })
-					task.wait(STEP_INTERVAL)
+					task.wait(STEP)
 				end
 			end)
 		end
@@ -13631,69 +13616,73 @@ Compkiller.MasterControl = function(...)
 			end
 		end
 
-		Compkiller:_Animation(Loader, TweenInfo.new(0.55, Enum.EasingStyle.Quint), {
+		Compkiller:_Animation(Loader,TweenInfo.new(0.55,Enum.EasingStyle.Quint),{
 			BackgroundTransparency = 0.5
-		})
+		});
 
-		local Event = Instance.new('BindableEvent')
+		local Event = Instance.new('BindableEvent');
 
-		task.delay(0.5, function()
-			Compkiller:_Animation(Icon, TweenInfo.new(0.75, Enum.EasingStyle.Quint), {
+		task.delay(0.5,function(...)
+			Compkiller:_Animation(Icon,TweenInfo.new(0.75,Enum.EasingStyle.Quint),{
 				ImageTransparency = 0.01,
-				Size = UDim2.new(0, _iconSize, 0, _iconSize)
-			})
+				Size = UDim2.new(0, 200, 0, 200)
+			});
 
-			-- Start spin once icon is visible
 			if _spin then
 				task.delay(0.75, _startSpin)
 			end
 
-			task.delay(0.25, function()
-				Compkiller:_Animation(Vignette, TweenInfo.new(5), {
+			task.delay(0.25,function(...)
+				Compkiller:_Animation(Vignette,TweenInfo.new(5),{
 					ImageTransparency = 0.2
-				})
+				});
 
 				task.wait(_duration)
 
-				-- Stop spin before exit animations
 				_stopSpin()
 
-				Compkiller:_Animation(Vignette, TweenInfo.new(3, Enum.EasingStyle.Quint, Enum.EasingDirection.InOut), {
+				Compkiller:_Animation(Vignette,TweenInfo.new(3,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
 					Size = UDim2.new(2, 0, 2, 0)
-				})
-				Compkiller:_Animation(Icon, TweenInfo.new(0.75, Enum.EasingStyle.Quint, Enum.EasingDirection.InOut), {
-					ImageTransparency = 1,
-				})
-				Compkiller:_Animation(Loader, TweenInfo.new(1.5, Enum.EasingStyle.Quint, Enum.EasingDirection.InOut), {
-					BackgroundTransparency = 1
-				})
+				});
 
-				task.delay(0.1, function()
-					Compkiller:_Animation(Vignette, _TI.t100, {
+				Compkiller:_Animation(Icon,TweenInfo.new(0.75,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
+					ImageTransparency = 1,
+				});
+
+				Compkiller:_Animation(Loader,TweenInfo.new(1.5,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
+					BackgroundTransparency = 1
+				});
+
+				task.delay(0.1,function(...)
+					Compkiller:_Animation(Vignette,_TI.t100,{
 						ImageTransparency = 1
-					})
+					});
+
 					task.wait(0.2)
-					task.delay(3, function() CompKiller:Destroy() end)
+
+					task.delay(3,function()
+						CompKiller:Destroy();
+					end)
 				end)
 
-				task.delay(0.6, function() Event:Fire() end)
+				task.delay(0.6,function()
+					Event:Fire();
+				end)
 			end)
-		end)
+		end);
 
 		return {
 			yield = function()
-				return Event.Event:Wait()
+				return Event.Event:Wait();
 			end,
-			-- Start / stop spin at runtime (e.g. pause while waiting for server)
 			StartSpin = function() if not _spinActive then _startSpin() end end,
 			StopSpin  = function() _stopSpin() end,
-			-- Change spin speed/easing while running
 			SetSpinSpeed = function(speed, easing)
 				_spinSpeed  = speed  or _spinSpeed
 				_spinEasing = easing or _spinEasing
 				if _spinActive then _stopSpin(); _startSpin() end
 			end,
-		}
+		};
 	end;
 
 	local function preloadIcons()
