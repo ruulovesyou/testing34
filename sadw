@@ -11761,7 +11761,7 @@ function Compkiller.newNotify()
 			local _hl       = Compkiller.Colors.Highlight
 			local _base     = (typeof(Notify.Color)       == "Color3" and Notify.Color) or _hl
 			local _barColor = (typeof(Notify.BarColor)    == "Color3" and Notify.BarColor)    or _base
-			local _bgColor  = (typeof(Notify.IconBGColor) == "Color3" and Notify.IconBGColor) or _base
+			local _bgColor  = (typeof(Notify.IconBGColor) == "Color3" and Notify.IconBGColor) or Compkiller.Colors.BlockColor
 			local _stColor  = (typeof(Notify.StrokeColor) == "Color3" and Notify.StrokeColor) or _base
 			-- keep accent as alias for icon tint (follows BarColor by default)
 			local accent    = _barColor
@@ -11843,12 +11843,14 @@ function Compkiller.newNotify()
 
 			-- Icon
 			CompLogo.Name = Compkiller:_RandomString()
-			CompLogo.Parent = Card
+			-- CompLogo parented to IconBG (see above)
 			CompLogo.BackgroundTransparency = 1
 			CompLogo.BorderSizePixel = 0
 			CompLogo.AnchorPoint = Vector2.new(0.5, 0.5)
-			CompLogo.Position = UDim2.new(0, 26, 0, 26)
-			CompLogo.Size = UDim2.new(0, 20, 0, 20)
+			CompLogo.Position = UDim2.new(0.5, 0, 0.5, 0)  -- centred inside IconBG
+			CompLogo.Size = UDim2.new(0.65, 0, 0.65, 0)    -- 65% of pill size
+			CompLogo.SizeConstraint = Enum.SizeConstraint.RelativeYY
+			CompLogo.Parent = IconBG  -- parent to pill so size is relative to it
 			CompLogo.ZIndex = 5
 			CompLogo.ImageColor3 = _barColor
 
