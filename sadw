@@ -7728,19 +7728,13 @@ function Compkiller.new(Config)
 	MainFrame.Size = Compkiller.Scale.Window
 	MainFrame.ZIndex = 4
 
-	MainFrame:GetPropertyChangedSignal('BackgroundTransparency'):Connect(function()
-		if MainFrame.BackgroundTransparency > 0.9 then
-			MainFrame.Visible = false;
-		else
-			MainFrame.Visible = true;
-		end;
-	end)
+	-- Visibility is controlled directly in WindowOpen:Connect
+	-- (BackgroundTransparency watcher removed — it fired during tweens
+	--  and hid the frame mid-animation, causing the open/close bug)
 
-	-- Start hidden to match IsOpen=false — first keybind press opens cleanly.
+	-- Start hidden: correct size ready, just invisible until first open.
 	MainFrame.BackgroundTransparency = 1
-	MainFrame.Size = UDim2.new(
-		math.max(Config.Scale.X.Scale-0.05,0), Config.Scale.X.Offset-10,
-		math.max(Config.Scale.Y.Scale-0.05,0), Config.Scale.Y.Offset-10)
+	MainFrame.Size = Config.Scale
 	MainFrame.Visible = false
 
 	UICorner.Parent = MainFrame
@@ -7999,89 +7993,93 @@ function Compkiller.new(Config)
 	local _TW_SNAP  = _TI.t010
 	WindowOpen:Connect(function(v)
 		if WindowArgs.PerformanceMode then
-			MainFrame.BackgroundTransparency = (v and 0) or 1;
-			return;	
-		end;
+			MainFrame.Visible = v
+			MainFrame.BackgroundTransparency = v and 0 or 1
+			return
+		end
 
 		if v then
-			-- ── OPEN: clean original timing ─────────────────────────────────
-			Compkiller:_Animation(MainFrame,TweenInfo.new(0.2),{
-				Size = Config.Scale
-			})
+			-- ── OPEN ─────────────────────────────────────────────────────────
+			-- Make visible immediately so tweens are actually seen
+			MainFrame.Visible = true
+			MainFrame.Size    = Config.Scale
+			MainFrame.BackgroundTransparency = 1
 
-			Compkiller:_Animation(TabButtonScrollingFrame,TweenInfo.new(0.35,Enum.EasingStyle.Quint),{
-				Position = UDim2.new(0.5, 0, 0.5, 0)
-			})
+			-- Sidebar starts off-screen right, flies in with spring
+			TabButtonScrollingFrame.Position = UDim2.new(1.5, 0, 0.5, 0)
 
-			Compkiller:_Animation(CompLogo,TweenInfo.new(0.2),{
-				ImageTransparency = 0
-			})
+			-- All header elements start transparent
+			CompLogo.ImageTransparency    = 1
+			WindowLabel.TextTransparency  = 1
+			UserProfile.ImageTransparency = 1
+			UserText.TextTransparency     = 1
+			ExpireText.TextTransparency   = 1
+			LineFrame1.BackgroundTransparency = 1
+			LineFrame1.Size = UDim2.new(0, 1, 1, 0)
 
-			Compkiller:_Animation(WindowLabel,TweenInfo.new(0.2),{
-				TextTransparency = 0
-			})
+			-- Step 1: frame fades in (0.22s)
+			Compkiller:_Animation(MainFrame,
+				TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+				{ BackgroundTransparency = 0 })
 
-			Compkiller:_Animation(UserProfile,TweenInfo.new(0.2),{
-				ImageTransparency = 0
-			})
+			-- Step 2: sidebar springs in (0.38s Back Out)
+			Compkiller:_Animation(TabButtonScrollingFrame,
+				TweenInfo.new(0.38, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+				{ Position = UDim2.new(0.5, 0, 0.5, 0) })
 
-			Compkiller:_Animation(UserText,TweenInfo.new(0.2),{
-				TextTransparency = 0
-			})
+			-- Step 3: accent line grows (0.35s Quint Out)
+			Compkiller:_Animation(LineFrame1,
+				TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
+				{ BackgroundTransparency = 0, Size = UDim2.new(0, 20, 1, 0) })
 
-			Compkiller:_Animation(ExpireText,TweenInfo.new(0.2),{
-				TextTransparency = 0.5
-			})
+			-- Step 4: TabFrame + header fade in (0.25s)
+			Compkiller:_Animation(TabFrame,
+				TweenInfo.new(0.25, Enum.EasingStyle.Quint),
+				{ BackgroundTransparency = TabFrameBaseTrans })
+			Compkiller:_Animation(CompLogo,    TweenInfo.new(0.25), { ImageTransparency = 0 })
+			Compkiller:_Animation(WindowLabel, TweenInfo.new(0.25), { TextTransparency = 0 })
+			Compkiller:_Animation(UserProfile, TweenInfo.new(0.25), { ImageTransparency = 0 })
+			Compkiller:_Animation(UserText,    TweenInfo.new(0.25), { TextTransparency = 0 })
+			Compkiller:_Animation(ExpireText,  TweenInfo.new(0.25), { TextTransparency = 0.5 })
 
 			if WindowArgs._PillActive and WindowArgs._PremiumBadge and TabHover:GetValue() then
-				Compkiller:_Animation(WindowArgs._PremiumBadge,TweenInfo.new(0.2),{ TextTransparency = 0 })
+				Compkiller:_Animation(WindowArgs._PremiumBadge, TweenInfo.new(0.25), { TextTransparency = 0 })
 			end
 
-			Compkiller:_Animation(MainFrame,TweenInfo.new(0.2),{
-				BackgroundTransparency = 0
-			})
-
-			Compkiller:_Animation(LineFrame1,TweenInfo.new(0.3),{
-				BackgroundTransparency = 0,
-				Size = UDim2.new(0, 20, 1, 0)
-			})
-
-			Compkiller:_Animation(TabFrame,TweenInfo.new(0.2),{
-				BackgroundTransparency = TabFrameBaseTrans
-			})
 		else
-			-- ── CLOSE: cool cascading collapse ──────────────────────────────
-			-- Step 1: content fades and sidebar sweeps away instantly
-			Compkiller:_Animation(TabButtonScrollingFrame,TweenInfo.new(0.25,Enum.EasingStyle.Quint,Enum.EasingDirection.In),{
-				Position = UDim2.new(1.5, 100, 0.5, 0)
-			})
+			-- ── CLOSE: 3-layer cascade ───────────────────────────────────────
 
-			Compkiller:_Animation(LineFrame1,TweenInfo.new(0.15),{
-				BackgroundTransparency = 1,
-				Size = UDim2.new(0, 1, 1, 0)
-			})
+			-- Layer 1 (instant): sidebar sweeps away + line shrinks
+			Compkiller:_Animation(TabButtonScrollingFrame,
+				TweenInfo.new(0.22, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+				{ Position = UDim2.new(1.5, 100, 0.5, 0) })
+			Compkiller:_Animation(LineFrame1,
+				TweenInfo.new(0.12, Enum.EasingStyle.Quint),
+				{ BackgroundTransparency = 1, Size = UDim2.new(0, 1, 1, 0) })
 
-			-- Step 2: header elements fade simultaneously
-			Compkiller:_Animation(CompLogo,TweenInfo.new(0.18),{ ImageTransparency = 1 })
-			Compkiller:_Animation(WindowLabel,TweenInfo.new(0.18),{ TextTransparency = 1 })
-			Compkiller:_Animation(UserProfile,TweenInfo.new(0.18),{ ImageTransparency = 1 })
-			Compkiller:_Animation(UserText,TweenInfo.new(0.18),{ TextTransparency = 1 })
-			Compkiller:_Animation(ExpireText,TweenInfo.new(0.18),{ TextTransparency = 1 })
+			-- Layer 2 (slight delay): header elements fade out
+			task.delay(0.05, function()
+				Compkiller:_Animation(CompLogo,    TweenInfo.new(0.18), { ImageTransparency = 1 })
+				Compkiller:_Animation(WindowLabel, TweenInfo.new(0.18), { TextTransparency = 1 })
+				Compkiller:_Animation(UserProfile, TweenInfo.new(0.18), { ImageTransparency = 1 })
+				Compkiller:_Animation(UserText,    TweenInfo.new(0.18), { TextTransparency = 1 })
+				Compkiller:_Animation(ExpireText,  TweenInfo.new(0.18), { TextTransparency = 1 })
+				if WindowArgs._PremiumBadge then
+					Compkiller:_Animation(WindowArgs._PremiumBadge, TweenInfo.new(0.18), { TextTransparency = 1 })
+				end
+				Compkiller:_Animation(TabFrame, TweenInfo.new(0.12), { BackgroundTransparency = 1 })
+			end)
 
-			if WindowArgs._PremiumBadge then
-				Compkiller:_Animation(WindowArgs._PremiumBadge,TweenInfo.new(0.18),{ TextTransparency = 1 })
-			end
-
-			Compkiller:_Animation(TabFrame,TweenInfo.new(0.1),{ BackgroundTransparency = 1 })
-
-			-- Step 3: frame collapses with Quint In — snappy professional feel
-			Compkiller:_Animation(MainFrame,TweenInfo.new(0.3,Enum.EasingStyle.Quint,Enum.EasingDirection.In),{
-				BackgroundTransparency = 1,
-				Size = UDim2.new(
-					Config.Scale.X.Scale, Config.Scale.X.Offset - 16,
-					Config.Scale.Y.Scale, Config.Scale.Y.Offset - 16)
-			})
-		end;
+			-- Layer 3: main frame collapses — Quint In snap, then hide
+			task.delay(0.10, function()
+				Compkiller:_Animation(MainFrame,
+					TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+					{ BackgroundTransparency = 1 })
+				task.delay(0.30, function()
+					MainFrame.Visible = false
+				end)
+			end)
+		end
 	end);
 
 	local _TW_TAB_HOVER = TweenInfo.new(0.45, Enum.EasingStyle.Quint)  -- Fix C2: cached
