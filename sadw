@@ -11735,24 +11735,36 @@ function Compkiller.newNotify()
 		_gui = Notification,
 		new  = function(Notify)
 			-- ── CONFIG ─────────────────────────────────────────────────────
-			-- Title      = string          bold header text
-			-- Content    = string          body — supports multi-line / paragraphs
-			-- Icon       = string          rbxassetid://... OR lucide icon name
-			-- SpinIcon   = bool            rotate the icon  (default false)
-			-- Color      = Color3          accent: bar, icon bg, stroke (default Highlight)
-			-- Duration   = number          seconds | math.huge = manual close only
+			-- Title       = string   bold header text
+			-- Content     = string   body — supports multi-line / paragraphs
+			-- Icon        = string   rbxassetid://... OR lucide icon name
+			-- SpinIcon    = bool     rotate the icon          (default false)
+			-- Duration    = number   seconds | math.huge = manual close only
+			-- Color       = Color3   sets ALL three below at once (shorthand)
+			-- BarColor    = Color3   left accent bar + progress fill color
+			-- IconBGColor = Color3   icon background pill color
+			-- StrokeColor = Color3   card border stroke color
 			-- ──────────────────────────────────────────────────────────────
 			Notify = Compkiller.__CONFIG(Notify, {
-				Icon     = Compkiller.Logo,
-				SpinIcon = false,
-				Color    = nil,
+				Icon        = Compkiller.Logo,
+				SpinIcon    = false,
+				Color       = nil,
+				BarColor    = nil,
+				IconBGColor = nil,
+				StrokeColor = nil,
 				Title    = "Notification",
 				Content  = "",
 				Duration = 3,
 			})
 
-			local accent = (typeof(Notify.Color) == "Color3" and Notify.Color)
-				or Compkiller.Colors.Highlight
+			-- Resolve colors: specific key > Color shorthand > theme Highlight
+			local _hl       = Compkiller.Colors.Highlight
+			local _base     = (typeof(Notify.Color)       == "Color3" and Notify.Color) or _hl
+			local _barColor = (typeof(Notify.BarColor)    == "Color3" and Notify.BarColor)    or _base
+			local _bgColor  = (typeof(Notify.IconBGColor) == "Color3" and Notify.IconBGColor) or _base
+			local _stColor  = (typeof(Notify.StrokeColor) == "Color3" and Notify.StrokeColor) or _base
+			-- keep accent as alias for icon tint (follows BarColor by default)
+			local accent    = _barColor
 
 			LayoutREF = LayoutREF - 1
 
@@ -11801,7 +11813,7 @@ function Compkiller.newNotify()
 			CardCorner.CornerRadius = UDim.new(0, 8)
 			CardCorner.Parent = Card
 
-			CardStroke.Color = accent
+			CardStroke.Color = _stColor
 			CardStroke.Transparency = 0.82
 			CardStroke.Thickness = 1
 			CardStroke.Parent = Card
@@ -11809,7 +11821,7 @@ function Compkiller.newNotify()
 			-- Left accent bar
 			AccentBar.Name = Compkiller:_RandomString()
 			AccentBar.Parent = Card
-			AccentBar.BackgroundColor3 = accent
+			AccentBar.BackgroundColor3 = _barColor
 			AccentBar.BorderSizePixel = 0
 			AccentBar.Position = UDim2.new(0, 0, 0, 8)
 			AccentBar.Size = UDim2.new(0, 3, 1, -16)
@@ -11820,7 +11832,7 @@ function Compkiller.newNotify()
 			-- Icon background circle
 			IconBG.Name = Compkiller:_RandomString()
 			IconBG.Parent = Card
-			IconBG.BackgroundColor3 = accent
+			IconBG.BackgroundColor3 = _bgColor
 			IconBG.BackgroundTransparency = 0.78
 			IconBG.BorderSizePixel = 0
 			IconBG.Position = UDim2.new(0, 10, 0, 10)
@@ -11838,7 +11850,7 @@ function Compkiller.newNotify()
 			CompLogo.Position = UDim2.new(0, 26, 0, 26)
 			CompLogo.Size = UDim2.new(0, 20, 0, 20)
 			CompLogo.ZIndex = 5
-			CompLogo.ImageColor3 = accent
+			CompLogo.ImageColor3 = _barColor
 
 			-- Resolve icon: rbxassetid passthrough, else lucide lookup
 			if tostring(Notify.Icon):find("rbxassetid://", 1, true)
@@ -11930,7 +11942,7 @@ function Compkiller.newNotify()
 			-- Progress bar fill
 			BarFill.Name = Compkiller:_RandomString()
 			BarFill.Parent = BarTrack
-			BarFill.BackgroundColor3 = accent
+			BarFill.BackgroundColor3 = _barColor
 			BarFill.BorderSizePixel = 0
 			BarFill.Size = UDim2.new(0, 0, 1, 0)
 			BarFill.ZIndex = 5
@@ -11984,15 +11996,25 @@ function Compkiller.newNotify()
 					Body.Text = new or ""
 					_syncBodyVisibility()
 				end,
-				-- Override accent color at runtime
-				SetColor = function(self, newColor)
-					if typeof(newColor) ~= "Color3" then return end
-					accent = newColor
-					CardStroke.Color       = newColor
-					AccentBar.BackgroundColor3 = newColor
-					IconBG.BackgroundColor3    = newColor
-					CompLogo.ImageColor3       = newColor
-					BarFill.BackgroundColor3   = newColor
+				-- Update individual colors at runtime
+				-- SetColors({ BarColor, IconBGColor, StrokeColor })
+				-- Any nil key is left unchanged.
+				SetColors = function(self, cfg)
+					if typeof(cfg) ~= "table" then return end
+					if typeof(cfg.BarColor)    == "Color3" then
+						_barColor = cfg.BarColor
+						AccentBar.BackgroundColor3 = _barColor
+						CompLogo.ImageColor3       = _barColor
+						BarFill.BackgroundColor3   = _barColor
+					end
+					if typeof(cfg.IconBGColor) == "Color3" then
+						_bgColor = cfg.IconBGColor
+						IconBG.BackgroundColor3 = _bgColor
+					end
+					if typeof(cfg.StrokeColor) == "Color3" then
+						_stColor = cfg.StrokeColor
+						CardStroke.Color = _stColor
+					end
 				end,
 				-- Progress bar (0-1 or 0-100)
 				SetProgress = function(self, new, Time)
