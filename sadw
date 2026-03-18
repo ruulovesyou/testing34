@@ -5576,44 +5576,44 @@ function Compkiller:_LoadOption(Value , TabSignal)
 				if _w and ExtractElement.Parent ~= _w then
 					ExtractElement.Parent = _w
 				end
-				-- Make visible BEFORE setting position/size so Roblox calculates layout
+				-- Show instantly, set start position, then animate only Size
 				ExtractElement.Visible = true
 				ExtractElement.BackgroundTransparency = 0
+				UIStroke.Transparency = 0
 
 				if not IsSameValue then
 					ExtractElement.Position = DropPosition
 				end;
 
-				-- Spawn so we can yield a full Heartbeat frame before reading layout
+				-- Wait one frame so UIListLayout measures content, then animate
 				task.spawn(function()
-					RunService.Heartbeat:Wait()  -- one render frame: UIListLayout updates
-					if not Toggl then return end -- user closed before layout finished
+					RunService.Heartbeat:Wait()
+					if not Toggl then return end
 					local contentH = math.max(UIListLayout.AbsoluteContentSize.Y, 30)
-					Compkiller:_Animation(ExtractElement , Tween , {
+					-- Only animate position + size (no transparency — avoids competing tweens)
+					Compkiller:_Animation(ExtractElement, Tween, {
 						Position = MainPosition,
-						BackgroundTransparency = 0,
-						Size = UDim2.new(0, 225, 0, contentH)
-					});
-					Compkiller:_Animation(UIStroke , Tween , {
-						Transparency = 0
-					});
+						Size     = UDim2.new(0, 225, 0, contentH)
+					})
 				end)
 
 			else
 				Signal:Fire(false);
 
-				Compkiller:_Animation(ExtractElement , Tween , {
+				-- Collapse size first, hide after tween completes
+				Compkiller:_Animation(ExtractElement, Tween, {
 					Position = DropPosition,
-					BackgroundTransparency = 1,
-					Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y - 10)
-				});
-
-				Compkiller:_Animation(UIStroke , Tween , {
+					Size     = UDim2.new(0, 225, 0, 0)
+				})
+				Compkiller:_Animation(UIStroke, Tween, {
 					Transparency = 1
-				});
+				})
 
 				task.delay(Tween.Time + 0.05, function()
-					if not Toggl then ExtractElement.Visible = false end
+					if not Toggl then
+						ExtractElement.Visible = false
+						ExtractElement.BackgroundTransparency = 1
+					end
 				end);
 			end;
 		end;
@@ -5793,37 +5793,39 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 			if _dw and DropdownWindow.Parent ~= _dw then
 				DropdownWindow.Parent = _dw
 			end
-			-- Show BEFORE reading AbsoluteContentSize so UIListLayout has measured
+			-- Show instantly at start position, then animate size into place
 			DropdownWindow.Visible = true
 			DropdownWindow.BackgroundTransparency = 0
+			UIStroke.Transparency = 0
 			if not IsSame then
 				DropdownWindow.Position = DropPosition;
 			end;
 
 			task.spawn(function()
-				RunService.Heartbeat:Wait()  -- wait one render frame for layout
+				RunService.Heartbeat:Wait()
 				if not ToggleDb:GetValue() then return end
 				local h = math.clamp(UIListLayout.AbsoluteContentSize.Y + 10, 10, 200)
-				Compkiller:_Animation(DropdownWindow,_TI.t020,{
-					BackgroundTransparency = 0,
+				-- Only animate position + size (transparency is already set instantly above)
+				Compkiller:_Animation(DropdownWindow, _TI.t020, {
 					Position = MainPosition,
-					Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, h)
+					Size     = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, h)
 				})
 			end)
-
-			Compkiller:_Animation(UIStroke,_TI.t020,{
-				Transparency = 0
-			})
 		else
-			Compkiller:_Animation(DropdownWindow,_TI.t020,{
-				BackgroundTransparency = 1,
+			local h = math.clamp(UIListLayout.AbsoluteContentSize.Y + 10, 10, 200)
+			Compkiller:_Animation(DropdownWindow, _TI.t020, {
 				Position = DropPosition,
-				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, math.clamp(UIListLayout.AbsoluteContentSize.Y / 1.5, 10 , 200))
+				Size     = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, 0)
 			})
-
-			Compkiller:_Animation(UIStroke,_TI.t020,{
+			Compkiller:_Animation(UIStroke, _TI.t020, {
 				Transparency = 1
 			})
+			task.delay(_TI.t020.Time + 0.05, function()
+				if not ToggleDb:GetValue() then
+					DropdownWindow.Visible = false
+					DropdownWindow.BackgroundTransparency = 1
+				end
+			end)
 		end;
 	end;
 
@@ -8552,6 +8554,7 @@ function Compkiller.new(Config)
 		ContainerTab.Position = UDim2.new(0.5, 0, 0.5, 0)
 		ContainerTab.Size = UDim2.new(1, -15, 1, -15)
 		ContainerTab.ZIndex = 6
+		ContainerTab.Visible = false  -- hidden by default; first tab reveal is explicit
 
 		MainFrame.Name = Compkiller:_RandomString()
 		MainFrame.Parent = ContainerTab
@@ -8584,25 +8587,19 @@ function Compkiller.new(Config)
 		-- _SetNilP re-parent that rebuilt the entire render tree on every tween frame.
 
 		local TabOpen = function(bool)
-			-- Debounce: ignore if already in the correct state
-			local _isOpen = ContainerTab.Visible
-			if bool == _isOpen and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
+			-- Guard: only act when visibility actually needs to change
+			if bool == ContainerTab.Visible then return end
 
 			if bool then
 				WindowArgs.SelectedTab = TabButton;
-
-				-- Show content immediately (no tween delay, no re-parent cost)
 				ContainerTab.Visible = true
-				ContainerTab.Parent = TabMainFrame
 
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0,
 				});
-
 				Compkiller:_Animation(TabNameLabel,Tween,{
 					TextTransparency = 0
 				});
-
 				Compkiller:_Animation(Highlight,Tween,{
 					BackgroundTransparency = 0.925
 				});
@@ -8613,18 +8610,14 @@ function Compkiller.new(Config)
 					end;
 				end;
 			else
-				-- Hide content immediately (no tween delay)
 				ContainerTab.Visible = false
-				ContainerTab.Parent = _GetNilFolder()
 
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0.5
 				});
-
 				Compkiller:_Animation(TabNameLabel,Tween,{
 					TextTransparency = 0.5
 				});
-
 				Compkiller:_Animation(Highlight,Tween,{
 					BackgroundTransparency = 1
 				});
@@ -9307,15 +9300,11 @@ function Compkiller.new(Config)
 		local Tween = _TI.t035q;
 
 		local TabOpen = function(bool)
-			if bool == TabConfig.Visible and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
+			if bool == TabConfig.Visible then return end
 
 			if bool then
-
 				WindowArgs.SelectedTab = TabButton;
-
-				-- Show content immediately (no tween delay, no re-parent cost)
 				TabConfig.Visible = true
-				TabConfig.Parent = TabMainFrame
 
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0,
@@ -9395,7 +9384,6 @@ function Compkiller.new(Config)
 
 				-- Hide content immediately
 				TabConfig.Visible = false
-				TabConfig.Parent = _GetNilFolder()
 
 				Compkiller:_Animation(Icon,Tween,{
 					ImageTransparency = 0.5
@@ -10071,6 +10059,7 @@ function Compkiller.new(Config)
 			TabContent.Position = UDim2.new(0.5, 0, 0.5, 0)
 			TabContent.Size = UDim2.new(1, -5,1, -5)
 			TabContent.ZIndex = 6
+			TabContent.Visible = false  -- hidden by default
 
 			Left.Name = Compkiller:_RandomString()
 			Left.Parent = TabContent
@@ -10147,21 +10136,12 @@ function Compkiller.new(Config)
 			-- Set initial visibility directly based on current signal state
 			if not TabOpenSignal:GetValue() then
 				TabContent.Visible = false
-				TabContent.Parent = _GetNilFolder()
 			else
 				TabContent.Visible = true
-				TabContent.Parent = Internal.Parent
 			end
 
-			-- React to future open/close events immediately
 			TabOpenSignal:Connect(function(visible)
-				if visible then
-					TabContent.Visible = true
-					TabContent.Parent = Internal.Parent
-				else
-					TabContent.Visible = false
-					TabContent.Parent = _GetNilFolder()
-				end
+				TabContent.Visible = visible
 			end)
 		else
 			-- Button --
@@ -10327,15 +10307,11 @@ function Compkiller.new(Config)
 			-- per-frame and triggered an expensive _SetNilP re-parent each switch.
 
 			local TabOpen = function(bool)
-				if bool == TabContent.Visible and WindowArgs.SelectedTab == (bool and TabButton or nil) then return end
+				if bool == TabContent.Visible then return end
 
 				if bool then
-
 					WindowArgs.SelectedTab = TabButton;
-
-					-- Show content immediately — no render-tree rebuild delay
 					TabContent.Visible = true
-					TabContent.Parent = TabMainFrame
 
 					Compkiller:_Animation(Icon,Tween,{
 						ImageTransparency = 0,
@@ -10349,9 +10325,7 @@ function Compkiller.new(Config)
 						BackgroundTransparency = 0.925
 					});
 				else
-					-- Hide content immediately
 					TabContent.Visible = false
-					TabContent.Parent = _GetNilFolder()
 
 					Compkiller:_Animation(Icon,Tween,{
 						ImageTransparency = 0.5
@@ -11472,6 +11446,9 @@ function Compkiller.new(Config)
 			end
 		end);
 	end);
+
+	-- Register as active window so mc.config() window keys resolve correctly
+	Compkiller._ActiveWindow = WindowArgs
 
 	return WindowArgs;
 end;
