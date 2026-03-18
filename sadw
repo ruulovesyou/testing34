@@ -11618,7 +11618,7 @@ function Compkiller.newNotify()
 		and Compkiller.NOTIFY_CACHE._gui.Parent ~= nil then
 		return Compkiller.NOTIFY_CACHE;
 	end
-	Compkiller.NOTIFY_CACHE = nil  -- clear dead reference before rebuilding
+	Compkiller.NOTIFY_CACHE = nil
 
 	local Notification = Instance.new("ScreenGui")
 	local NotifyContainer = Instance.new("Frame")
@@ -11629,8 +11629,6 @@ function Compkiller.newNotify()
 	Notification.ResetOnSpawn = false
 	Notification.ZIndexBehavior = Enum.ZIndexBehavior.Global
 
-	-- [PATCH #6] Shield notify GUI immediately -- apply protect_gui + tag it
-	-- so it is invisible to AC DescendantAdded scans and GetAttribute probes
 	_pcall(function()
 		local _pfn = protect_gui or protectgui or (syn and syn.protect_gui)
 		if _pfn and not _islclosure(_pfn) then _pfn(Notification) end
@@ -11645,9 +11643,7 @@ function Compkiller.newNotify()
 	NotifyContainer.Name = Compkiller:_RandomString()
 	NotifyContainer.Parent = Notification
 	NotifyContainer.AnchorPoint = Vector2.new(1, 0)
-	NotifyContainer.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 	NotifyContainer.BackgroundTransparency = 1.000
-	NotifyContainer.BorderColor3 = Color3.fromRGB(0, 0, 0)
 	NotifyContainer.BorderSizePixel = 0
 	NotifyContainer.Position = UDim2.new(1, -10, 0, 1)
 	NotifyContainer.Size = UDim2.new(0, 100, 0, 100)
@@ -11659,228 +11655,281 @@ function Compkiller.newNotify()
 
 	local LayoutREF = 0;
 
+	-- ── Spin animation helper ───────────────────────────────────────────────
+	local function _startSpin(img)
+		local _spinThread
+		_spinThread = _ckSpawn(function()
+			local rot = 0
+			while img and img.Parent do
+				rot = (rot + 6) % 360
+				img.Rotation = rot
+				task.wait(0.03)
+			end
+		end)
+		return _spinThread
+	end
+
 	Compkiller.NOTIFY_CACHE = {
-		_gui = Notification,   -- held so newNotify() can check if it is still alive
-		new = function(Notify: Notify) : NotifyPayback
+		_gui = Notification,
+		new = function(Notify)
+			-- ── API ─────────────────────────────────────────────────────────
+			-- Icon       = "rbxassetid://..."  or lucide icon name  (default: Compkiller.Logo)
+			-- SpinIcon   = true/false           rotate the icon     (default: false)
+			-- Color      = Color3               override accent/bar  (default: Highlight)
+			-- Title      = string
+			-- Content    = string
+			-- Duration   = number | math.huge   seconds (math.huge = manual close only)
 			Notify = Compkiller.__CONFIG(Notify, {
-				Icon = Compkiller.Logo,
-				Title = "Notification",
-				Content = "Content",
-				Duration = 3,
+				Icon       = Compkiller.Logo,
+				SpinIcon   = false,
+				Color      = nil,
+				Title      = "Notification",
+				Content    = "Content",
+				Duration   = 3,
 			});
+
+			-- Resolve accent color — caller Color > theme Highlight
+			local accentColor = (typeof(Notify.Color) == "Color3" and Notify.Color)
+				or Compkiller.Colors.Highlight
 
 			LayoutREF = LayoutREF - 5
 
-			local BlockFrame = Instance.new("Frame")
-			local NotifyFrame = Instance.new("Frame")
-			local UICorner = Instance.new("UICorner")
-			local CompLogo = Instance.new("ImageLabel")
-			local Header = Instance.new("TextLabel")
-			local Body = Instance.new("TextLabel")
+			local BlockFrame    = Instance.new("Frame")
+			local NotifyFrame   = Instance.new("Frame")
+			local UICorner      = Instance.new("UICorner")
+			local UIStroke      = Instance.new("UIStroke")
+			local CompLogo      = Instance.new("ImageLabel")
+			local LogoBG        = Instance.new("Frame")
+			local LogoBGCorner  = Instance.new("UICorner")
+			local Header        = Instance.new("TextLabel")
+			local Body          = Instance.new("TextLabel")
 			local TimeLeftFrame = Instance.new("Frame")
-			local UICorner_2 = Instance.new("UICorner")
-			local TimeLeft = Instance.new("Frame")
-			local UICorner_3 = Instance.new("UICorner")
+			local UICorner_2    = Instance.new("UICorner")
+			local TimeLeft      = Instance.new("Frame")
+			local UICorner_3    = Instance.new("UICorner")
 
+			-- BlockFrame (size container)
 			BlockFrame.Name = Compkiller:_RandomString()
 			BlockFrame.Parent = NotifyContainer
 			BlockFrame.AnchorPoint = Vector2.new(1, 0)
-			BlockFrame.BackgroundColor3 = Compkiller.Colors.BGDBColor
 			BlockFrame.BackgroundTransparency = 1.000
-			BlockFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
 			BlockFrame.BorderSizePixel = 0
 			BlockFrame.ClipsDescendants = false
 			BlockFrame.Size = UDim2.new(0, 200, 0, 0)
-			BlockFrame.LayoutOrder = LayoutREF;
+			BlockFrame.LayoutOrder = LayoutREF
 
-
+			-- NotifyFrame (visible card)
 			NotifyFrame.Name = Compkiller:_RandomString()
 			NotifyFrame.Parent = BlockFrame
 			NotifyFrame.BackgroundColor3 = Compkiller.Colors.BGDBColor
-			NotifyFrame.BackgroundTransparency = 0.100
-			NotifyFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
+			NotifyFrame.BackgroundTransparency = 0.08
 			NotifyFrame.BorderSizePixel = 0
 			NotifyFrame.ClipsDescendants = false
 			NotifyFrame.Size = UDim2.new(1, 0, 1, -5)
 			NotifyFrame.ZIndex = 2
-			NotifyFrame.Position = UDim2.new(1,200,0,0)
+			NotifyFrame.Position = UDim2.new(1, 200, 0, 0)
 
-
-			UICorner.CornerRadius = UDim.new(0, 4)
+			UICorner.CornerRadius = UDim.new(0, 6)
 			UICorner.Parent = NotifyFrame
 
+			-- Subtle stroke tinted with accent
+			UIStroke.Color = accentColor
+			UIStroke.Transparency = 0.75
+			UIStroke.Thickness = 1
+			UIStroke.Parent = NotifyFrame
+
+			-- Icon background pill
+			LogoBG.Name = Compkiller:_RandomString()
+			LogoBG.Parent = NotifyFrame
+			LogoBG.BackgroundColor3 = accentColor
+			LogoBG.BackgroundTransparency = 0.80
+			LogoBG.BorderSizePixel = 0
+			LogoBG.Position = UDim2.new(0, 6, 0, 6)
+			LogoBG.Size = UDim2.new(0, 29, 0, 29)
+			LogoBG.ZIndex = 3
+			LogoBGCorner.CornerRadius = UDim.new(0, 5)
+			LogoBGCorner.Parent = LogoBG
+
+			-- Icon
 			CompLogo.Name = Compkiller:_RandomString()
 			CompLogo.Parent = NotifyFrame
-			CompLogo.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 			CompLogo.BackgroundTransparency = 1.000
-			CompLogo.BorderColor3 = Color3.fromRGB(0, 0, 0)
 			CompLogo.BorderSizePixel = 0
-			CompLogo.Position = UDim2.new(0, 6, 0, 6)
-			CompLogo.Size = UDim2.new(0, 25, 0, 25)
+			CompLogo.AnchorPoint = Vector2.new(0.5, 0.5)
+			CompLogo.Position = UDim2.new(0, 20, 0, 20)  -- centred over LogoBG
+			CompLogo.Size = UDim2.new(0, 22, 0, 22)
 			CompLogo.ZIndex = 4
+			CompLogo.ImageColor3 = accentColor
 
-			if string.find(Notify.Icon,'cache-ck-',1,true) then	
-				CompLogo.Image = Notify.Icon;
+			-- Resolve icon: rbxassetid passthrough, else lucide lookup
+			if tostring(Notify.Icon):find("rbxassetid://", 1, true)
+				or tostring(Notify.Icon):find("cache%-ck%-", 1, true) then
+				CompLogo.Image = Notify.Icon
 			else
-				CompLogo.Image = Compkiller:_GetIcon(Notify.Icon);
-			end;
+				CompLogo.Image = Compkiller:_GetIcon(Notify.Icon)
+			end
 
-			if Compkiller.CustomHighlightMode then
-				CompLogo.ImageColor3 = Compkiller.Colors.Highlight;
-			end;
-			
+			-- SpinIcon — continuous rotation on the icon
+			local _spinThread = nil
+			if Notify.SpinIcon then
+				_spinThread = _startSpin(CompLogo)
+			end
+
+			-- Header
 			Header.Name = Compkiller:_RandomString()
 			Header.Parent = NotifyFrame
-			Header.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 			Header.BackgroundTransparency = 1.000
-			Header.BorderColor3 = Color3.fromRGB(0, 0, 0)
 			Header.BorderSizePixel = 0
-			Header.Position = UDim2.new(0, 40, 0, 10)
-			Header.Size = UDim2.new(1, -50, 0, 15)
+			Header.Position = UDim2.new(0, 42, 0, 8)
+			Header.Size = UDim2.new(1, -52, 0, 15)
 			Header.ZIndex = 3
 			Header.Font = Enum.Font.GothamBold
 			Header.Text = Notify.Title
 			Header.TextColor3 = Compkiller.Colors.SwitchColor
-			Header.TextSize = 14.000
+			Header.TextSize = 13.000
 			Header.TextXAlignment = Enum.TextXAlignment.Left
 
+			-- Body
 			Body.Name = Compkiller:_RandomString()
 			Body.Parent = NotifyFrame
-			Body.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 			Body.BackgroundTransparency = 1.000
-			Body.BorderColor3 = Color3.fromRGB(0, 0, 0)
 			Body.BorderSizePixel = 0
-			Body.Position = UDim2.new(0, 10, 0, 33)
+			Body.Position = UDim2.new(0, 10, 0, 30)
 			Body.Size = UDim2.new(1, -15, 0, 30)
 			Body.ZIndex = 3
 			Body.Font = Enum.Font.GothamMedium
 			Body.Text = Notify.Content
 			Body.TextColor3 = Compkiller.Colors.SwitchColor
 			Body.TextSize = 12.000
-			Body.TextTransparency = 0.500
+			Body.TextTransparency = 0.45
 			Body.TextXAlignment = Enum.TextXAlignment.Left
 			Body.TextYAlignment = Enum.TextYAlignment.Top
 
+			-- Progress bar track
 			TimeLeftFrame.Name = Compkiller:_RandomString()
 			TimeLeftFrame.Parent = NotifyFrame
 			TimeLeftFrame.AnchorPoint = Vector2.new(0, 1)
-			TimeLeftFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-			TimeLeftFrame.BackgroundTransparency = 1.000
-			TimeLeftFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
+			TimeLeftFrame.BackgroundColor3 = Compkiller.Colors.StrokeColor
+			TimeLeftFrame.BackgroundTransparency = 0.50
 			TimeLeftFrame.BorderSizePixel = 0
-			TimeLeftFrame.Position = UDim2.new(0, 0, 1, 1)
-			TimeLeftFrame.Size = UDim2.new(1, 0, 0, 5)
+			TimeLeftFrame.Position = UDim2.new(0, 0, 1, 0)
+			TimeLeftFrame.Size = UDim2.new(1, 0, 0, 3)
 			TimeLeftFrame.ZIndex = 5
-
-			UICorner_2.CornerRadius = UDim.new(0, 4)
+			UICorner_2.CornerRadius = UDim.new(1, 0)
 			UICorner_2.Parent = TimeLeftFrame
 
+			-- Progress bar fill — uses accent color
 			TimeLeft.Name = Compkiller:_RandomString()
 			TimeLeft.Parent = TimeLeftFrame
-			TimeLeft.BackgroundColor3 = Compkiller.Colors.Highlight
-			TimeLeft.BorderColor3 = Color3.fromRGB(0, 0, 0)
+			TimeLeft.BackgroundColor3 = accentColor
 			TimeLeft.BorderSizePixel = 0
 			TimeLeft.Size = UDim2.new(0, 0, 1, 0)
 			TimeLeft.ZIndex = 5
-
-			UICorner_3.CornerRadius = UDim.new(0, 1)
+			UICorner_3.CornerRadius = UDim.new(1, 0)
 			UICorner_3.Parent = TimeLeft
 
+			-- ── helpers ────────────────────────────────────────────────────
 			local UpdateText = function()
 				local TitleScale = TextService:GetTextSize(Header.Text,Header.TextSize,Header.Font,Vector2.new(math.huge,math.huge));
-				local BodyScale = TextService:GetTextSize(Body.Text,Body.TextSize,Body.Font,Vector2.new(math.huge,math.huge));
-
-				local MainX = (TitleScale.X >= BodyScale.X and TitleScale.X) or BodyScale.X;
-				local MainY = TitleScale.Y + ((Body.Text:byte() and BodyScale.Y) or 1);
+				local BodyScale  = TextService:GetTextSize(Body.Text,Body.TextSize,Body.Font,Vector2.new(math.huge,math.huge));
+				local MainX = (TitleScale.X >= BodyScale.X and TitleScale.X) or BodyScale.X
+				local MainY = TitleScale.Y + ((Body.Text:byte() and BodyScale.Y) or 1)
 
 				if BlockFrame:GetAttribute('Already') then
 					Compkiller:_Animation(BlockFrame,_TI.t030,{
-						Size = UDim2.new(0,MainX + 55,0,MainY + 35)
-					});
+						Size = UDim2.new(0, MainX + 60, 0, MainY + 35)
+					})
 				else
-					BlockFrame:SetAttribute('Already',true)
-					BlockFrame.Size = UDim2.new(0, MainX + 45, 0, 0);
-
+					BlockFrame:SetAttribute('Already', true)
+					BlockFrame.Size = UDim2.new(0, MainX + 50, 0, 0)
 					Compkiller:_Animation(BlockFrame,_TI.t030,{
-						Size = UDim2.new(0,MainX + 55,0,MainY + 35)
-					});
-				end;
-			end;
+						Size = UDim2.new(0, MainX + 60, 0, MainY + 35)
+					})
+				end
+			end
 
-			UpdateText();
+			UpdateText()
 
 			local Close = function()
-				Compkiller:_Animation(NotifyFrame,TweenInfo.new(0.65,Enum.EasingStyle.Quint),{
-					Position = UDim2.new(1,200,0,0)
-				});
-
-				task.wait(0.3);
-
-				Compkiller:_Animation(BlockFrame,_TI.t030,{
-					Size = UDim2.new(1,0,0,0)
-				});
-
+				if _spinThread then
+					pcall(function() task.cancel(_spinThread) end)
+					_spinThread = nil
+				end
+				Compkiller:_Animation(NotifyFrame, TweenInfo.new(0.55, Enum.EasingStyle.Quint), {
+					Position = UDim2.new(1, 200, 0, 0)
+				})
+				task.wait(0.3)
+				Compkiller:_Animation(BlockFrame, _TI.t030, {
+					Size = UDim2.new(1, 0, 0, 0)
+				})
 				task.wait(0.35)
-				BlockFrame:Destroy();
-
-			end;
+				BlockFrame:Destroy()
+			end
 
 			local Show = function()
-				Compkiller:_Animation(NotifyFrame,TweenInfo.new(0.5,Enum.EasingStyle.Quint),{
-					Position = UDim2.new(0,0,0,0)
-				});
-			end;
+				Compkiller:_Animation(NotifyFrame, TweenInfo.new(0.5, Enum.EasingStyle.Quint), {
+					Position = UDim2.new(0, 0, 0, 0)
+				})
+			end
 
 			if typeof(Notify.Duration) == 'number' and Notify.Duration ~= math.huge then
-				Compkiller:_Animation(TimeLeft,TweenInfo.new(Notify.Duration + 0.2,Enum.EasingStyle.Linear),{
+				Compkiller:_Animation(TimeLeft, TweenInfo.new(Notify.Duration + 0.2, Enum.EasingStyle.Linear), {
 					Size = UDim2.new(1, 0, 1, 0)
-				});
+				})
+				return task.delay(0.25, function()
+					Show()
+					task.delay(Notify.Duration + 0.2, Close)
+				end)
+			end
 
-				return task.delay(0.25,function()
-					Show();
-
-					task.delay(Notify.Duration + 0.2,Close)
-				end);
-			end;
-
-			Show();
+			Show()
 
 			return {
-				Title = function(self , new)
-					Header.Text = new;
-					UpdateText(); 
+				Title = function(self, new)
+					Header.Text = new
+					UpdateText()
 				end,
-
-				Content = function(self , new)
-					Body.Text = new;
-					UpdateText();
+				Content = function(self, new)
+					Body.Text = new
+					UpdateText()
 				end,
-
-				SetProgress = function(self , new , Time)
+				SetProgress = function(self, new, Time)
 					if Time and Time <= 0 then
-						TimeLeft.Size = UDim2.new(new, 0, 1, 0);
-
-						UpdateText();
-						return;
-					end;
-
-					if new > 1 then
-						new = (new / 100);	
-					end;
-
-					Compkiller:_Animation(TimeLeft,TweenInfo.new(Time or 0.85,(Time and Enum.EasingStyle.Linear) or Enum.EasingStyle.Quint),{
-						Size = UDim2.new(new, 0, 1, 0)
-					});
-
-					UpdateText();
+						TimeLeft.Size = UDim2.new(new, 0, 1, 0)
+						UpdateText()
+						return
+					end
+					if new > 1 then new = new / 100 end
+					Compkiller:_Animation(TimeLeft,
+						TweenInfo.new(Time or 0.85, (Time and Enum.EasingStyle.Linear) or Enum.EasingStyle.Quint),
+						{ Size = UDim2.new(new, 0, 1, 0) })
+					UpdateText()
 				end,
-
+				-- New: update color at runtime
+				SetColor = function(self, newColor)
+					if typeof(newColor) ~= "Color3" then return end
+					accentColor = newColor
+					LogoBG.BackgroundColor3 = newColor
+					CompLogo.ImageColor3    = newColor
+					TimeLeft.BackgroundColor3 = newColor
+					UIStroke.Color          = newColor
+				end,
+				-- New: start / stop spin at runtime
+				SetSpin = function(self, enabled)
+					if enabled and not _spinThread then
+						_spinThread = _startSpin(CompLogo)
+					elseif not enabled and _spinThread then
+						pcall(function() task.cancel(_spinThread) end)
+						_spinThread = nil
+						CompLogo.Rotation = 0
+					end
+				end,
 				Close = Close,
 			}
 		end,
-	};
+	}
 
-	return Compkiller.NOTIFY_CACHE;
+	return Compkiller.NOTIFY_CACHE
 end;
 
 -- NilFolder.Name set inside _GetNilFolder() on creation.
@@ -13464,9 +13513,50 @@ Compkiller.MasterControl = function(...)
 		end;
 	end;
 
-	local function loader(IconId,Duration)
-		local CompKiller = Instance.new("ScreenGui")
+	local function loader(Config, Duration)
+		-- ── API ──────────────────────────────────────────────────────────────
+		-- Legacy:  loader("rbxassetid://...", 4.5)
+		-- Table:   loader({ ... }):yield()
+		--
+		-- Icon            = string    rbxassetid or lucide name     (default: Logo)
+		-- Duration        = number    seconds before auto-dismiss   (default: 4.5)
+		-- BackgroundColor = Color3    overlay fill                  (default: black)
+		-- VignetteColor   = Color3    glow ring tint                (default: Highlight)
+		-- IconColor       = Color3    icon tint                     (default: original)
+		-- IconSize        = number    final icon size in px         (default: 200)
+		--
+		-- SpinIcon        = bool      spin the icon while loading   (default: false)
+		-- SpinSpeed       = number    degrees per second            (default: 120)
+		--                             higher = faster  (30=very slow, 360=very fast)
+		-- SpinEasing      = Enum.EasingStyle  easing per step       (default: Linear)
+		--                             Linear   = constant smooth rotation
+		--                             Sine     = gentle breathing pulse feel
+		--                             Quint    = ease in/out per step (chunky)
+		-- ──────────────────────────────────────────────────────────────────────
 
+		local cfg = {}
+		if type(Config) == "string" then
+			cfg.Icon     = Config
+			cfg.Duration = Duration
+		elseif type(Config) == "table" then
+			cfg = Config
+		else
+			cfg = {}
+		end
+
+		local _icon          = cfg.Icon            or Compkiller.Logo
+		local _duration      = cfg.Duration        or Duration or 4.5
+		local _bgColor       = cfg.BackgroundColor or Color3.fromRGB(0, 0, 0)
+		local _vignetteColor = cfg.VignetteColor   or Compkiller.Colors.Highlight
+		local _iconColor     = cfg.IconColor
+		local _iconSize      = cfg.IconSize        or 200
+		local _spin          = cfg.SpinIcon        or false
+		-- SpinSpeed: degrees/sec. step interval = 0.016s (≈60fps).
+		-- degreesPerStep = SpinSpeed / 60
+		local _spinSpeed     = cfg.SpinSpeed       or 120   -- 120°/s default
+		local _spinEasing    = cfg.SpinEasing      or Enum.EasingStyle.Linear
+
+		local CompKiller = Instance.new("ScreenGui")
 		CompKiller.Name = Compkiller:_RandomString()
 		CompKiller.Parent = CoreGui
 		CompKiller.Enabled = true
@@ -13474,16 +13564,15 @@ Compkiller.MasterControl = function(...)
 		CompKiller.IgnoreGuiInset = true
 		CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global
 
-		local Loader = Instance.new("Frame")
-		local Icon = Instance.new("ImageLabel")
+		local Loader   = Instance.new("Frame")
+		local Icon     = Instance.new("ImageLabel")
 		local Vignette = Instance.new("ImageLabel")
 
 		Loader.Name = Compkiller:_RandomString()
 		Loader.Parent = CompKiller
 		Loader.AnchorPoint = Vector2.new(0.5, 0.5)
-		Loader.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+		Loader.BackgroundColor3 = _bgColor
 		Loader.BackgroundTransparency = 1
-		Loader.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		Loader.BorderSizePixel = 0
 		Loader.Position = UDim2.new(0.5, 0, 0.5, 0)
 		Loader.Size = UDim2.new(1, 0, 1, 0)
@@ -13492,80 +13581,119 @@ Compkiller.MasterControl = function(...)
 		Icon.Parent = Loader
 		Icon.AnchorPoint = Vector2.new(0.5, 0.5)
 		Icon.BackgroundTransparency = 1.000
-		Icon.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		Icon.BorderSizePixel = 0
 		Icon.Position = UDim2.new(0.5, 0, 0.5, 0)
 		Icon.Size = UDim2.new(0, 750, 0, 750)
 		Icon.ZIndex = 100
-		Icon.Image = IconId or Compkiller.Logo;
+		Icon.Image = _icon
 		Icon.ImageTransparency = 1
+		if _iconColor then Icon.ImageColor3 = _iconColor end
 
 		Vignette.Name = Compkiller:_RandomString()
 		Vignette.Parent = Loader
 		Vignette.BackgroundTransparency = 1.000
-		Vignette.BorderColor3 = Color3.fromRGB(27, 42, 53)
 		Vignette.BorderSizePixel = 0
 		Vignette.Size = UDim2.new(1, 0, 1, 0)
 		Vignette.Image = cacheImage("rbxassetid://18720640102")
-		Vignette.ImageColor3 = Compkiller.Colors.Highlight
+		Vignette.ImageColor3 = _vignetteColor
 		Vignette.ImageTransparency = 1
-		Vignette.AnchorPoint = Vector2.new(0.5,0.5)
-		Vignette.Position = UDim2.fromScale(0.5,0.5)
+		Vignette.AnchorPoint = Vector2.new(0.5, 0.5)
+		Vignette.Position = UDim2.fromScale(0.5, 0.5)
 
-		Compkiller:_Animation(Loader,TweenInfo.new(0.55,Enum.EasingStyle.Quint),{
-			BackgroundTransparency = 0.5
-		});
+		-- ── Spin engine ───────────────────────────────────────────────────────
+		-- Uses TweenService for each step so SpinEasing applies per-step.
+		-- stepInterval: how often we fire a new tween step.
+		-- A shorter interval = more steps = smoother (at the cost of more tweens).
+		-- SpinSpeed controls how many degrees each step covers.
+		local _spinThread = nil
+		local _spinActive = false
 
-		local Event = Instance.new('BindableEvent');
-
-		task.delay(0.5,function(...)
-			Compkiller:_Animation(Icon,TweenInfo.new(0.75,Enum.EasingStyle.Quint),{
-				ImageTransparency = 0.01,
-				Size = UDim2.new(0, 200, 0, 200)
-			});
-
-			task.delay(0.25,function(...)
-				Compkiller:_Animation(Vignette,TweenInfo.new(5),{
-					ImageTransparency = 0.2
-				});
-
-				task.wait(Duration or 4.5)
-
-				Compkiller:_Animation(Vignette,TweenInfo.new(3,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
-					Size = UDim2.new(2, 0, 2, 0)
-				});
-
-				Compkiller:_Animation(Icon,TweenInfo.new(0.75,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
-					ImageTransparency = 1,
-				});
-
-				Compkiller:_Animation(Loader,TweenInfo.new(1.5,Enum.EasingStyle.Quint,Enum.EasingDirection.InOut),{
-					BackgroundTransparency = 1
-				});
-
-				task.delay(0.1,function(...)
-					Compkiller:_Animation(Vignette,_TI.t100,{
-						ImageTransparency = 1
-					});
-
-					task.wait(0.2)
-
-					task.delay(3,function()
-						CompKiller:Destroy();
-					end)
-				end)
-
-				task.delay(0.6,function()
-					Event:Fire();
-				end)
+		local function _startSpin()
+			_spinActive = true
+			_spinThread = _ckSpawn(function()
+				local STEP_INTERVAL = 0.016   -- ~60fps tick
+				local degreesPerStep = _spinSpeed * STEP_INTERVAL
+				local stepTI = TweenInfo.new(STEP_INTERVAL, _spinEasing)
+				local rot = 0
+				while _spinActive and Icon and Icon.Parent do
+					rot = (rot + degreesPerStep) % 360
+					Compkiller:_Animation(Icon, stepTI, { Rotation = rot })
+					task.wait(STEP_INTERVAL)
+				end
 			end)
-		end);
+		end
+
+		local function _stopSpin()
+			_spinActive = false
+			if _spinThread then
+				pcall(function() task.cancel(_spinThread) end)
+				_spinThread = nil
+			end
+		end
+
+		Compkiller:_Animation(Loader, TweenInfo.new(0.55, Enum.EasingStyle.Quint), {
+			BackgroundTransparency = 0.5
+		})
+
+		local Event = Instance.new('BindableEvent')
+
+		task.delay(0.5, function()
+			Compkiller:_Animation(Icon, TweenInfo.new(0.75, Enum.EasingStyle.Quint), {
+				ImageTransparency = 0.01,
+				Size = UDim2.new(0, _iconSize, 0, _iconSize)
+			})
+
+			-- Start spin once icon is visible
+			if _spin then
+				task.delay(0.75, _startSpin)
+			end
+
+			task.delay(0.25, function()
+				Compkiller:_Animation(Vignette, TweenInfo.new(5), {
+					ImageTransparency = 0.2
+				})
+
+				task.wait(_duration)
+
+				-- Stop spin before exit animations
+				_stopSpin()
+
+				Compkiller:_Animation(Vignette, TweenInfo.new(3, Enum.EasingStyle.Quint, Enum.EasingDirection.InOut), {
+					Size = UDim2.new(2, 0, 2, 0)
+				})
+				Compkiller:_Animation(Icon, TweenInfo.new(0.75, Enum.EasingStyle.Quint, Enum.EasingDirection.InOut), {
+					ImageTransparency = 1,
+				})
+				Compkiller:_Animation(Loader, TweenInfo.new(1.5, Enum.EasingStyle.Quint, Enum.EasingDirection.InOut), {
+					BackgroundTransparency = 1
+				})
+
+				task.delay(0.1, function()
+					Compkiller:_Animation(Vignette, _TI.t100, {
+						ImageTransparency = 1
+					})
+					task.wait(0.2)
+					task.delay(3, function() CompKiller:Destroy() end)
+				end)
+
+				task.delay(0.6, function() Event:Fire() end)
+			end)
+		end)
 
 		return {
 			yield = function()
-				return Event.Event:Wait();
-			end	
-		};
+				return Event.Event:Wait()
+			end,
+			-- Start / stop spin at runtime (e.g. pause while waiting for server)
+			StartSpin = function() if not _spinActive then _startSpin() end end,
+			StopSpin  = function() _stopSpin() end,
+			-- Change spin speed/easing while running
+			SetSpinSpeed = function(speed, easing)
+				_spinSpeed  = speed  or _spinSpeed
+				_spinEasing = easing or _spinEasing
+				if _spinActive then _stopSpin(); _startSpin() end
+			end,
+		}
 	end;
 
 	local function preloadIcons()
