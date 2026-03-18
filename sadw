@@ -5333,10 +5333,10 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		local Helper = Value:AddLink("Helper" , Config.Default);
 		local Button: ImageButton = Helper.InfoButton;
 
-		-- Parent tooltip to window — resolve lazily in case tab was hidden at creation
+		-- Resolve window lazily (tab may be hidden at creation)
 		local function _getHelperWin()
-			local w = Window or _resolveWindow(Value.Root)
-			Window = w  -- cache for future calls
+			local w = Compkiller:_GetWindowFromElement(Value.Root)
+			if not w then w = Compkiller.Windows and Compkiller.Windows[1] end
 			return w
 		end
 		local _hw = _getHelperWin()
@@ -5376,7 +5376,11 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			return scale;
 		end;
 
+		-- Guard flag: prevents Release's delayed Visible=false from firing after Hold
+		local _helperHeld = false
+
 		local Release = function()
+			_helperHeld = false
 			local scale = Update()
 
 			Compkiller:_Animation(Helper.Text,_TI.t015,{
@@ -5388,17 +5392,24 @@ function Compkiller:_LoadOption(Value , TabSignal)
 			Compkiller:_Animation(Helper.UIStroke,_TI.t015,{
 				Transparency = 1
 			});
+			-- Hide after tween — guard flag prevents hiding if Hold fires first
+			task.delay(_TI.t015.Time + 0.05, function()
+				if not _helperHeld then
+					Helper.Text.Visible = false
+				end
+			end)
 		end;
 
 		local Hold = function()
+			_helperHeld = true
 			local scale = Update()
-			-- Ensure tooltip is parented to the window (may have been nil at creation)
+			-- Ensure tooltip is parented to the window
 			local _hw = _getHelperWin()
 			if _hw and Helper.Text.Parent ~= _hw then Helper.Text.Parent = _hw end
 
-			if not Helper.Text.Visible then
-				Helper.Text.Position = UDim2.fromOffset(Button.AbsolutePosition.X,Button.AbsolutePosition.Y + (45))
-			end;
+			-- Force visible directly — watcher may not fire when animation=false
+			Helper.Text.Visible = true
+			Helper.Text.Position = UDim2.fromOffset(Button.AbsolutePosition.X, Button.AbsolutePosition.Y + 45);
 
 			Compkiller:_Animation(Helper.Text,_TI.t015,{
 				TextTransparency = 0.35,
@@ -5533,6 +5544,13 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		local UIListLayout = Instance.new("UIListLayout")
 		local Toggl = false;
 
+		-- Resolve window reliably (element may be in NilFolder at creation)
+		local function _getOptWin()
+			local w = Compkiller:_GetWindowFromElement(Element)
+			if w then return w end
+			return Compkiller.Windows and Compkiller.Windows[1]
+		end
+
 		local ToggleUI = function(bool)
 			local IsSameValue = bool == Toggl;
 
@@ -5553,26 +5571,33 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			if bool then
 				Signal:Fire(true);
-				-- Re-resolve window now that the tab is visible
+				-- Re-resolve and re-parent to the ScreenGui
 				local _w = _getOptWin()
 				if _w and ExtractElement.Parent ~= _w then
 					ExtractElement.Parent = _w
 				end
+				-- Make visible BEFORE setting position/size so Roblox calculates layout
 				ExtractElement.Visible = true
+				ExtractElement.BackgroundTransparency = 0
 
 				if not IsSameValue then
 					ExtractElement.Position = DropPosition
 				end;
 
-				Compkiller:_Animation(ExtractElement , Tween , {
-					Position = MainPosition,
-					BackgroundTransparency = 0,
-					Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y)
-				});
-
-				Compkiller:_Animation(UIStroke , Tween , {
-					Transparency = 0
-				});
+				-- Spawn so we can yield a full Heartbeat frame before reading layout
+				task.spawn(function()
+					RunService.Heartbeat:Wait()  -- one render frame: UIListLayout updates
+					if not Toggl then return end -- user closed before layout finished
+					local contentH = math.max(UIListLayout.AbsoluteContentSize.Y, 30)
+					Compkiller:_Animation(ExtractElement , Tween , {
+						Position = MainPosition,
+						BackgroundTransparency = 0,
+						Size = UDim2.new(0, 225, 0, contentH)
+					});
+					Compkiller:_Animation(UIStroke , Tween , {
+						Transparency = 0
+					});
+				end)
 
 			else
 				Signal:Fire(false);
@@ -5606,15 +5631,9 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		ExtractElement.BackgroundTransparency = 1
 		ExtractElement.Visible = false
 		ExtractElement.ClipsDescendants = true
-		-- Resolve window lazily — element may be in NilFolder at creation time
-		local function _getOptWin()
-			local w = Compkiller:_GetWindowFromElement(Element)
-			if w then return w end
-			return Compkiller.Windows and Compkiller.Windows[1]
-		end
 		-- Parent to Windows[1] (always valid after Compkiller.new())
 		local _optWindow = _getOptWin()
-		ExtractElement.Parent = _optWindow
+		ExtractElement.Parent = _optWindow or (Compkiller.Windows and Compkiller.Windows[1])
 
 		table.insert(Compkiller.Elements.BlockBackground,{
 			Element = ExtractElement,
@@ -5769,21 +5788,28 @@ function Compkiller:_LoadDropdown(BaseParent , Callback)
 		end;
 
 		if bool then
-			-- Re-resolve window now that the user opened the dropdown (tab is visible)
+			-- Re-resolve window now that the user opened the dropdown
 			local _dw = _resolveWindow(BaseParent)
 			if _dw and DropdownWindow.Parent ~= _dw then
 				DropdownWindow.Parent = _dw
 			end
+			-- Show BEFORE reading AbsoluteContentSize so UIListLayout has measured
 			DropdownWindow.Visible = true
+			DropdownWindow.BackgroundTransparency = 0
 			if not IsSame then
 				DropdownWindow.Position = DropPosition;
 			end;
 
-			Compkiller:_Animation(DropdownWindow,_TI.t020,{
-				BackgroundTransparency = 0,
-				Position = MainPosition,
-				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, math.clamp(UIListLayout.AbsoluteContentSize.Y + 10,10 , 200))
-			})
+			task.spawn(function()
+				RunService.Heartbeat:Wait()  -- wait one render frame for layout
+				if not ToggleDb:GetValue() then return end
+				local h = math.clamp(UIListLayout.AbsoluteContentSize.Y + 10, 10, 200)
+				Compkiller:_Animation(DropdownWindow,_TI.t020,{
+					BackgroundTransparency = 0,
+					Position = MainPosition,
+					Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, h)
+				})
+			end)
 
 			Compkiller:_Animation(UIStroke,_TI.t020,{
 				Transparency = 0
@@ -13374,19 +13400,18 @@ Compkiller.MasterControl = function(...)
 	end
 
 	local function enableAdvancedOptimizations(enabled)
-		_OPT.Enabled = (enabled == true)
-		if _OPT.Enabled then
+		-- advancedOpt only controls the memory sweep monitor thread.
+		-- It does NOT touch _OPT.Enabled — smartAnimations owns that flag.
+		-- This prevents advancedOpt=true from overriding smartAnimations=false.
+		if enabled then
 			if not _OPT.MonitorThread then
 				local thread
 				thread = task.spawn(function()
-					while _OPT.Enabled and _OPT.MonitorThread == thread do
+					while _OPT.MonitorThread == thread do
 						task.wait(_OPT.MemInterval)
-						if _OPT.Enabled and _OPT.MonitorThread == thread then
+						if _OPT.MonitorThread == thread then
 							Compkiller:_SweepMemory()
 						end
-					end
-					if _OPT.MonitorThread == thread then
-						_OPT.MonitorThread = nil
 					end
 				end)
 				_OPT.MonitorThread = thread
@@ -13395,8 +13420,8 @@ Compkiller.MasterControl = function(...)
 		else
 			_OPT.MonitorThread = nil
 		end
-		_CKLog("AdvancedOptimizations: " .. (_OPT.Enabled and "ON" or "OFF") .. " | Threshold=" .. _OPT.AnimThreshold .. "fps" .. " | MemInterval=" .. _OPT.MemInterval .. "s")
-		return _OPT.Enabled
+		_CKLog("AdvancedOptimizations thread: " .. (enabled and "ON" or "OFF") .. " | MemInterval=" .. _OPT.MemInterval .. "s")
+		return enabled == true
 	end
 
 	local function pauseAllAnimations()
