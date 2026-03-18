@@ -1,3 +1,46 @@
+if not game:IsLoaded() then game.Loaded:Wait() end
+function missing(t, f, fallback)
+    if type(f) == t then return f end
+    return fallback
+end
+
+do
+    local _FLAG_KEY  = "_ck_loaded_"  .. tostring(math.random(1e8, 9e8))
+    local _KILL_KEY  = "_ck_killfn_"  .. tostring(math.random(1e8, 9e8))
+    local _TS_KEY    = "_ck_ts_"      .. tostring(math.random(1e8, 9e8))
+
+    local _debug = (_G.CK_DEBUG == true)
+    local _env   = pcall(getgenv) and getgenv() or _G
+
+    local _already = false
+    pcall(function() _already = _env[_FLAG_KEY] == true end)
+
+    if _already and not _debug then
+        -- L2: call the registered teardown fn from the previous run
+        pcall(function()
+            local killFn = _env[_KILL_KEY]
+            if type(killFn) == "function" then killFn() end
+        end)
+        -- L3: timestamp guard — if last boot was < 3s ago, hard-exit instead
+        local _lastTs = 0
+        pcall(function() _lastTs = tonumber(_env[_TS_KEY]) or 0 end)
+        if (tick() - _lastTs) < 3 then
+            return  -- too recent — silent exit, nothing spawned
+        end
+        -- Older run — allowed to restart; fall through and re-arm below
+    end
+
+    -- Arm this execution
+    pcall(function()
+        _env[_FLAG_KEY] = true
+        _env[_TS_KEY]   = tostring(math.floor(tick()))
+        -- Kill-fn will be registered later (after _CK_CONNECTIONS is set up)
+        -- Store key so the teardown block can write it without _KILL_KEY in scope
+        rawset(_G, "_ck_kk_bridge", _KILL_KEY)
+    end)
+end
+-- ============================================================================
+
 if not game:IsLoaded() then
     game.Loaded:Wait()
 end
@@ -914,50 +957,36 @@ end
 local _CK_ENCRYPTED_NAMES = {}   -- registry of all encrypted names this run
 
 -- ════════════════════════════════════════════════════════════════════════════
--- _EncryptGuiName — printable-noise name generator
--- Generates 10-20 char strings from the full printable ASCII range (0x21-0x7E),
--- seeded with a per-boot salt so every session produces a different character
--- distribution. Indistinguishable from corrupted/encoded binary data — no
--- recognisable words, prefixes, or structure for ACs to fingerprint.
--- ════════════════════════════════════════════════════════════════════════════
--- _NOISE_CHARS / _NOISE_LEN: built once at module load — not per call.
--- string.char() is called 94 times total (not 94×N per execution).
-local _NOISE_CHARS = table.concat({
-    string.char(33), string.char(34), string.char(35), string.char(36), string.char(37), string.char(38), string.char(39), string.char(40), string.char(41), string.char(42), string.char(43), string.char(44), string.char(45), string.char(46), string.char(47), string.char(48), string.char(49), string.char(50), string.char(51), string.char(52), string.char(53), string.char(54), string.char(55), string.char(56), string.char(57), string.char(58), string.char(59), string.char(60), string.char(61), string.char(62), string.char(63), string.char(64), string.char(65), string.char(66), string.char(67), string.char(68), string.char(69), string.char(70), string.char(71), string.char(72), string.char(73), string.char(74), string.char(75), string.char(76), string.char(77), string.char(78), string.char(79), string.char(80), string.char(81), string.char(82), string.char(83), string.char(84), string.char(85), string.char(86), string.char(87), string.char(88), string.char(89), string.char(90), string.char(91), string.char(92), string.char(93), string.char(94), string.char(95), string.char(96), string.char(97), string.char(98), string.char(99), string.char(100), string.char(101), string.char(102), string.char(103), string.char(104), string.char(105), string.char(106), string.char(107), string.char(108), string.char(109), string.char(110), string.char(111), string.char(112), string.char(113), string.char(114), string.char(115), string.char(116), string.char(117), string.char(118), string.char(119), string.char(120), string.char(121), string.char(122), string.char(123), string.char(124), string.char(125), string.char(126)
-})
-local _NOISE_LEN = #_NOISE_CHARS  -- always 94
+-- _EncryptGuiName — session-unique GUI name that looks like a real Roblox
+-- internal name but changes every session and every call.
+-- Format: <RobloxPrefix>_<4-hex><suffix>  e.g. "RbxGui_3f2a_Core"
+-- • Looks legitimate to executors / AC scanners (matches known GUI name patterns)
+-- • Still unique per-session via tick() seed + call counter
+-- • No null bytes or binary noise — safe for all property assignments
+local _ENC_SEED = math.floor((tick() % 1) * 0xFFFF) + _mrandom(1, 0xFFFF)
+local _ENC_CTR  = 0
+
+local _NAME_PREFIXES = {
+    "RbxGui","CoreGui","TopbarGui","PlayerGui","UIService",
+    "ScreenGui","GuiService","SurfaceGui","BillboardGui","PortalGui",
+    "InternalUI","SystemFrame","ServiceGui","GuiManager","RbxFrame",
+}
+local _NAME_SUFFIXES = {
+    "Core","Frame","Panel","Layer","Root",
+    "Handler","Service","Instance","Module","Object",
+}
 
 local function _EncryptGuiName()
-    -- Per-boot salt: mixes entropy so same seed != same output across sessions
-    local _salt    = _mrandom(0, 0xFFFF)
-    local _nameLen = _mrandom(10, 20)
-    local _parts   = {}
-    for i = 1, _nameLen do
-        local _idx = (_salt + i * 7 + _mrandom(0, _NOISE_LEN - 1)) % _NOISE_LEN + 1
-        _parts[i]  = _NOISE_CHARS:sub(_idx, _idx)
-    end
-    return table.concat(_parts)
+    _ENC_CTR = _ENC_CTR + 1
+    -- Mix entropy: seed + counter + fresh random
+    local _n = (_ENC_SEED * 1103515245 + _ENC_CTR * 12345 + _mrandom(0, 0xFFFF)) % 0xFFFF
+    -- 4-char hex segment — unique per call
+    local _hex = string.format("%04x", _n)
+    -- Pick prefix and suffix deterministically from the mixed value
+    local _p = _NAME_PREFIXES[(_n % #_NAME_PREFIXES) + 1]
+    local _s = _NAME_SUFFIXES[(math.floor(_n / #_NAME_PREFIXES) % #_NAME_SUFFIXES) + 1]
+    return _p .. "_" .. _hex .. "_" .. _s
 end
-
-pcall(function()
-    local reg = getgenv()[_GUI_REG_KEY]
-    if type(reg) == "table" then
-        for _, oldName in ipairs(reg) do
-            pcall(function()
-                local g = CoreGui:FindFirstChild(oldName)
-                if g then g:Destroy() end
-            end)
-            pcall(function()
-                if PlayerGui then
-                    local g = PlayerGui:FindFirstChild(oldName)
-                    if g then g:Destroy() end
-                end
-            end)
-        end
-    end
-    getgenv()[_GUI_REG_KEY] = {}   -- reset for this run
-end)
-
 local function _ShieldParent(screenGui)
     _pcall(function()
         if _CK_SAFE_DO and type(_CK_SAFE_DO) == "number" then
@@ -11837,7 +11866,7 @@ function Compkiller.newNotify()
 			IconBG.BorderSizePixel = 0
 			IconBG.AnchorPoint = Vector2.new(0, 0.5)
 			IconBG.Position = UDim2.new(0, 10, 0.5, 0)
-			IconBG.Size = UDim2.new(0, 34, 0, 34)
+			IconBG.Size = UDim2.new(0, 44, 0, 44)
 			IconBG.ZIndex = 3
 			IconBGCorner.CornerRadius = UDim.new(0, 8)
 			IconBGCorner.Parent = IconBG
@@ -11849,10 +11878,10 @@ function Compkiller.newNotify()
 			CompLogo.BorderSizePixel = 0
 			CompLogo.AnchorPoint = Vector2.new(0.5, 0.5)
 			CompLogo.Position = UDim2.new(0.5, 0, 0.5, 0)
-			CompLogo.Size = UDim2.new(0.58, 0, 0.58, 0)
+			CompLogo.Size = UDim2.new(0.72, 0, 0.72, 0)
 			CompLogo.SizeConstraint = Enum.SizeConstraint.RelativeYY
 			CompLogo.ZIndex = 5
-			CompLogo.ImageColor3 = _barColor
+			CompLogo.ImageColor3 = Color3.new(1, 1, 1)  -- white icon
 
 			-- Resolve icon: rbxassetid passthrough, else lucide lookup
 			if tostring(Notify.Icon):find("rbxassetid://", 1, true)
@@ -11873,7 +11902,7 @@ function Compkiller.newNotify()
 			TextColumn.Parent = Card
 			TextColumn.BackgroundTransparency = 1
 			TextColumn.BorderSizePixel = 0
-			TextColumn.Position = UDim2.new(0, 50, 0, 8)
+			TextColumn.Position = UDim2.new(0, 62, 0, 8)  -- clear of pill (10 + 44 + 8)
 			TextColumn.Size = UDim2.new(1, -60, 0, 0)
 			TextColumn.AutomaticSize = Enum.AutomaticSize.Y
 			TextColumn.ZIndex = 3
