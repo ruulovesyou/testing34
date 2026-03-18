@@ -21,6 +21,22 @@ _G.CK_LOADED = true
 getgenv().CK_LOADED = getgenv().CK_LOADED or {}
 if getgenv().CK_LOADED.__ran then return end
 getgenv().CK_LOADED.__ran = true
+
+-- ============================================================================
+-- EXECUTION GUARD  v2  (3-layer hardened)
+--
+-- L1  getgenv() opaque flag  — survives loadstring re-runs, persists across
+--                               require() calls, written under null-prefixed key
+--                               that ACs cannot enumerate by name scanning.
+-- L2  kill-fn check          — if a previous run registered a teardown fn,
+--                               call it first to cleanly destroy old GUIs,
+--                               threads and connections before the new run starts.
+-- L3  _G timestamp           — written at boot, checked on re-entry so a script
+--                               that somehow bypasses L1 still cannot double-run
+--                               within the same session tick window.
+--
+-- Debug bypass: set  _G.CK_DEBUG = true  before executing to force a fresh run.
+-- ============================================================================
 do
     -- Opaque keys — null-byte prefix makes them invisible to standard key scans
     local _FLAG_KEY  = "__ck_f_"  .. tostring(math.random(1e8, 9e8))
@@ -3200,14 +3216,20 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 
 			if bool then
 				Toggle:SetAttribute('Enabled',true);
-				-- Pill slides right + track color transitions
-				Compkiller:_Animation(ToggleValue, _TI.tToggle, { Position = UDim2.new(0.75, 0, 0.5, 0) })
-				Compkiller:_Animation(Toggle, _TI.tToggleC, { BackgroundColor3 = Compkiller.Colors.Toggle })
+				Compkiller:_Animation(ToggleValue,rep.Tween,{
+					Position = UDim2.new(0.75, 0, 0.5, 0)
+				})
+				Compkiller:_Animation(Toggle,rep.Tween,{
+					BackgroundColor3 = Compkiller.Colors.Toggle
+				})
 			else
 				Toggle:SetAttribute('Enabled',false);
-				-- Pill slides left + track color transitions
-				Compkiller:_Animation(ToggleValue, _TI.tToggle, { Position = UDim2.new(0.25, 0, 0.5, 0) })
-				Compkiller:_Animation(Toggle, _TI.tToggleC, { BackgroundColor3 = Compkiller.Colors.DropColor })
+				Compkiller:_Animation(ToggleValue,rep.Tween,{
+					Position = UDim2.new(0.25, 0, 0.5, 0)
+				})
+				Compkiller:_Animation(Toggle,rep.Tween,{
+					BackgroundColor3 = Compkiller.Colors.DropColor
+				})
 			end;
 		end;
 
@@ -6313,30 +6335,26 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 		Compkiller:_Hover(Frame,function(...)
 			if Signal:GetValue() then
-				Compkiller:_Animation(Frame, _TI.tBtnHover, {
-					BackgroundTransparency = 0,
-					Size = UDim2.new(1, -3, 0, 28)  -- subtle shrink inward
+				Compkiller:_Animation(Frame,TweenInfo.new(0.2),{
+					BackgroundTransparency = 0
 				})
 			end;
 		end,function()
 			if Signal:GetValue() then
-				Compkiller:_Animation(Frame, _TI.tBtnHover, {
-					BackgroundTransparency = 0.1,
-					Size = UDim2.new(1, -1, 0, 30)
+				Compkiller:_Animation(Frame,TweenInfo.new(0.2),{
+					BackgroundTransparency = 0.1
 				})
 			end;
 		end);
 
 		Compkiller:_Input(Frame,function()
-			-- Press: flash highlight then restore
-			Compkiller:_Animation(Frame, _TI.tBtn, {
-				BackgroundColor3 = Compkiller.Colors.Highlight,
-				Size = UDim2.new(1, -5, 0, 26)
+			-- Press: quick highlight flash
+			Compkiller:_Animation(Frame,TweenInfo.new(0.12),{
+				BackgroundColor3 = Compkiller.Colors.Highlight
 			})
-			task.delay(0.12, function()
-				Compkiller:_Animation(Frame, _TI.tBtnHover, {
-					BackgroundColor3 = Compkiller.Colors.MouseEnter,
-					Size = UDim2.new(1, -1, 0, 30)
+			task.delay(0.18, function()
+				Compkiller:_Animation(Frame,TweenInfo.new(0.2),{
+					BackgroundColor3 = Compkiller.Colors.MouseEnter
 				})
 			end)
 			Config.Callback();
@@ -6580,9 +6598,7 @@ function Compkiller:_LoadElement(Parent , EnabledLine , Signal , DisableStackKey
 
 			local Size = (Value - Config.Min) / (Config.Max - Config.Min);
 
-			Compkiller:_Animation(SliderInput, _TI.tSlider, {
-				Size = UDim2.new(math.clamp(Size,0.045,1), 0, 1, 0)
-			})
+			SliderInput.Size = UDim2.new(math.clamp(Size,0.045,1), 0, 1, 0)
 
 			Config.Default = Value;
 
@@ -7988,47 +8004,82 @@ function Compkiller.new(Config)
 		end;
 
 		if v then
-			-- ── OPEN: spring scale from slightly smaller + fade in ─────────
-			MainFrame.Size = UDim2.new(
-				Config.Scale.X.Scale, Config.Scale.X.Offset - 18,
-				Config.Scale.Y.Scale, Config.Scale.Y.Offset - 18)
-			MainFrame.BackgroundTransparency = 0.6
-			Compkiller:_Animation(MainFrame, _TI.tWinOpen, { Size = Config.Scale, BackgroundTransparency = 0 })
-			-- Sidebar slides in from left
-			TabButtonScrollingFrame.Position = UDim2.new(-0.3, 0, 0.5, 0)
-			Compkiller:_Animation(TabButtonScrollingFrame, _TI.tWinOpen, { Position = UDim2.new(0.5,0,0.5,0) })
-			-- TabFrame fades in
-			Compkiller:_Animation(TabFrame, _TI.tFade, { BackgroundTransparency = TabFrameBaseTrans })
-			-- Accent line grows
-			Compkiller:_Animation(LineFrame1, _TI.tWinOpen, { BackgroundTransparency = 0, Size = UDim2.new(0,20,1,0) })
-			-- Header elements stagger in
-			Compkiller:_Animation(CompLogo,    _TI.tFade, { ImageTransparency = 0 })
-			Compkiller:_Animation(WindowLabel, _TI.tFade, { TextTransparency = 0 })
-			Compkiller:_Animation(UserProfile, _TI.tFade, { ImageTransparency = 0 })
-			Compkiller:_Animation(UserText,    _TI.tFade, { TextTransparency = 0 })
-			Compkiller:_Animation(ExpireText,  _TI.tFade, { TextTransparency = 0.5 })
+			-- ── OPEN: clean original timing ─────────────────────────────────
+			Compkiller:_Animation(MainFrame,TweenInfo.new(0.2),{
+				Size = Config.Scale
+			})
+
+			Compkiller:_Animation(TabButtonScrollingFrame,TweenInfo.new(0.35,Enum.EasingStyle.Quint),{
+				Position = UDim2.new(0.5, 0, 0.5, 0)
+			})
+
+			Compkiller:_Animation(CompLogo,TweenInfo.new(0.2),{
+				ImageTransparency = 0
+			})
+
+			Compkiller:_Animation(WindowLabel,TweenInfo.new(0.2),{
+				TextTransparency = 0
+			})
+
+			Compkiller:_Animation(UserProfile,TweenInfo.new(0.2),{
+				ImageTransparency = 0
+			})
+
+			Compkiller:_Animation(UserText,TweenInfo.new(0.2),{
+				TextTransparency = 0
+			})
+
+			Compkiller:_Animation(ExpireText,TweenInfo.new(0.2),{
+				TextTransparency = 0.5
+			})
+
 			if WindowArgs._PillActive and WindowArgs._PremiumBadge and TabHover:GetValue() then
-				Compkiller:_Animation(WindowArgs._PremiumBadge, _TI.tFade, { TextTransparency = 0 })
+				Compkiller:_Animation(WindowArgs._PremiumBadge,TweenInfo.new(0.2),{ TextTransparency = 0 })
 			end
+
+			Compkiller:_Animation(MainFrame,TweenInfo.new(0.2),{
+				BackgroundTransparency = 0
+			})
+
+			Compkiller:_Animation(LineFrame1,TweenInfo.new(0.3),{
+				BackgroundTransparency = 0,
+				Size = UDim2.new(0, 20, 1, 0)
+			})
+
+			Compkiller:_Animation(TabFrame,TweenInfo.new(0.2),{
+				BackgroundTransparency = TabFrameBaseTrans
+			})
 		else
-			-- ── CLOSE: shrink down + fade out ─────────────────────────────
-			Compkiller:_Animation(TabButtonScrollingFrame, _TI.tWinClose, { Position = UDim2.new(1.5,100,0.5,0) })
-			Compkiller:_Animation(LineFrame1, _TI.t010, { BackgroundTransparency = 1, Size = UDim2.new(0,1,1,0) })
-			Compkiller:_Animation(CompLogo,    _TI.tWinClose, { ImageTransparency = 1 })
-			Compkiller:_Animation(WindowLabel, _TI.tWinClose, { TextTransparency = 1 })
-			Compkiller:_Animation(UserProfile, _TI.tWinClose, { ImageTransparency = 1 })
-			Compkiller:_Animation(UserText,    _TI.tWinClose, { TextTransparency = 1 })
-			Compkiller:_Animation(ExpireText,  _TI.tWinClose, { TextTransparency = 1 })
+			-- ── CLOSE: cool cascading collapse ──────────────────────────────
+			-- Step 1: content fades and sidebar sweeps away instantly
+			Compkiller:_Animation(TabButtonScrollingFrame,TweenInfo.new(0.25,Enum.EasingStyle.Quint,Enum.EasingDirection.In),{
+				Position = UDim2.new(1.5, 100, 0.5, 0)
+			})
+
+			Compkiller:_Animation(LineFrame1,TweenInfo.new(0.15),{
+				BackgroundTransparency = 1,
+				Size = UDim2.new(0, 1, 1, 0)
+			})
+
+			-- Step 2: header elements fade simultaneously
+			Compkiller:_Animation(CompLogo,TweenInfo.new(0.18),{ ImageTransparency = 1 })
+			Compkiller:_Animation(WindowLabel,TweenInfo.new(0.18),{ TextTransparency = 1 })
+			Compkiller:_Animation(UserProfile,TweenInfo.new(0.18),{ ImageTransparency = 1 })
+			Compkiller:_Animation(UserText,TweenInfo.new(0.18),{ TextTransparency = 1 })
+			Compkiller:_Animation(ExpireText,TweenInfo.new(0.18),{ TextTransparency = 1 })
+
 			if WindowArgs._PremiumBadge then
-				Compkiller:_Animation(WindowArgs._PremiumBadge, _TI.tWinClose, { TextTransparency = 1 })
+				Compkiller:_Animation(WindowArgs._PremiumBadge,TweenInfo.new(0.18),{ TextTransparency = 1 })
 			end
-			Compkiller:_Animation(TabFrame, _TI.t010, { BackgroundTransparency = 1 })
-			-- Main frame shrinks and fades out
-			Compkiller:_Animation(MainFrame, _TI.tWinClose, {
+
+			Compkiller:_Animation(TabFrame,TweenInfo.new(0.1),{ BackgroundTransparency = 1 })
+
+			-- Step 3: frame collapses with Quint In — snappy professional feel
+			Compkiller:_Animation(MainFrame,TweenInfo.new(0.3,Enum.EasingStyle.Quint,Enum.EasingDirection.In),{
 				BackgroundTransparency = 1,
 				Size = UDim2.new(
-					Config.Scale.X.Scale, Config.Scale.X.Offset - 20,
-					Config.Scale.Y.Scale, Config.Scale.Y.Offset - 20)
+					Config.Scale.X.Scale, Config.Scale.X.Offset - 16,
+					Config.Scale.Y.Scale, Config.Scale.Y.Offset - 16)
 			})
 		end;
 	end);
@@ -14250,18 +14301,38 @@ Compkiller.MasterControl = function(...)
 		if cfg.sleepMode        ~= nil  then setSleepMode(cfg.sleepMode)                                     end
 		if cfg.fpsCap           ~= nil  then fpsCap(cfg.fpsCap)                                              end
 
-		-- ── ANIMATIONS ──────────────────────────────────────────────────────────
-		-- animation        = bool   master switch for ALL UI animations
-		--                           true  = tweens enabled (default)
-		--                           false = instant property sets, no tweens
-		-- smartAnimations  = bool   FPS-adaptive tween durations
-		-- pauseAnimations  = bool   temporary pause without disabling (true/false)
+		-- ── ANIMATION API ────────────────────────────────────────────────────────
+		--
+		--  animation       = bool    Master on/off for ALL UI tweens.
+		--                            false → every Compkiller:_Animation() call
+		--                            instantly sets properties, zero TweenService.
+		--                            Affects: window, tabs, toggles, buttons,
+		--                                     dropdowns, notifications, loader.
+		--
+		--  optimizeMode    = bool    Performance mode — disables tweens AND reduces
+		--                            rendering overhead (blur, extra GUI layers).
+		--                            Designed for very low-end devices.
+		--                            Use animation=false to only kill tweens.
+		--
+		--  smartAnimations = bool    FPS-adaptive tween duration scaling.
+		--                            At high FPS → full duration.
+		--                            At low FPS  → shorter tweens to avoid jank.
+		--                            Requires advancedOpt=true to take effect.
+		--
+		--  advancedOpt     = bool    Starts the background FPS monitor thread
+		--                            that feeds smartAnimations + memory sweeper.
+		--                            Safe to leave enabled; negligible overhead.
+		--
+		--  pauseAnimations = bool    Temporarily suspend tweens without disabling.
+		--                            true  → pause (sets in progress instantly).
+		--                            false → resume from paused state.
+		--                            Does NOT change the animation master switch.
 		-- ─────────────────────────────────────────────────────────────────────────
 		if cfg.animation ~= nil then
 			Compkiller.AnimationsEnabled = (cfg.animation ~= false)
 			if not Compkiller.AnimationsEnabled then pauseAllAnimations() else resumeAllAnimations() end
 		end
-		-- animationsEnabled removed — use animation = true/false instead
+		if cfg.optimizeMode ~= nil then optimizeMode(cfg.optimizeMode) end
 		if cfg.pauseAnimations == true  then pauseAllAnimations()  end
 		if cfg.pauseAnimations == false then resumeAllAnimations() end
 		if cfg.forceGC          == true  then forceGC()                                                      end
