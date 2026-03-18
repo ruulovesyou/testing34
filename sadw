@@ -11051,7 +11051,7 @@ function Compkiller.new(Config)
 
 		-- [AVATAR] Respect HideAvatar toggle
 		if WindowArgs._HideAvatar then
-			UserProfile.Image = Compkiller:CacheImage("rbxassetid://109535175596957")  -- custom hide avatar
+			UserProfile.Image = Compkiller:CacheImage("rbxassetid://10723346871")  -- custom hide avatar
 		else
 			UserProfile.Image = config.UserProfile;
 		end
