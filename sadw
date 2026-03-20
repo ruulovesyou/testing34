@@ -9618,9 +9618,7 @@ function Compkiller:_SmartAnimation(Self, Info, Property)
 	local threshold = _OPT.AnimThreshold
 	if currentFPS < threshold then
 		for prop, val in pairs(Property) do
-			pcall(function()
-				Self[prop] = val
-			end)
+			pcall(function() Self[prop] = val end)
 		end
 		_OPT.Stats.InstantSets = _OPT.Stats.InstantSets + 1
 		return _OPT._DummyTween
@@ -9629,56 +9627,52 @@ function Compkiller:_SmartAnimation(Self, Info, Property)
 	local fpsScale = math.clamp(currentFPS / 60, 0.5, 1.0)
 	local newDuration = math.max(0.05, baseDuration * fpsScale)
 	local newInfo
-	if Info then
-		newInfo = TweenInfo.new(
-			newDuration,
-			Info.EasingStyle,
-			Info.EasingDirection,
-			Info.RepeatCount,
-			Info.Reverses,
-			Info.DelayTime
-		)
+	if fpsScale >= 0.99 then
+		-- FPS healthy: reuse original TweenInfo, zero allocation
+		newInfo = Info or TweenInfo.new(newDuration)
+	elseif Info then
+		newInfo = TweenInfo.new(newDuration, Info.EasingStyle, Info.EasingDirection,
+			Info.RepeatCount, Info.Reverses, Info.DelayTime)
 	else
 		newInfo = TweenInfo.new(newDuration)
 	end
+	-- FIX: memoize tostring(Self) — called once here, reused everywhere below
+	local _ikey = tostring(Self)
 	for prop in pairs(Property) do
-		local dedupKey = tostring(Self) .. "|" .. prop
+		local dedupKey = _ikey .. "|" .. prop
 		local existing = _OPT.ActiveTweenMap[dedupKey]
 		if existing then
-			local ok, playing = pcall(function()
-				return existing.PlaybackState
-			end)
+			local ok, playing = pcall(function() return existing.PlaybackState end)
 			if ok and playing == Enum.PlaybackState.Playing then
-				pcall(function()
-					existing:Cancel()
-				end)
+				pcall(function() existing:Cancel() end)
 				_OPT.Stats.DedupCancels = _OPT.Stats.DedupCancels + 1
 			end
 			_OPT.ActiveTweenMap[dedupKey] = nil
 		end
 	end
-	local _ok2, tween = pcall(TweenService.Create, TweenService, Self, newInfo, Property)
-	if not _ok2 or not tween then
+	-- FIX: pcall-guard TweenService:Create (throws on protected/destroyed instances)
+	local _ok, tween = pcall(TweenService.Create, TweenService, Self, newInfo, Property)
+	if not _ok or not tween then
 		for prop, val in pairs(Property) do pcall(function() Self[prop] = val end) end
 		return _OPT._DummyTween
 	end
 	table.insert(_OPT.ActiveTweens, tween)
 	for prop in pairs(Property) do
-		_OPT.ActiveTweenMap[tostring(Self) .. "|" .. prop] = tween
+		_OPT.ActiveTweenMap[_ikey .. "|" .. prop] = tween
 	end
 	tween:Play()
-	_TrackConn(tween.Completed:Connect(function()
+	-- FIX: use :Once() instead of _TrackConn(:Connect()) — the Completed callback
+	-- previously leaked into _CK_CONNECTIONS and was never cleaned up.
+	tween.Completed:Once(function()
 		local idx = table.find(_OPT.ActiveTweens, tween)
-		if idx then
-			table.remove(_OPT.ActiveTweens, idx)
-		end
+		if idx then table.remove(_OPT.ActiveTweens, idx) end
 		for prop in pairs(Property) do
-			local key = tostring(Self) .. "|" .. prop
+			local key = _ikey .. "|" .. prop
 			if _OPT.ActiveTweenMap[key] == tween then
 				_OPT.ActiveTweenMap[key] = nil
 			end
 		end
-	end))
+	end)
 	return tween
 end
 function Compkiller:_SweepMemory()
@@ -10367,30 +10361,55 @@ Compkiller.MasterControl = function(...)
 	end
 	local function enableAdvancedOptimizations(enabled)
 		if enabled then
+			-- FIX: set _OPT.Enabled so _Animation routes through _SmartAnimation
+			_OPT.Enabled = true
+
 			if not _OPT.MonitorThread then
 				local thread
 				thread = task.spawn(function()
+					-- FIX: live FPS sampler — _OPT.FPS was hardcoded at 60, never updated.
+					-- _SmartAnimation reads _OPT.FPS for threshold check and duration scaling.
+					-- Without this sampler the entire smart scaling system was inert.
+					local _lastTick = tick()
+					local _fpsSamples = {}
+					local _FPS_SAMPLE_MAX = 30
+					local _fpsConn = RunService.Heartbeat:Connect(function(dt)
+						if dt > 0 then
+							local sample = math.clamp(1 / dt, 1, 300)
+							table.insert(_fpsSamples, sample)
+							if #_fpsSamples > _FPS_SAMPLE_MAX then
+								table.remove(_fpsSamples, 1)
+							end
+							local sum = 0
+							for _, v in ipairs(_fpsSamples) do sum = sum + v end
+							_OPT.FPS = sum / #_fpsSamples
+						end
+					end)
+					_TrackConn(_fpsConn)
+
 					while _OPT.MonitorThread == thread do
 						task.wait(_OPT.MemInterval)
 						if _OPT.MonitorThread == thread then
 							Compkiller:_SweepMemory()
 						end
 					end
+					_fpsConn:Disconnect()
 				end)
 				_OPT.MonitorThread = thread
 				_TrackThread(thread)
 			end
 		else
+			_OPT.Enabled = false
 			_OPT.MonitorThread = nil
 		end
 	end
 	local function pauseAllAnimations()
 		_OPT._AnimPaused = true
-		_OPT.Enabled = false
+		-- FIX: don't touch _OPT.Enabled here — advancedOpt owns that flag.
+		-- _Animation already checks _AnimPaused first before checking _OPT.Enabled.
 	end
 	local function resumeAllAnimations()
 		_OPT._AnimPaused = false
-		_OPT.Enabled = true
 	end
 	local function forceGC()
 		local before = math.floor((collectgarbage("count") or 0) + 0.5)
@@ -11182,11 +11201,19 @@ Compkiller.MasterControl = function(...)
 		if cfg.memInterval ~= nil then
 			setMemInterval(cfg.memInterval)
 		end
-		if cfg.smartAnimations ~= nil then
-			setSmartAnimations(cfg.smartAnimations)
+		-- ANIMATION MASTER SWITCH: set first so downstream functions see correct state
+		if cfg.animation ~= nil then
+			Compkiller.AnimationsEnabled = (cfg.animation ~= false)
+			if not Compkiller.AnimationsEnabled then
+				Compkiller.PerformanceMode = false
+			end
 		end
-		if cfg.advancedOpt ~= nil then
-			enableAdvancedOptimizations(cfg.advancedOpt)
+		-- optimize = for-animation-only toggle: sets PerformanceMode + smart anims together.
+		-- Processed BEFORE advancedOpt/smartAnimations so explicit keys win.
+		if cfg.optimize ~= nil then
+			local on = (cfg.optimize == true)
+			optimizeMode(on)
+			-- Don't touch _OPT.Enabled here — advancedOpt/smartAnimations handle that below
 		end
 		if cfg.optimizeMode ~= nil then
 			optimizeMode(cfg.optimizeMode)
@@ -11197,35 +11224,20 @@ Compkiller.MasterControl = function(...)
 		if cfg.fpsCap ~= nil then
 			fpsCap(cfg.fpsCap)
 		end
-		if cfg.animation ~= nil then
-			Compkiller.AnimationsEnabled = (cfg.animation ~= false)
-			if not Compkiller.AnimationsEnabled then
-				pauseAllAnimations()
-				Compkiller.PerformanceMode = false
-			else
-				resumeAllAnimations()
-			end
-		end
-		if cfg.optimize ~= nil then
-			local on = (cfg.optimize == true)
-			optimizeMode(on)
-			setSmartAnimations(on)
-			enableAdvancedOptimizations(on)
-		end
-		if cfg.optimizeMode ~= nil then
-			optimizeMode(cfg.optimizeMode)
-		end
-		if cfg.smartAnimations ~= nil then
-			setSmartAnimations(cfg.smartAnimations)
-		end
-		if cfg.advancedOpt ~= nil then
-			enableAdvancedOptimizations(cfg.advancedOpt)
-		end
+		-- pauseAnimations: processed before advancedOpt so advancedOpt can re-enable after
 		if cfg.pauseAnimations == true then
 			pauseAllAnimations()
 		end
 		if cfg.pauseAnimations == false then
 			resumeAllAnimations()
+		end
+		-- smartAnimations and advancedOpt: processed last so they always win.
+		-- Each is processed exactly once (duplicates removed).
+		if cfg.smartAnimations ~= nil then
+			setSmartAnimations(cfg.smartAnimations)
+		end
+		if cfg.advancedOpt ~= nil then
+			enableAdvancedOptimizations(cfg.advancedOpt)
 		end
 		if cfg.forceGC == true then
 			forceGC()
