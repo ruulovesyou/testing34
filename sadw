@@ -9262,7 +9262,9 @@ function Compkiller.newNotify()
 			Card.Size = UDim2.new(1, 0, 0, 0)
 			Card.AutomaticSize = Enum.AutomaticSize.Y
 			Card.ZIndex = 2
-			Card.Position = UDim2.new(1, 300, 0, 0)
+			Card.Position = Compkiller.AnimationsEnabled
+				and UDim2.new(1, 300, 0, 0)   -- off-screen start for slide-in animation
+				or  UDim2.new(0, 0, 0, 0)     -- final position immediately (no animation)
 			CardCorner.CornerRadius = UDim.new(0, 8)
 			CardCorner.Parent = Card
 			CardStroke.Color = _stColor
@@ -9384,38 +9386,55 @@ function Compkiller.newNotify()
 			local function _syncBodyVisibility()
 				Body.Visible = Body.Text ~= nil and Body.Text ~= ""
 			end
+			local _anim = Compkiller.AnimationsEnabled  -- snapshot at creation time
+
 			local Close = function()
 				if _stopSpin then
 					_stopSpin()
 					_stopSpin = nil
 				end
-				Compkiller:_Animation(
-					Card,
-					TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
-					{ Position = UDim2.new(1, 320, 0, 0) }
-				)
-				task.wait(0.2)
-				Compkiller:_Animation(
-					BlockFrame,
-					TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
-					{ Size = UDim2.new(1, 0, 0, 0) }
-				)
-				task.wait(0.28)
+				if _anim then
+					Compkiller:_Animation(
+						Card,
+						TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+						{ Position = UDim2.new(1, 320, 0, 0) }
+					)
+					task.wait(0.2)
+					Compkiller:_Animation(
+						BlockFrame,
+						TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+						{ Size = UDim2.new(1, 0, 0, 0) }
+					)
+					task.wait(0.28)
+				else
+					-- No animations: destroy instantly
+					Card.Position = UDim2.new(1, 320, 0, 0)
+				end
 				BlockFrame:Destroy()
 			end
 			local Show = function()
-				Compkiller:_Animation(
-					Card,
-					TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-					{ Position = UDim2.new(0, 0, 0, 0) }
-				)
+				if _anim then
+					Compkiller:_Animation(
+						Card,
+						TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+						{ Position = UDim2.new(0, 0, 0, 0) }
+					)
+				else
+					-- No animations: snap to final position instantly
+					Card.Position = UDim2.new(0, 0, 0, 0)
+				end
 			end
 			if typeof(Notify.Duration) == "number" and Notify.Duration ~= math.huge then
-				Compkiller:_Animation(
-					BarFill,
-					TweenInfo.new(Notify.Duration, Enum.EasingStyle.Linear),
-					{ Size = UDim2.new(1, 0, 1, 0) }
-				)
+				if _anim then
+					Compkiller:_Animation(
+						BarFill,
+						TweenInfo.new(Notify.Duration, Enum.EasingStyle.Linear),
+						{ Size = UDim2.new(1, 0, 1, 0) }
+					)
+				else
+					-- No animations: fill bar instantly, hide bar track (pointless without animation)
+					BarTrack.Visible = false
+				end
 				return task.delay(0.2, function()
 					Show()
 					task.delay(Notify.Duration, Close)
@@ -9453,7 +9472,7 @@ function Compkiller.newNotify()
 					if new > 1 then
 						new = new / 100
 					end
-					if Time and Time <= 0 then
+					if not _anim or (Time and Time <= 0) then
 						BarFill.Size = UDim2.new(new, 0, 1, 0)
 						return
 					end
