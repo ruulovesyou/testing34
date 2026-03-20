@@ -2533,7 +2533,7 @@ function Compkiller:_Animation(Self, Info, Property)
 		end
 		return (_OPT and _OPT._DummyTween) or nil
 	end
-	if _OPT and _OPT._AnimPaused then
+	if _OPT and _OPT._AnimPaused and not Compkiller.AnimationsEnabled then
 		for prop, val in pairs(Property) do
 			pcall(function()
 				Self[prop] = val
@@ -11224,9 +11224,12 @@ Compkiller.MasterControl = function(...)
 		if cfg.fpsCap ~= nil then
 			fpsCap(cfg.fpsCap)
 		end
-		-- pauseAnimations: processed before advancedOpt so advancedOpt can re-enable after
+		-- pauseAnimations: only pause tweens when animations are also disabled.
+		-- If animation=true, pauseAnimations=true is ignored — animations stay on.
 		if cfg.pauseAnimations == true then
-			pauseAllAnimations()
+			if not Compkiller.AnimationsEnabled then
+				pauseAllAnimations()
+			end
 		end
 		if cfg.pauseAnimations == false then
 			resumeAllAnimations()
