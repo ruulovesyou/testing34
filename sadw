@@ -8645,7 +8645,7 @@ function Compkiller.new(Config)
 			WindowArgs._PillActive = true
 			if WindowArgs._PremiumBadge then
 				WindowArgs._PremiumBadge.Text = "Premium"
-				WindowArgs._PremiumBadge.TextColor3 = Color3.fromRGB(255, 190, 50)
+				WindowArgs._PremiumBadge.TextColor3 = Color3.fromRGB(245, 158, 11)
 			end
 		else
 			_expireDisplay = ""
@@ -8653,13 +8653,13 @@ function Compkiller.new(Config)
 			WindowArgs._PillActive = true
 			if WindowArgs._PremiumBadge then
 				WindowArgs._PremiumBadge.Text = "Free"
-				WindowArgs._PremiumBadge.TextColor3 = Color3.fromRGB(60, 210, 180)
+				WindowArgs._PremiumBadge.TextColor3 = Color3.fromRGB(34, 197, 94)
 			end
 		end
 		ExpireText.Text = _expireDisplay
 		WindowLabel.Text = config.WindowName
 		if WindowArgs._HideAvatar then
-			UserProfile.Image = Compkiller:CacheImage("rbxassetid://9613855144")--HIDECOG
+			UserProfile.Image = Compkiller:CacheImage("rbxassetid://9613855144") --HIDEAVATAR
 		else
 			UserProfile.Image = config.UserProfile
 		end
