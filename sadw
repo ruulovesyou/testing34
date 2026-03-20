@@ -281,6 +281,25 @@ end
 local _CK_VERSION = "5.5.4"
 math.randomseed(os.time and os.time() or tick() * 1000)
 local _CK_BUILD = "Shield-Edition"
+
+-- ── GC helpers ───────────────────────────────────────────────────────────────
+-- Roblox only allows collectgarbage("count") in some executors; most block it
+-- entirely and require gcinfo() instead.  collectgarbage("collect") is always
+-- blocked.  These two wrappers normalise both cases safely.
+local function _safeGCInfo()
+	if type(gcinfo) == "function" then
+		local ok, kb = pcall(gcinfo)
+		if ok and type(kb) == "number" then return kb end
+	end
+	local ok2, kb2 = pcall(collectgarbage, "count")
+	if ok2 and type(kb2) == "number" then return kb2 end
+	return 0
+end
+local function _safeGCCollect()
+	-- collectgarbage("collect") is blocked on Roblox — silently no-op.
+	pcall(collectgarbage, "collect")
+end
+-- ─────────────────────────────────────────────────────────────────────────────
 local _rawget = rawget
 local _rawset = rawset
 local _pcall = pcall
@@ -708,23 +727,45 @@ local function _GetProtectFn()
 	end
 	return nil
 end
+local _CK_GUI_SAFE_PARENTS = {}  -- [screenGui] = the container protect_gui actually placed it in
+
 local function _ReApplyShield(screenGui)
+	local _shielded = false
+
+	-- 1. Try protect_gui first (direct call — no wrapper)
 	_pcall(function()
 		local fn = _GetProtectFn()
 		if fn then
-			fn(screenGui)
-		end
-	end)
-	_pcall(function()
-		local huiFn = gethui or get_hidden_ui or get_hidden_gui or hiddenUI
-		if _type(huiFn) == "function" and not _islclosure(huiFn) then
-			local ok, hui = _pcall(huiFn)
-			if ok and hui and screenGui.Parent ~= hui then
-				screenGui.Parent = hui
+			local ok = _pcall(fn, screenGui)
+			if ok then
+				_shielded = true
 			end
 		end
 	end)
-	_safeSet(screenGui, "Parent", _GUI_PARENT)
+
+	-- 2. Try gethui() fallback
+	if not _shielded then
+		_pcall(function()
+			local huiFn = gethui or get_hidden_ui or get_hidden_gui or hiddenUI
+			if _type(huiFn) == "function" and not _islclosure(huiFn) then
+				local ok, hui = _pcall(huiFn)
+				if ok and hui then
+					screenGui.Parent = hui
+					-- Record where this GUI actually lives so the monitor knows
+					_CK_GUI_SAFE_PARENTS[screenGui] = hui
+					_shielded = true
+				end
+			end
+		end)
+	end
+
+	-- 3. Last resort — _GUI_PARENT only if nothing else worked
+	if not _shielded then
+		_safeSet(screenGui, "Parent", _GUI_PARENT)
+		_CK_GUI_SAFE_PARENTS[screenGui] = _GUI_PARENT
+	end
+
+	-- Always restore these regardless of parent strategy
 	_safeSet(screenGui, "DisplayOrder", _CK_SAFE_DO)
 	_safeSet(screenGui, "ResetOnSpawn", false)
 	_safeSet(screenGui, "Enabled", true)
@@ -744,7 +785,13 @@ local function _StartGuiIntegrityMonitor(screenGui)
 	end
 	local _monitors = {
 		Parent = function()
-			if screenGui.Parent ~= _GUI_PARENT then
+			-- Compare against wherever THIS gui was actually placed by protect_gui
+			-- (could be gethui(), RobloxGui, CoreGui, or _GUI_PARENT depending on executor).
+			-- Using _GUI_PARENT here was wrong — it would always fire when the GUI is
+			-- correctly hidden in gethui() space, causing an infinite re-parent loop.
+			local expectedParent = _CK_GUI_SAFE_PARENTS[screenGui] or _GUI_PARENT
+			local ok, currentParent = _pcall(function() return screenGui.Parent end)
+			if ok and currentParent ~= expectedParent then
 				_debouncedFix("Parent", function()
 					_ReApplyShield(screenGui)
 				end)
@@ -791,6 +838,7 @@ local function _StartGuiIntegrityMonitor(screenGui)
 				end)
 			end
 			_CK_INTEGRITY_CONNS = {}
+			_CK_GUI_SAFE_PARENTS[screenGui] = nil   -- clean up parent record
 			_pcall(function()
 				_DisarmCanary(screenGui)
 			end)
@@ -917,47 +965,68 @@ local function _ShieldParent(screenGui)
 		screenGui.Name = encName
 		_TrackGuiName(encName)
 	end)
-	_pcall(function(...)
-		local protectFns = {
+
+	-- ── Protection + parenting ────────────────────────────────────────────────
+	-- Priority order:
+	--   1. syn.protect_gui (direct call — no _newcclosure wrapper, that breaks
+	--      the executor's internal GUI tracking and makes the GUI re-appear in
+	--      the game's scan space)
+	--   2. gethui() / get_hidden_ui() fallback  (parent directly)
+	--   3. _GUI_PARENT last resort  (only reached if nothing above worked)
+	--
+	-- CRITICAL: once a protect function has handled parenting we must NOT set
+	-- screenGui.Parent again — doing so rips the GUI back out of the hidden
+	-- container and makes it fully detectable.
+	local _protected = false
+
+	_pcall(function()
+		-- Build candidate list.  Call them DIRECTLY — not through _newcclosure.
+		local _protectFns = {
+			syn and syn.protect_gui,
 			protect_gui,
 			protectgui,
-			syn and syn.protect_gui,
 			fluxus and fluxus.protect_gui,
 			getgenv and getgenv().protect_gui,
 		}
-		local fnNames = {
-			"protect_gui",
-			"protectgui",
-			"syn.protect_gui",
-			"fluxus.protect_gui",
-			"getgenv().protect_gui",
-		}
-		local applied = false
-		for i, fn in _ipairs(protectFns) do
-			if _type(fn) == "function" then
-				if _islclosure(fn) then
-				else
-					_newcclosure(fn)(screenGui)
-					applied = true
+		for _, fn in _ipairs(_protectFns) do
+			if _type(fn) == "function" and not _islclosure(fn) then
+				local ok = _pcall(fn, screenGui)
+				if ok then
+					-- protect_gui sets Parent internally; record wherever it landed
+					_pcall(function()
+						_CK_GUI_SAFE_PARENTS[screenGui] = screenGui.Parent
+					end)
+					_protected = true
 					break
 				end
 			end
 		end
-		if not applied then
+	end)
+
+	if not _protected then
+		-- protect_gui unavailable — fall back to gethui() parenting
+		_pcall(function()
 			local huiFn = gethui or get_hidden_ui or get_hidden_gui or hiddenUI
 			if _type(huiFn) == "function" and not _islclosure(huiFn) then
 				local ok, hui = _pcall(huiFn)
 				if ok and hui then
-					_pcall(function()
-						screenGui.Parent = hui
-					end)
+					screenGui.Parent = hui
+					_CK_GUI_SAFE_PARENTS[screenGui] = hui
+					_protected = true
 				end
 			end
-		end
-	end)
-	_pcall(function()
-		screenGui.Parent = _GUI_PARENT
-	end)
+		end)
+	end
+
+	if not _protected then
+		-- Last resort: use the pre-resolved _GUI_PARENT
+		_pcall(function()
+			screenGui.Parent = _GUI_PARENT
+			_CK_GUI_SAFE_PARENTS[screenGui] = _GUI_PARENT
+		end)
+	end
+	-- ─────────────────────────────────────────────────────────────────────────
+
 	_pcall(function()
 		screenGui:SetAttribute(_CK_GUI_TAG, true)
 	end)
@@ -9676,7 +9745,7 @@ function Compkiller:GetOptimizerStats()
 		GCEnabled       = _OPT.GCEnabled,
 		GCCycles        = _OPT.Stats.GCCycles,
 		GCThresholdKB   = _OPT.GCThresholdKB,
-		GCMemKB         = math.floor((collectgarbage("count") or 0) + 0.5),
+		GCMemKB         = math.floor(_safeGCInfo() + 0.5),
 	}
 end
 function Compkiller:SetAnimThreshold(fps)
@@ -9830,9 +9899,9 @@ do
 	table.insert(_CK_CONNECTIONS, _dummyBE.Event:Connect(function() end))
 end
 function Compkiller:ForceGC()
-	local before = _mfloor((collectgarbage("count") or 0) + 0.5)
-	collectgarbage("collect")
-	local after = _mfloor((collectgarbage("count") or 0) + 0.5)
+	local before = _mfloor(_safeGCInfo() + 0.5)
+	_safeGCCollect()
+	local after = _mfloor(_safeGCInfo() + 0.5)
 	local freed = _mmax(0, before - after)
 	return freed
 end
@@ -10380,7 +10449,7 @@ Compkiller.MasterControl = function(...)
 			"|  Memory Sweeps   : " .. stats.MemorySweeps,
 			"|  Tracked Threads : " .. #_CK_THREADS,
 			"|  Tracked Conns   : " .. #_CK_CONNECTIONS,
-			"|  GC Memory (KB)  : " .. tostring(math.floor((collectgarbage("count") or 0) + 0.5)),
+			"|  GC Memory (KB)  : " .. tostring(math.floor(_safeGCInfo() + 0.5)),
 			"+==========================================",
 			"|  Windows Open    : " .. #Compkiller.Windows,
 			"+==========================================",
@@ -10609,15 +10678,15 @@ Compkiller.MasterControl = function(...)
 						end
 
 						-- ④c GC pressure watcher ────────────────────────────
-						-- Monitors Lua heap size. If it exceeds GCThresholdKB and
-						-- enough time has passed since the last collection, force one.
-						-- Uses only collectgarbage — zero AC-detectable APIs.
+						-- Monitors Lua heap size via gcinfo() (Roblox-safe).
+						-- collectgarbage("collect") is blocked on Roblox, so we
+						-- call _safeGCCollect() which pcall-wraps it harmlessly.
 						if _OPT.GCEnabled then
-							local heapKB = math.floor((collectgarbage("count") or 0) + 0.5)
+							local heapKB = math.floor(_safeGCInfo() + 0.5)
 							if heapKB > _OPT.GCThresholdKB
 								and (now - _OPT.GCLastAt) >= _OPT.GCCooldown
 							then
-								collectgarbage("collect")
+								_safeGCCollect()
 								_OPT.GCLastAt  = now
 								_OPT.GCLastKB  = heapKB
 								_OPT.Stats.GCCycles = _OPT.Stats.GCCycles + 1
@@ -10693,9 +10762,9 @@ Compkiller.MasterControl = function(...)
 		_OPT.Enabled = true
 	end
 	local function forceGC()
-		local before = math.floor((collectgarbage("count") or 0) + 0.5)
-		collectgarbage("collect")
-		local after = math.floor((collectgarbage("count") or 0) + 0.5)
+		local before = math.floor(_safeGCInfo() + 0.5)
+		_safeGCCollect()
+		local after = math.floor(_safeGCInfo() + 0.5)
 		local freed = math.max(0, before - after)
 		return freed
 	end
