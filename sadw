@@ -1162,16 +1162,61 @@ local function _EnableUltimateShieldAdvanced(self, config)
 	return results
 end
 local _OPT = {
-	AnimThreshold = 30,
-	MemInterval = 120,
-	FPS = 60,
-	FpsSamples = {},
-	FpsSampleMax = 30,
-	ActiveTweens = {},
+	-- ── Core state ──────────────────────────────────────────────────────────
+	Enabled        = false,
+	_AnimPaused    = false,
+	AnimThreshold  = 30,
+	MemInterval    = 120,
+	FPS            = 60,
+	FpsSamples     = {},
+	FpsSampleMax   = 30,
+	ActiveTweens   = {},
 	ActiveTweenMap = {},
-	MonitorThread = nil,
-	_DummyTween = nil,
-	Stats = { TweensCancelled = 0, InstantSets = 0, DedupCancels = 0, MemorySweeps = 0, LastSweepAt = 0 },
+	MonitorThread  = nil,
+	_DummyTween    = nil,
+	Stats = {
+		TweensCancelled = 0,
+		InstantSets     = 0,
+		DedupCancels    = 0,
+		MemorySweeps    = 0,
+		LastSweepAt     = 0,
+		-- ── New subsystem stats ─────────────────────────────────────────────
+		CulledTweens    = 0,   -- tweens skipped because element was invisible
+		BudgetBlocked   = 0,   -- tweens instant-set due to frame budget cap
+		AutoTuneAdj     = 0,   -- number of auto-tuner threshold adjustments made
+		GCCycles        = 0,   -- automatic GC collections triggered by pressure watcher
+		BatchFlushed    = 0,   -- individual property sets batched and flushed
+	},
+	-- ── Auto-tuner: live-adjusts AnimThreshold based on FPS trend ──────────
+	AutoTune      = true,   -- enable dynamic threshold adjustment
+	AutoTuneMin   = 20,     -- floor — always animate when FPS is this healthy
+	AutoTuneMax   = 75,     -- ceiling — instant-set everything when FPS this low
+	AutoTuneStep  = 3,      -- fps units moved per adjustment cycle
+	FpsTrend      = 0,      -- +1 improving / -1 degrading / 0 stable
+	FpsPrev       = 60,     -- previous rolling FPS for trend delta
+	-- ── Frame budget: caps new tweens created per Heartbeat frame ───────────
+	FrameBudget   = 6,      -- max tweens spawned per frame before instant-set kicks in
+	FrameBudgetUsed = 0,    -- counter reset each Heartbeat
+	-- ── Visibility culling: skip tweens on hidden/zero-size elements ─────────
+	CullInvisible = true,
+	-- ── Adaptive sweep: sweep interval shrinks when FPS is hurting ───────────
+	SweepIntervalMin = 20,   -- seconds — aggressive sweep when FPS is bad
+	SweepIntervalMax = 180,  -- seconds — relaxed sweep when FPS is healthy
+	-- ── GC pressure watcher: auto-collects when Lua heap is bloated ─────────
+	GCEnabled      = true,
+	GCThresholdKB  = 8192,  -- KB — trigger GC when heap exceeds this
+	GCLastKB       = 0,
+	GCCooldown     = 30,    -- seconds between automatic GC triggers
+	GCLastAt       = 0,
+	-- ── Batch queue: defers instant-sets to end-of-frame to avoid micro-stutter
+	BatchEnabled   = true,
+	BatchQueue     = {},    -- {inst, prop, val} items flushed each Heartbeat
+	BatchFlushing  = false,
+	-- ── Priority registry: per-instance animation priority ───────────────────
+	-- "HIGH"   → last to be instant-set; always gets a tween if FPS allows
+	-- "NORMAL" → default behaviour
+	-- "LOW"    → first to be instant-set; culled aggressively when FPS drops
+	PriorityMap   = {},
 }
 local function _TrackConn(conn)
 	table.insert(_CK_CONNECTIONS, conn)
@@ -1219,6 +1264,13 @@ pcall(function(...)
 		_OPT.MonitorThread = nil
 		_OPT.ActiveTweenMap = {}
 		_OPT._DummyTween = nil
+		_OPT.BatchQueue = {}
+		_OPT.BatchFlushing = false
+		_OPT.FrameBudgetUsed = 0
+		_OPT.FrameBudget = 6
+		_OPT.FpsTrend = 0
+		_OPT.FpsPrev = 60
+		_OPT.PriorityMap = {}
 		_CK_HIDDEN_GUI_NAMES = {}
 		_TW_CACHE = {}
 		_TURBO_ACTIVE = false
@@ -2533,7 +2585,7 @@ function Compkiller:_Animation(Self, Info, Property)
 		end
 		return (_OPT and _OPT._DummyTween) or nil
 	end
-	if _OPT and _OPT._AnimPaused and not Compkiller.AnimationsEnabled then
+	if _OPT and _OPT._AnimPaused then
 		for prop, val in pairs(Property) do
 			pcall(function()
 				Self[prop] = val
@@ -2553,8 +2605,8 @@ function Compkiller:_Animation(Self, Info, Property)
 			_TW_CACHE[_k] = nil
 		end
 	end
-	local _ok, Tween = pcall(TweenService.Create, TweenService, Self, Info or _TI.t025, Property)
-	if not _ok or not Tween then
+	local _twok, Tween = pcall(TweenService.Create, TweenService, Self, Info or _TI.t025, Property)
+	if not _twok or not Tween then
 		for prop, val in pairs(Property) do pcall(function() Self[prop] = val end) end
 		return (_OPT and _OPT._DummyTween) or nil
 	end
@@ -9594,15 +9646,37 @@ function Compkiller:GetFPS()
 end
 function Compkiller:GetOptimizerStats()
 	return {
-		FPS = self:GetFPS(),
-		Enabled = _OPT.Enabled,
-		AnimThreshold = _OPT.AnimThreshold,
-		ActiveTweens = #_OPT.ActiveTweens,
+		-- Core
+		FPS            = self:GetFPS(),
+		Enabled        = _OPT.Enabled,
+		AnimThreshold  = _OPT.AnimThreshold,
+		ActiveTweens   = #_OPT.ActiveTweens,
+		-- Original stats
 		TweensCancelled = _OPT.Stats.TweensCancelled,
-		InstantSets = _OPT.Stats.InstantSets,
-		DedupCancels = _OPT.Stats.DedupCancels,
-		MemorySweeps = _OPT.Stats.MemorySweeps,
-		LastSweepAt = _OPT.Stats.LastSweepAt,
+		InstantSets     = _OPT.Stats.InstantSets,
+		DedupCancels    = _OPT.Stats.DedupCancels,
+		MemorySweeps    = _OPT.Stats.MemorySweeps,
+		LastSweepAt     = _OPT.Stats.LastSweepAt,
+		-- Auto-tuner
+		AutoTune        = _OPT.AutoTune,
+		FpsTrend        = _OPT.FpsTrend,    -- +1 / 0 / -1
+		AutoTuneAdj     = _OPT.Stats.AutoTuneAdj,
+		-- Frame budget
+		FrameBudget     = _OPT.FrameBudget,
+		FrameBudgetUsed = _OPT.FrameBudgetUsed,
+		BudgetBlocked   = _OPT.Stats.BudgetBlocked,
+		-- Culling
+		CullInvisible   = _OPT.CullInvisible,
+		CulledTweens    = _OPT.Stats.CulledTweens,
+		-- Batch queue
+		BatchEnabled    = _OPT.BatchEnabled,
+		BatchFlushed    = _OPT.Stats.BatchFlushed,
+		BatchPending    = #_OPT.BatchQueue,
+		-- GC watcher
+		GCEnabled       = _OPT.GCEnabled,
+		GCCycles        = _OPT.Stats.GCCycles,
+		GCThresholdKB   = _OPT.GCThresholdKB,
+		GCMemKB         = math.floor((collectgarbage("count") or 0) + 0.5),
 	}
 end
 function Compkiller:SetAnimThreshold(fps)
@@ -9615,31 +9689,85 @@ function Compkiller:SetMemInterval(seconds)
 end
 function Compkiller:_SmartAnimation(Self, Info, Property)
 	local currentFPS = _OPT.FPS
-	local threshold = _OPT.AnimThreshold
-	if currentFPS < threshold then
-		for prop, val in pairs(Property) do
-			pcall(function() Self[prop] = val end)
+	local threshold  = _OPT.AnimThreshold
+	local instKey    = tostring(Self)
+
+	-- ① Visibility culling ─────────────────────────────────────────────────
+	-- Skip creating a tween for any element that is hidden or has zero size.
+	-- The target value is still applied instantly so state stays correct.
+	if _OPT.CullInvisible then
+		local hidden = false
+		pcall(function()
+			hidden = (Self.Visible == false)
+				or (Self.AbsoluteSize.X <= 0 and Self.AbsoluteSize.Y <= 0)
+		end)
+		if hidden then
+			for prop, val in pairs(Property) do
+				pcall(function() Self[prop] = val end)
+			end
+			_OPT.Stats.CulledTweens = _OPT.Stats.CulledTweens + 1
+			return _OPT._DummyTween
+		end
+	end
+
+	-- ② Priority-aware threshold ───────────────────────────────────────────
+	-- HIGH priority: threshold lowered by 20 → animates even under mild FPS stress.
+	-- LOW  priority: threshold raised by 10  → instant-set sooner than default.
+	local priority   = _OPT.PriorityMap[instKey] or "NORMAL"
+	local effThresh  = threshold
+	if priority == "HIGH" then
+		effThresh = math.max(10, threshold - 20)
+	elseif priority == "LOW" then
+		effThresh = math.min(_OPT.AutoTuneMax, threshold + 10)
+	end
+
+	-- ③ FPS gate ───────────────────────────────────────────────────────────
+	-- Below effective threshold: batch the property set and return dummy.
+	if currentFPS < effThresh then
+		if _OPT.BatchEnabled and not _OPT.BatchFlushing then
+			for prop, val in pairs(Property) do
+				_OPT.BatchQueue[#_OPT.BatchQueue + 1] = { inst = Self, prop = prop, val = val }
+			end
+		else
+			for prop, val in pairs(Property) do
+				pcall(function() Self[prop] = val end)
+			end
 		end
 		_OPT.Stats.InstantSets = _OPT.Stats.InstantSets + 1
 		return _OPT._DummyTween
 	end
+
+	-- ④ Frame budget ───────────────────────────────────────────────────────
+	-- Cap how many tweens start per Heartbeat frame to prevent tween floods.
+	-- Blocked tweens are instant-set so their state is never lost.
+	if _OPT.FrameBudgetUsed >= _OPT.FrameBudget then
+		for prop, val in pairs(Property) do
+			pcall(function() Self[prop] = val end)
+		end
+		_OPT.Stats.BudgetBlocked = _OPT.Stats.BudgetBlocked + 1
+		return _OPT._DummyTween
+	end
+	_OPT.FrameBudgetUsed = _OPT.FrameBudgetUsed + 1
+
+	-- ⑤ Duration scaling ───────────────────────────────────────────────────
+	-- Proportionally shorten tween duration when FPS is below 60 so
+	-- the UI feels responsive even when the engine is under load.
 	local baseDuration = (Info and Info.Time) or 0.25
-	local fpsScale = math.clamp(currentFPS / 60, 0.5, 1.0)
-	local newDuration = math.max(0.05, baseDuration * fpsScale)
+	local fpsScale     = math.clamp(currentFPS / 60, 0.5, 1.0)
+	local newDuration  = math.max(0.05, baseDuration * fpsScale)
 	local newInfo
-	if fpsScale >= 0.99 then
-		-- FPS healthy: reuse original TweenInfo, zero allocation
-		newInfo = Info or TweenInfo.new(newDuration)
-	elseif Info then
+	if Info then
 		newInfo = TweenInfo.new(newDuration, Info.EasingStyle, Info.EasingDirection,
 			Info.RepeatCount, Info.Reverses, Info.DelayTime)
 	else
 		newInfo = TweenInfo.new(newDuration)
 	end
-	-- FIX: memoize tostring(Self) — called once here, reused everywhere below
-	local _ikey = tostring(Self)
+
+	-- ⑥ Dedup cancel ───────────────────────────────────────────────────────
+	-- If a tween for this property is still running, cancel it before
+	-- starting the new one to avoid overlapping/fighting tweens.
 	for prop in pairs(Property) do
-		local dedupKey = _ikey .. "|" .. prop
+		local dedupKey = instKey .. "|" .. prop
 		local existing = _OPT.ActiveTweenMap[dedupKey]
 		if existing then
 			local ok, playing = pcall(function() return existing.PlaybackState end)
@@ -9650,29 +9778,28 @@ function Compkiller:_SmartAnimation(Self, Info, Property)
 			_OPT.ActiveTweenMap[dedupKey] = nil
 		end
 	end
-	-- FIX: pcall-guard TweenService:Create (throws on protected/destroyed instances)
-	local _ok, tween = pcall(TweenService.Create, TweenService, Self, newInfo, Property)
-	if not _ok or not tween then
+
+	-- ⑦ Create, register, play ─────────────────────────────────────────────
+	local _twok2, tween = pcall(TweenService.Create, TweenService, Self, newInfo, Property)
+	if not _twok2 or not tween then
 		for prop, val in pairs(Property) do pcall(function() Self[prop] = val end) end
 		return _OPT._DummyTween
 	end
 	table.insert(_OPT.ActiveTweens, tween)
 	for prop in pairs(Property) do
-		_OPT.ActiveTweenMap[_ikey .. "|" .. prop] = tween
+		_OPT.ActiveTweenMap[instKey .. "|" .. prop] = tween
 	end
 	tween:Play()
-	-- FIX: use :Once() instead of _TrackConn(:Connect()) — the Completed callback
-	-- previously leaked into _CK_CONNECTIONS and was never cleaned up.
-	tween.Completed:Once(function()
+	_TrackConn(tween.Completed:Connect(function()
 		local idx = table.find(_OPT.ActiveTweens, tween)
 		if idx then table.remove(_OPT.ActiveTweens, idx) end
 		for prop in pairs(Property) do
-			local key = _ikey .. "|" .. prop
+			local key = instKey .. "|" .. prop
 			if _OPT.ActiveTweenMap[key] == tween then
 				_OPT.ActiveTweenMap[key] = nil
 			end
 		end
-	end)
+	end))
 	return tween
 end
 function Compkiller:_SweepMemory()
@@ -9733,30 +9860,51 @@ function Compkiller:SetSmartAnimations(enabled)
 end
 function Compkiller:DumpStats()
 	local stats = self:GetOptimizerStats()
+	local trend = (stats.FpsTrend == 1) and "↑ improving" or (stats.FpsTrend == -1) and "↓ degrading" or "→ stable"
 	local lines = {
-		"+==========================================",
+		"+============================================",
 		"|  Compkiller v" .. self.Version .. " -- Runtime Stats",
-		"+==========================================",
+		"+============================================",
 		"|  Hardware Tier   : " .. tostring(self.HardwareTier or "N/A"),
 		"|  Hardware FPS    : " .. tostring(self.HardwareFPS or "N/A"),
 		"|  GUI Shield      : " .. tostring(self.GuiShieldMethod or "N/A"),
 		"|  Performance Mode: " .. tostring(self.PerformanceMode),
-		"+==========================================",
+		"+============================================",
+		"|  [FPS & ANIMATION ENGINE]",
 		"|  Live FPS        : " .. stats.FPS,
-		"|  Anim Threshold  : " .. stats.AnimThreshold .. " fps",
-		"|  Smart Anim ON   : " .. tostring(stats.Enabled),
+		"|  FPS Trend       : " .. trend,
+		"|  Anim Threshold  : " .. stats.AnimThreshold .. " fps (auto-tune: " .. tostring(stats.AutoTune) .. ")",
+		"|  SmartAnim ON    : " .. tostring(stats.Enabled),
 		"|  Active Tweens   : " .. stats.ActiveTweens,
-		"+==========================================",
+		"+============================================",
+		"|  [FRAME BUDGET & CULLING]",
+		"|  Frame Budget    : " .. stats.FrameBudgetUsed .. " / " .. stats.FrameBudget .. " this frame",
+		"|  Budget Blocked  : " .. stats.BudgetBlocked,
+		"|  Cull Invisible  : " .. tostring(stats.CullInvisible),
+		"|  Culled Tweens   : " .. stats.CulledTweens,
+		"+============================================",
+		"|  [BATCH QUEUE]",
+		"|  Batch Enabled   : " .. tostring(stats.BatchEnabled),
+		"|  Batch Flushed   : " .. stats.BatchFlushed,
+		"|  Batch Pending   : " .. stats.BatchPending,
+		"+============================================",
+		"|  [GC & MEMORY]",
+		"|  GC Watcher ON   : " .. tostring(stats.GCEnabled),
+		"|  GC Auto-cycles  : " .. stats.GCCycles,
+		"|  GC Threshold KB : " .. stats.GCThresholdKB,
+		"|  GC Heap Now KB  : " .. stats.GCMemKB,
+		"+============================================",
+		"|  [TWEEN STATS]",
 		"|  Tweens Cancelled: " .. stats.TweensCancelled,
 		"|  Instant Sets    : " .. stats.InstantSets,
 		"|  Dedup Cancels   : " .. stats.DedupCancels,
 		"|  Memory Sweeps   : " .. stats.MemorySweeps,
+		"|  Auto-tune Adj   : " .. stats.AutoTuneAdj,
+		"+============================================",
 		"|  Tracked Threads : " .. #_CK_THREADS,
 		"|  Tracked Conns   : " .. #_CK_CONNECTIONS,
-		"|  GC Memory (KB)  : " .. tostring(math.floor((collectgarbage("count") or 0) + 0.5)),
-		"+==========================================",
 		"|  Windows Open    : " .. #self.Windows,
-		"+==========================================",
+		"+============================================",
 	}
 	return stats
 end
@@ -10361,55 +10509,188 @@ Compkiller.MasterControl = function(...)
 	end
 	local function enableAdvancedOptimizations(enabled)
 		if enabled then
-			-- FIX: set _OPT.Enabled so _Animation routes through _SmartAnimation
+			-- ── Activate smart animation routing in :_Animation ─────────────
 			_OPT.Enabled = true
 
 			if not _OPT.MonitorThread then
+
+				-- ────────────────────────────────────────────────────────────
+				-- SUBSYSTEM 1 + 2 + 3  (Heartbeat — runs every frame)
+				-- ① FPS Sampler: rolling 20-frame average → _OPT.FPS
+				-- ② Frame Budget Reset: clears FrameBudgetUsed each frame
+				-- ③ Batch Queue Flusher: applies deferred instant-sets in one pass
+				-- ────────────────────────────────────────────────────────────
+				local _sum, _samples = 0, {}
+				local _MAX = 20
+
+				local _fpsConn = RunService.Heartbeat:Connect(function(dt)
+					if dt <= 0 then return end
+
+					-- ① FPS sample
+					local fps = 1 / dt
+					_samples[#_samples + 1] = fps
+					_sum = _sum + fps
+					if #_samples > _MAX then
+						_sum = _sum - _samples[1]
+						table.remove(_samples, 1)
+					end
+					_OPT.FPS = _sum / #_samples
+
+					-- ② Frame budget reset — must happen every frame
+					_OPT.FrameBudgetUsed = 0
+
+					-- ③ Batch queue flush — apply all deferred instant-sets atomically
+					if #_OPT.BatchQueue > 0 and not _OPT.BatchFlushing then
+						_OPT.BatchFlushing = true
+						local q = _OPT.BatchQueue
+						_OPT.BatchQueue = {}
+						local flushed = 0
+						for i = 1, #q do
+							local item = q[i]
+							pcall(function() item.inst[item.prop] = item.val end)
+							flushed = flushed + 1
+						end
+						_OPT.Stats.BatchFlushed = _OPT.Stats.BatchFlushed + flushed
+						_OPT.BatchFlushing = false
+					end
+				end)
+				_TrackConn(_fpsConn)
+
+				-- ────────────────────────────────────────────────────────────
+				-- SUBSYSTEM 4  (background task loop — low frequency)
+				-- ④a Auto-tuner:       adjust AnimThreshold by FPS trend
+				-- ④b Adaptive sweep:   prune finished tweens; interval scales with FPS
+				-- ④c GC pressure watch: force-collect when Lua heap is bloated
+				-- ────────────────────────────────────────────────────────────
 				local thread
 				thread = task.spawn(function()
-					-- FIX: live FPS sampler — _OPT.FPS was hardcoded at 60, never updated.
-					-- _SmartAnimation reads _OPT.FPS for threshold check and duration scaling.
-					-- Without this sampler the entire smart scaling system was inert.
-					local _lastTick = tick()
-					local _fpsSamples = {}
-					local _FPS_SAMPLE_MAX = 30
-					local _fpsConn = RunService.Heartbeat:Connect(function(dt)
-						if dt > 0 then
-							local sample = math.clamp(1 / dt, 1, 300)
-							table.insert(_fpsSamples, sample)
-							if #_fpsSamples > _FPS_SAMPLE_MAX then
-								table.remove(_fpsSamples, 1)
-							end
-							local sum = 0
-							for _, v in ipairs(_fpsSamples) do sum = sum + v end
-							_OPT.FPS = sum / #_fpsSamples
-						end
-					end)
-					_TrackConn(_fpsConn)
-
 					while _OPT.MonitorThread == thread do
-						task.wait(_OPT.MemInterval)
-						if _OPT.MonitorThread == thread then
+						local fps = _OPT.FPS
+						local now  = tick()
+
+						-- ④a Auto-tuner ─────────────────────────────────────
+						-- Measures FPS delta since last loop iteration.
+						-- Degrading FPS → raise AnimThreshold (fewer tweens, less overhead).
+						-- Recovering FPS → lower AnimThreshold (more tweens, smoother UI).
+						-- Also adapts FrameBudget: tight when hurting, relaxed when healthy.
+						if _OPT.AutoTune then
+							local delta = fps - _OPT.FpsPrev
+							_OPT.FpsTrend = (delta > 2) and 1 or (delta < -2) and -1 or 0
+							_OPT.FpsPrev  = fps
+
+							if _OPT.FpsTrend < 0 then
+								-- FPS is dropping → be more aggressive: raise threshold + cut budget
+								_OPT.AnimThreshold = math.min(
+									_OPT.AnimThreshold + _OPT.AutoTuneStep,
+									_OPT.AutoTuneMax
+								)
+								_OPT.FrameBudget = math.max(2, _OPT.FrameBudget - 1)
+								_OPT.Stats.AutoTuneAdj = _OPT.Stats.AutoTuneAdj + 1
+
+							elseif _OPT.FpsTrend > 0 then
+								-- FPS is recovering → relax: lower threshold + open budget
+								_OPT.AnimThreshold = math.max(
+									_OPT.AnimThreshold - _OPT.AutoTuneStep,
+									_OPT.AutoTuneMin
+								)
+								_OPT.FrameBudget = math.min(6, _OPT.FrameBudget + 1)
+							end
+						end
+
+						-- ④b Adaptive tween sweep ───────────────────────────
+						-- Sweep interval shrinks when FPS is bad (clean up fast)
+						-- and expands when FPS is healthy (low overhead).
+						-- health ∈ [0,1]: 0 = bad, 1 = perfect
+						local health       = math.clamp(fps / 60, 0, 1)
+						local sweepInterval = _OPT.SweepIntervalMin
+							+ ((_OPT.SweepIntervalMax - _OPT.SweepIntervalMin) * health)
+						if (now - _OPT.Stats.LastSweepAt) >= sweepInterval then
 							Compkiller:_SweepMemory()
 						end
+
+						-- ④c GC pressure watcher ────────────────────────────
+						-- Monitors Lua heap size. If it exceeds GCThresholdKB and
+						-- enough time has passed since the last collection, force one.
+						-- Uses only collectgarbage — zero AC-detectable APIs.
+						if _OPT.GCEnabled then
+							local heapKB = math.floor((collectgarbage("count") or 0) + 0.5)
+							if heapKB > _OPT.GCThresholdKB
+								and (now - _OPT.GCLastAt) >= _OPT.GCCooldown
+							then
+								collectgarbage("collect")
+								_OPT.GCLastAt  = now
+								_OPT.GCLastKB  = heapKB
+								_OPT.Stats.GCCycles = _OPT.Stats.GCCycles + 1
+							end
+						end
+
+						-- Loop wait scales with FPS health:
+						-- Very bad FPS (< 20)  → check every ~3 s (fast reaction)
+						-- Healthy FPS (≥ 60)   → check every  8 s (minimal overhead)
+						local loopWait = math.clamp(60 / math.max(fps, 1), 3, 8)
+						task.wait(loopWait)
 					end
-					_fpsConn:Disconnect()
+
+					-- Monitor stopped — disconnect FPS sampler
+					pcall(function() _fpsConn:Disconnect() end)
 				end)
+
 				_OPT.MonitorThread = thread
 				_TrackThread(thread)
 			end
 		else
-			_OPT.Enabled = false
-			_OPT.MonitorThread = nil
+			-- Disable: stop all subsystems, reset to safe defaults
+			_OPT.Enabled        = false
+			_OPT.MonitorThread  = nil
+			_OPT.FPS            = 60
+			_OPT.AnimThreshold  = 30
+			_OPT.FrameBudget    = 6
+			_OPT.FrameBudgetUsed = 0
+			_OPT.FpsTrend       = 0
+			_OPT.BatchQueue     = {}
 		end
 	end
+	-- Public fine-tuning API for advancedOpt subsystems ─────────────────────
+	-- MC.tuneOpt({ frameBudget=4, autoTune=true, gcThreshold=6000, ... })
+	local function tuneOpt(cfg)
+		if type(cfg) ~= "table" then return end
+		if cfg.autoTune        ~= nil then _OPT.AutoTune        = (cfg.autoTune == true) end
+		if cfg.autoTuneMin     ~= nil then _OPT.AutoTuneMin     = math.clamp(cfg.autoTuneMin, 5, 60) end
+		if cfg.autoTuneMax     ~= nil then _OPT.AutoTuneMax     = math.clamp(cfg.autoTuneMax, 30, 144) end
+		if cfg.autoTuneStep    ~= nil then _OPT.AutoTuneStep    = math.clamp(cfg.autoTuneStep, 1, 10) end
+		if cfg.frameBudget     ~= nil then _OPT.FrameBudget     = math.clamp(math.floor(cfg.frameBudget), 1, 20) end
+		if cfg.cullInvisible   ~= nil then _OPT.CullInvisible   = (cfg.cullInvisible == true) end
+		if cfg.batchEnabled    ~= nil then _OPT.BatchEnabled    = (cfg.batchEnabled == true) end
+		if cfg.gcEnabled       ~= nil then _OPT.GCEnabled       = (cfg.gcEnabled == true) end
+		if cfg.gcThreshold     ~= nil then _OPT.GCThresholdKB   = math.max(1024, cfg.gcThreshold) end
+		if cfg.gcCooldown      ~= nil then _OPT.GCCooldown      = math.max(5, cfg.gcCooldown) end
+		if cfg.sweepMin        ~= nil then _OPT.SweepIntervalMin = math.max(5, cfg.sweepMin) end
+		if cfg.sweepMax        ~= nil then _OPT.SweepIntervalMax = math.max(_OPT.SweepIntervalMin, cfg.sweepMax) end
+	end
+
+	-- setPriority(instance, "HIGH"|"NORMAL"|"LOW")
+	-- Marks a specific UI instance so _SmartAnimation treats it differently.
+	--   HIGH  → gets a tween even under stress (threshold -20 fps)
+	--   LOW   → instant-set much sooner (threshold +10 fps)
+	--   NORMAL (or nil) → clears any override
+	local function setAnimPriority(inst, level)
+		if type(inst) ~= "userdata" then return end
+		local key = tostring(inst)
+		if level == "HIGH" or level == "LOW" then
+			_OPT.PriorityMap[key] = level
+		else
+			_OPT.PriorityMap[key] = nil
+		end
+	end
+
+
 	local function pauseAllAnimations()
 		_OPT._AnimPaused = true
-		-- FIX: don't touch _OPT.Enabled here — advancedOpt owns that flag.
-		-- _Animation already checks _AnimPaused first before checking _OPT.Enabled.
+		_OPT.Enabled = false
 	end
 	local function resumeAllAnimations()
 		_OPT._AnimPaused = false
+		_OPT.Enabled = true
 	end
 	local function forceGC()
 		local before = math.floor((collectgarbage("count") or 0) + 0.5)
@@ -11201,19 +11482,13 @@ Compkiller.MasterControl = function(...)
 		if cfg.memInterval ~= nil then
 			setMemInterval(cfg.memInterval)
 		end
-		-- ANIMATION MASTER SWITCH: set first so downstream functions see correct state
+		-- 1. Master animation switch first — all downstream reads AnimationsEnabled
 		if cfg.animation ~= nil then
 			Compkiller.AnimationsEnabled = (cfg.animation ~= false)
-			if not Compkiller.AnimationsEnabled then
-				Compkiller.PerformanceMode = false
-			end
 		end
-		-- optimize = for-animation-only toggle: sets PerformanceMode + smart anims together.
-		-- Processed BEFORE advancedOpt/smartAnimations so explicit keys win.
+		-- 2. optimize = PerformanceMode only (hides offscreen UI elements)
 		if cfg.optimize ~= nil then
-			local on = (cfg.optimize == true)
-			optimizeMode(on)
-			-- Don't touch _OPT.Enabled here — advancedOpt/smartAnimations handle that below
+			optimizeMode(cfg.optimize == true)
 		end
 		if cfg.optimizeMode ~= nil then
 			optimizeMode(cfg.optimizeMode)
@@ -11224,23 +11499,36 @@ Compkiller.MasterControl = function(...)
 		if cfg.fpsCap ~= nil then
 			fpsCap(cfg.fpsCap)
 		end
-		-- pauseAnimations: only pause tweens when animations are also disabled.
-		-- If animation=true, pauseAnimations=true is ignored — animations stay on.
-		if cfg.pauseAnimations == true then
-			if not Compkiller.AnimationsEnabled then
-				pauseAllAnimations()
-			end
+		-- 3. pauseAnimations respects animation master switch
+		if cfg.pauseAnimations == true and not Compkiller.AnimationsEnabled then
+			pauseAllAnimations()
 		end
 		if cfg.pauseAnimations == false then
 			resumeAllAnimations()
 		end
-		-- smartAnimations and advancedOpt: processed last so they always win.
-		-- Each is processed exactly once (duplicates removed).
+		-- 4. smartAnimations and advancedOpt — each processed exactly once, last wins
 		if cfg.smartAnimations ~= nil then
 			setSmartAnimations(cfg.smartAnimations)
 		end
 		if cfg.advancedOpt ~= nil then
-			enableAdvancedOptimizations(cfg.advancedOpt)
+			-- advancedOpt can be a boolean (enable/disable) OR a config table.
+			-- Table form:  { enabled=true, frameBudget=4, autoTune=true, ... }
+			if type(cfg.advancedOpt) == "table" then
+				local aoCfg = cfg.advancedOpt
+				local aoEnabled = (aoCfg.enabled ~= false)  -- default true if table given
+				enableAdvancedOptimizations(aoEnabled)
+				tuneOpt(aoCfg)
+			else
+				enableAdvancedOptimizations(cfg.advancedOpt)
+			end
+		end
+		if cfg.tuneOpt ~= nil then
+			tuneOpt(cfg.tuneOpt)
+		end
+		if cfg.animPriority ~= nil and type(cfg.animPriority) == "table" then
+			for inst, level in pairs(cfg.animPriority) do
+				setAnimPriority(inst, level)
+			end
 		end
 		if cfg.forceGC == true then
 			forceGC()
@@ -11343,6 +11631,8 @@ Compkiller.MasterControl = function(...)
 		isMobile = isMobileTier,
 		smartAnimations = setSmartAnimations,
 		advancedOpt = enableAdvancedOptimizations,
+		tuneOpt = tuneOpt,
+		setPriority = setAnimPriority,
 		pauseAnimations = pauseAllAnimations,
 		resumeAnimations = resumeAllAnimations,
 		forceGC = forceGC,
