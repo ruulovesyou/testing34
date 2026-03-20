@@ -14,15 +14,11 @@ function missing(t, f, fallback)
 	return fallback
 end
 _G.CK_LOADED = true
--- Run-once guard using opaque random key, not enumerable named key
-local _CK_RAN_KEY = "__ck_r_" .. tostring(math.random(1e8, 9e8))
-local _ck_ran = false
-pcall(function()
-	local _e = getgenv and getgenv() or _G
-	_ck_ran = _e[_CK_RAN_KEY] == true
-	_e[_CK_RAN_KEY] = true
-end)
-if _ck_ran then return end
+getgenv().CK_LOADED = getgenv().CK_LOADED or {}
+if getgenv().CK_LOADED.__ran then
+	return
+end
+getgenv().CK_LOADED.__ran = true
 do
 	local _FLAG_KEY = "__ck_f_" .. tostring(math.random(1e8, 9e8))
 	local _KILL_KEY = "__ck_k_" .. tostring(math.random(1e8, 9e8))
@@ -51,7 +47,7 @@ do
 	pcall(function()
 		_env[_FLAG_KEY] = true
 		_env[_TS_KEY] = tostring(math.floor(tick()))
-		-- bridge key not written to _G (AC-detectable pattern removed)
+		rawset(_G, "__ck_bridge", _KILL_KEY)
 	end)
 end
 if not game:IsLoaded() then
@@ -85,7 +81,7 @@ do
 	end)
 	local _CK_BRIDGE_KK = "\0\0_ckbkk_" .. tostring(math.random(100000000, 999999999))
 	local _CK_BRIDGE_LC = "\0\0_ckblc_" .. tostring(math.random(100000000, 999999999))
-	-- bridge key not written to _G directly (AC-detectable rawset removed)
+	rawset(_G, _CK_BRIDGE_KK, _CK_KILL_KEY)
 	pcall(function()
 		local m = getgenv()["__ckmp"]
 		if type(m) == "table" then
@@ -728,7 +724,7 @@ local function _ReApplyShield(screenGui)
 			end
 		end
 	end)
-	-- Parent NOT set: protected GUIs have locked Parent, setting it crashes
+	_safeSet(screenGui, "Parent", _GUI_PARENT)
 	_safeSet(screenGui, "DisplayOrder", _CK_SAFE_DO)
 	_safeSet(screenGui, "ResetOnSpawn", false)
 	_safeSet(screenGui, "Enabled", true)
@@ -747,7 +743,13 @@ local function _StartGuiIntegrityMonitor(screenGui)
 		end)
 	end
 	local _monitors = {
-		-- Parent monitor removed: re-parenting protected GUI crashes ("Parent locked")
+		Parent = function()
+			if screenGui.Parent ~= _GUI_PARENT then
+				_debouncedFix("Parent", function()
+					_ReApplyShield(screenGui)
+				end)
+			end
+		end,
 		Name = function()
 			_debouncedFix("Name", function()
 				_pcall(function()
@@ -2551,8 +2553,8 @@ function Compkiller:_Animation(Self, Info, Property)
 			_TW_CACHE[_k] = nil
 		end
 	end
-	local _twOk, Tween = pcall(TweenService.Create, TweenService, Self, Info or _TI.t025, Property)
-	if not _twOk or not Tween then
+	local _ok, Tween = pcall(TweenService.Create, TweenService, Self, Info or _TI.t025, Property)
+	if not _ok or not Tween then
 		for prop, val in pairs(Property) do pcall(function() Self[prop] = val end) end
 		return (_OPT and _OPT._DummyTween) or nil
 	end
@@ -9434,10 +9436,10 @@ function Compkiller.newNotify()
                 Body.Visible = Body.Text ~= nil and Body.Text ~= ""
             end
 
-            local _closed = false
+            local _notif_closed = false
             local Close = function()
-                if _closed then return end
-                _closed = true
+                if _notif_closed then return end
+                _notif_closed = true
                 if _stopSpin then _stopSpin(); _stopSpin = nil end
                 if Compkiller.AnimationsEnabled then
                     Compkiller:_Animation(
@@ -9655,8 +9657,8 @@ function Compkiller:_SmartAnimation(Self, Info, Property)
 			_OPT.ActiveTweenMap[dedupKey] = nil
 		end
 	end
-	local _twOk2, tween = pcall(TweenService.Create, TweenService, Self, newInfo, Property)
-	if not _twOk2 or not tween then
+	local _ok2, tween = pcall(TweenService.Create, TweenService, Self, newInfo, Property)
+	if not _ok2 or not tween then
 		for prop, val in pairs(Property) do pcall(function() Self[prop] = val end) end
 		return _OPT._DummyTween
 	end
