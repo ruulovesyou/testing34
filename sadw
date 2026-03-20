@@ -14,11 +14,15 @@ function missing(t, f, fallback)
 	return fallback
 end
 _G.CK_LOADED = true
-getgenv().CK_LOADED = getgenv().CK_LOADED or {}
-if getgenv().CK_LOADED.__ran then
-	return
-end
-getgenv().CK_LOADED.__ran = true
+-- Run-once guard using opaque random key, not enumerable named key
+local _CK_RAN_KEY = "__ck_r_" .. tostring(math.random(1e8, 9e8))
+local _ck_ran = false
+pcall(function()
+	local _e = getgenv and getgenv() or _G
+	_ck_ran = _e[_CK_RAN_KEY] == true
+	_e[_CK_RAN_KEY] = true
+end)
+if _ck_ran then return end
 do
 	local _FLAG_KEY = "__ck_f_" .. tostring(math.random(1e8, 9e8))
 	local _KILL_KEY = "__ck_k_" .. tostring(math.random(1e8, 9e8))
@@ -47,7 +51,7 @@ do
 	pcall(function()
 		_env[_FLAG_KEY] = true
 		_env[_TS_KEY] = tostring(math.floor(tick()))
-		rawset(_G, "__ck_bridge", _KILL_KEY)
+		-- bridge key not written to _G (AC-detectable pattern removed)
 	end)
 end
 if not game:IsLoaded() then
@@ -81,7 +85,7 @@ do
 	end)
 	local _CK_BRIDGE_KK = "\0\0_ckbkk_" .. tostring(math.random(100000000, 999999999))
 	local _CK_BRIDGE_LC = "\0\0_ckblc_" .. tostring(math.random(100000000, 999999999))
-	rawset(_G, _CK_BRIDGE_KK, _CK_KILL_KEY)
+	-- bridge key not written to _G directly (AC-detectable rawset removed)
 	pcall(function()
 		local m = getgenv()["__ckmp"]
 		if type(m) == "table" then
@@ -724,7 +728,7 @@ local function _ReApplyShield(screenGui)
 			end
 		end
 	end)
-	_safeSet(screenGui, "Parent", _GUI_PARENT)
+	-- Parent NOT set: protected GUIs have locked Parent, setting it crashes
 	_safeSet(screenGui, "DisplayOrder", _CK_SAFE_DO)
 	_safeSet(screenGui, "ResetOnSpawn", false)
 	_safeSet(screenGui, "Enabled", true)
@@ -743,13 +747,7 @@ local function _StartGuiIntegrityMonitor(screenGui)
 		end)
 	end
 	local _monitors = {
-		Parent = function()
-			if screenGui.Parent ~= _GUI_PARENT then
-				_debouncedFix("Parent", function()
-					_ReApplyShield(screenGui)
-				end)
-			end
-		end,
+		-- Parent monitor removed: re-parenting protected GUI crashes ("Parent locked")
 		Name = function()
 			_debouncedFix("Name", function()
 				_pcall(function()
@@ -2553,7 +2551,11 @@ function Compkiller:_Animation(Self, Info, Property)
 			_TW_CACHE[_k] = nil
 		end
 	end
-	local Tween = TweenService:Create(Self, Info or _TI.t025, Property)
+	local _twOk, Tween = pcall(TweenService.Create, TweenService, Self, Info or _TI.t025, Property)
+	if not _twOk or not Tween then
+		for prop, val in pairs(Property) do pcall(function() Self[prop] = val end) end
+		return (_OPT and _OPT._DummyTween) or nil
+	end
 	Tween:Play()
 	local _cleanupKeys = {}
 	for prop in pairs(Property) do
@@ -3713,15 +3715,18 @@ function Compkiller:_AddColorPickerPanel(Button, Callback)
 			or Input.UserInputType == Enum.UserInputType.Touch
 		then
 			Args.IsHold = true
-			while UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or Args.IsHold do
-				task.wait()
-				local ColorY = ColorRedGreenBlue.AbsolutePosition.Y
-				local ColorYM = ColorY + ColorRedGreenBlue.AbsoluteSize.Y
-				local Value = math.clamp(Mouse.Y, ColorY, ColorYM)
-				local Code = ((Value - ColorY) / (ColorYM - ColorY))
-				H = Code
-				Args:Update()
-			end
+			task.spawn(function()
+				while Args.IsHold and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
+					RunService.Heartbeat:Wait()
+					local ColorY = ColorRedGreenBlue.AbsolutePosition.Y
+					local ColorYM = ColorY + ColorRedGreenBlue.AbsoluteSize.Y
+					local Value = math.clamp(Mouse.Y, ColorY, ColorYM)
+					local Code = ((Value - ColorY) / (ColorYM - ColorY))
+					H = Code
+					Args:Update()
+				end
+				Args.IsHold = false
+			end)
 		end
 	end)
 	ColorOpc.InputBegan:Connect(function(Input)
@@ -3730,15 +3735,18 @@ function Compkiller:_AddColorPickerPanel(Button, Callback)
 			or Input.UserInputType == Enum.UserInputType.Touch
 		then
 			Args.IsHold = true
-			while UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or Args.IsHold do
-				task.wait()
-				local transparency =
-					math.clamp(((Mouse.X - ColorOpc.AbsolutePosition.X) / ColorOpc.AbsoluteSize.X), 0, 1)
-				local RealColor = Color3.fromHSV(H, S, V)
-				TextLabel.Text = "#" .. tostring(RealColor:ToHex())
-				Transparency = transparency
-				Args:Update()
-			end
+			task.spawn(function()
+				while Args.IsHold and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
+					RunService.Heartbeat:Wait()
+					local transparency =
+						math.clamp(((Mouse.X - ColorOpc.AbsolutePosition.X) / ColorOpc.AbsoluteSize.X), 0, 1)
+					local RealColor = Color3.fromHSV(H, S, V)
+					TextLabel.Text = "#" .. tostring(RealColor:ToHex())
+					Transparency = transparency
+					Args:Update()
+				end
+				Args.IsHold = false
+			end)
 		end
 	end)
 	ColorPickBox.InputBegan:Connect(function(Input)
@@ -3747,19 +3755,22 @@ function Compkiller:_AddColorPickerPanel(Button, Callback)
 			or Input.UserInputType == Enum.UserInputType.Touch
 		then
 			Args.IsHold = true
-			while UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) or Args.IsHold do
-				task.wait()
-				local PosX = ColorPickBox.AbsolutePosition.X
-				local ScaleX = PosX + ColorPickBox.AbsoluteSize.X
-				local Value, PosY = math.clamp(Mouse.X, PosX, ScaleX), ColorPickBox.AbsolutePosition.Y
-				local ScaleY = PosY + ColorPickBox.AbsoluteSize.Y
-				local Vals = math.clamp(Mouse.Y, PosY, ScaleY)
-				local RealColor = Color3.fromHSV(H, S, V)
-				S = (Value - PosX) / (ScaleX - PosX)
-				V = (1 - ((Vals - PosY) / (ScaleY - PosY)))
-				TextLabel.Text = "#" .. tostring(RealColor:ToHex())
-				Args:Update()
-			end
+			task.spawn(function()
+				while Args.IsHold and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) do
+					RunService.Heartbeat:Wait()
+					local PosX = ColorPickBox.AbsolutePosition.X
+					local ScaleX = PosX + ColorPickBox.AbsoluteSize.X
+					local Value, PosY = math.clamp(Mouse.X, PosX, ScaleX), ColorPickBox.AbsolutePosition.Y
+					local ScaleY = PosY + ColorPickBox.AbsoluteSize.Y
+					local Vals = math.clamp(Mouse.Y, PosY, ScaleY)
+					local RealColor = Color3.fromHSV(H, S, V)
+					S = (Value - PosX) / (ScaleX - PosX)
+					V = (1 - ((Vals - PosY) / (ScaleY - PosY)))
+					TextLabel.Text = "#" .. tostring(RealColor:ToHex())
+					Args:Update()
+				end
+				Args.IsHold = false
+			end)
 		end
 	end)
 	return Args
@@ -8645,7 +8656,7 @@ function Compkiller.new(Config)
 			WindowArgs._PillActive = true
 			if WindowArgs._PremiumBadge then
 				WindowArgs._PremiumBadge.Text = "Premium"
-				WindowArgs._PremiumBadge.TextColor3 = Color3.fromRGB(255, 190, 50)
+				WindowArgs._PremiumBadge.TextColor3 = Color3.fromRGB(245, 158, 11)
 			end
 		else
 			_expireDisplay = ""
@@ -8653,13 +8664,13 @@ function Compkiller.new(Config)
 			WindowArgs._PillActive = true
 			if WindowArgs._PremiumBadge then
 				WindowArgs._PremiumBadge.Text = "Free"
-				WindowArgs._PremiumBadge.TextColor3 = Color3.fromRGB(60, 210, 180)
+				WindowArgs._PremiumBadge.TextColor3 = Color3.fromRGB(34, 197, 94)
 			end
 		end
 		ExpireText.Text = _expireDisplay
 		WindowLabel.Text = config.WindowName
 		if WindowArgs._HideAvatar then
-			UserProfile.Image = Compkiller:CacheImage("rbxassetid://10723346871")
+			UserProfile.Image = Compkiller:CacheImage("rbxassetid://9613855144") --HIDEAVATAR
 		else
 			UserProfile.Image = config.UserProfile
 		end
@@ -9147,336 +9158,379 @@ function Compkiller:Loader(IconId, Duration)
 	}
 end
 function Compkiller.newNotify()
-	if Compkiller.NOTIFY_CACHE and Compkiller.NOTIFY_CACHE._gui and Compkiller.NOTIFY_CACHE._gui.Parent ~= nil then
-		return Compkiller.NOTIFY_CACHE
-	end
-	Compkiller.NOTIFY_CACHE = nil
-	local Notification = Instance.new("ScreenGui")
-	local NotifyContainer = Instance.new("Frame")
-	local UIListLayout = Instance.new("UIListLayout")
-	Notification.Name = Compkiller:_RandomString()
-	Notification.Parent = CoreGui
-	Notification.ResetOnSpawn = false
-	Notification.ZIndexBehavior = Enum.ZIndexBehavior.Global
-	_pcall(function()
-		local _pfn = protect_gui or protectgui or (syn and syn.protect_gui)
-		if _pfn and not _islclosure(_pfn) then
-			_pfn(Notification)
-		end
-	end)
-	_pcall(function()
-		Notification:SetAttribute(_CK_GUI_TAG, true)
-	end)
-	_pcall(function()
-		if _CK_SAFE_DO and type(_CK_SAFE_DO) == "number" then
-			Notification.DisplayOrder = _CK_SAFE_DO
-		end
-	end)
-	NotifyContainer.Name = Compkiller:_RandomString()
-	NotifyContainer.Parent = Notification
-	NotifyContainer.AnchorPoint = Vector2.new(1, 0)
-	NotifyContainer.BackgroundTransparency = 1
-	NotifyContainer.BorderSizePixel = 0
-	NotifyContainer.Position = UDim2.new(1, -12, 0, 10)
-	NotifyContainer.Size = UDim2.new(0, 280, 1, 0)
-	NotifyContainer.ClipsDescendants = false
-	UIListLayout.Parent = NotifyContainer
-	UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
-	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	UIListLayout.Padding = UDim.new(0, 6)
-	local LayoutREF = 0
-	local function _makeSpin(img)
-		if not Compkiller.AnimationsEnabled then
-			return function() end
-		end
-		local active = true
-		local t = _ckSpawn(function()
-			local rot = 0
-			while active and img and img.Parent and Compkiller.AnimationsEnabled do
-				rot = (rot + 4) % 360
-				img.Rotation = rot
-				task.wait(0.02)
-			end
-		end)
-		return function()
-			active = false
-			pcall(function()
-				task.cancel(t)
-			end)
-		end
-	end
-	Compkiller.NOTIFY_CACHE = {
-		_gui = Notification,
-		new = function(Notify)
-			Notify = Compkiller.__CONFIG(Notify, {
-				Icon = Compkiller.Logo,
-				SpinIcon = false,
-				Color = nil,
-				BarColor = nil,
-				IconBGColor = nil,
-				StrokeColor = nil,
-				Title = "Notification",
-				Content = "",
-				Duration = 3,
-			})
-			local _hl = Compkiller.Colors.Highlight
-			local _base = (typeof(Notify.Color) == "Color3" and Notify.Color) or _hl
-			local _barColor = (typeof(Notify.BarColor) == "Color3" and Notify.BarColor) or _base
-			local _bgColor = (typeof(Notify.IconBGColor) == "Color3" and Notify.IconBGColor)
-				or Compkiller.Colors.BlockColor
-			local _stColor = (typeof(Notify.StrokeColor) == "Color3" and Notify.StrokeColor) or _base
-			local accent = _barColor
-			LayoutREF = LayoutREF - 1
-			local BlockFrame = Instance.new("Frame")
-			local Card = Instance.new("Frame")
-			local CardCorner = Instance.new("UICorner")
-			local CardStroke = Instance.new("UIStroke")
-			local AccentBar = Instance.new("Frame")
-			local AccentCorner = Instance.new("UICorner")
-			local IconBG = Instance.new("Frame")
-			local IconBGCorner = Instance.new("UICorner")
-			local CompLogo = Instance.new("ImageLabel")
-			local TextColumn = Instance.new("Frame")
-			local TextLayout = Instance.new("UIListLayout")
-			local Header = Instance.new("TextLabel")
-			local Body = Instance.new("TextLabel")
-			local BarTrack = Instance.new("Frame")
-			local BarCorner = Instance.new("UICorner")
-			local BarFill = Instance.new("Frame")
-			local BarFillCorner = Instance.new("UICorner")
-			BlockFrame.Name = Compkiller:_RandomString()
-			BlockFrame.Parent = NotifyContainer
-			BlockFrame.AnchorPoint = Vector2.new(1, 0)
-			BlockFrame.BackgroundTransparency = 1
-			BlockFrame.BorderSizePixel = 0
-			BlockFrame.ClipsDescendants = false
-			BlockFrame.Size = UDim2.new(1, 0, 0, 0)
-			BlockFrame.LayoutOrder = LayoutREF
-			BlockFrame.AutomaticSize = Enum.AutomaticSize.Y
-			Card.Name = Compkiller:_RandomString()
-			Card.Parent = BlockFrame
-			Card.BackgroundColor3 = Compkiller.Colors.BGDBColor
-			Card.BackgroundTransparency = 0.05
-			Card.BorderSizePixel = 0
-			Card.ClipsDescendants = false
-			Card.Size = UDim2.new(1, 0, 0, 0)
-			Card.AutomaticSize = Enum.AutomaticSize.Y
-			Card.ZIndex = 2
-			Card.Position = UDim2.new(1, 300, 0, 0)
-			CardCorner.CornerRadius = UDim.new(0, 8)
-			CardCorner.Parent = Card
-			CardStroke.Color = _stColor
-			CardStroke.Transparency = 0.82
-			CardStroke.Thickness = 1
-			CardStroke.Parent = Card
-			AccentBar.Name = Compkiller:_RandomString()
-			AccentBar.Parent = Card
-			AccentBar.BackgroundColor3 = _barColor
-			AccentBar.BorderSizePixel = 0
-			AccentBar.Position = UDim2.new(0, 0, 0, 8)
-			AccentBar.Size = UDim2.new(0, 3, 1, -16)
-			AccentBar.ZIndex = 4
-			AccentCorner.CornerRadius = UDim.new(1, 0)
-			AccentCorner.Parent = AccentBar
-			IconBG.Name = Compkiller:_RandomString()
-			IconBG.Parent = Card
-			IconBG.BackgroundColor3 = _bgColor
-			IconBG.BackgroundTransparency = 0.10
-			IconBG.BorderSizePixel = 0
-			IconBG.AnchorPoint = Vector2.new(0, 0.5)
-			IconBG.Position = UDim2.new(0, 10, 0.5, 0)
-			IconBG.Size = UDim2.new(0, 38, 0, 38)
-			IconBG.ZIndex = 3
-			IconBGCorner.CornerRadius = UDim.new(0, 10)
-			IconBGCorner.Parent = IconBG
-			CompLogo.Name = Compkiller:_RandomString()
-			CompLogo.Parent = IconBG
-			CompLogo.BackgroundTransparency = 1
-			CompLogo.BorderSizePixel = 0
-			CompLogo.AnchorPoint = Vector2.new(0.5, 0.5)
-			CompLogo.Position = UDim2.new(0.5, 0, 0.5, 0)
-			CompLogo.Size = UDim2.new(0.55, 0, 0.55, 0)
-			CompLogo.SizeConstraint = Enum.SizeConstraint.RelativeYY
-			CompLogo.ZIndex = 5
-			CompLogo.ImageColor3 = Color3.new(1, 1, 1)
-			if
-				tostring(Notify.Icon):find("rbxassetid://", 1, true)
-				or tostring(Notify.Icon):find("cache%-ck%-", 1, true)
-			then
-				CompLogo.Image = Notify.Icon
-			else
-				CompLogo.Image = Compkiller:_GetIcon(Notify.Icon)
-			end
-			local _stopSpin = nil
-			if Notify.SpinIcon then
-				_stopSpin = _makeSpin(CompLogo)
-			end
-			TextColumn.Name = Compkiller:_RandomString()
-			TextColumn.Parent = Card
-			TextColumn.BackgroundTransparency = 1
-			TextColumn.BorderSizePixel = 0
-			TextColumn.Position = UDim2.new(0, 56, 0, 8)
-			TextColumn.Size = UDim2.new(1, -60, 0, 0)
-			TextColumn.AutomaticSize = Enum.AutomaticSize.Y
-			TextColumn.ZIndex = 3
-			TextColumn.ClipsDescendants = false
-			TextLayout.Parent = TextColumn
-			TextLayout.SortOrder = Enum.SortOrder.LayoutOrder
-			TextLayout.Padding = UDim.new(0, 3)
-			TextLayout.FillDirection = Enum.FillDirection.Vertical
-			Header.Name = Compkiller:_RandomString()
-			Header.Parent = TextColumn
-			Header.BackgroundTransparency = 1
-			Header.BorderSizePixel = 0
-			Header.Size = UDim2.new(1, 0, 0, 0)
-			Header.AutomaticSize = Enum.AutomaticSize.Y
-			Header.ZIndex = 3
-			Header.Font = Enum.Font.GothamBold
-			Header.Text = Notify.Title
-			Header.TextColor3 = Compkiller.Colors.SwitchColor
-			Header.TextSize = 13
-			Header.TextXAlignment = Enum.TextXAlignment.Left
-			Header.TextYAlignment = Enum.TextYAlignment.Top
-			Header.TextWrapped = true
-			Header.LayoutOrder = 1
-			Body.Name = Compkiller:_RandomString()
-			Body.Parent = TextColumn
-			Body.BackgroundTransparency = 1
-			Body.BorderSizePixel = 0
-			Body.Size = UDim2.new(1, 0, 0, 0)
-			Body.AutomaticSize = Enum.AutomaticSize.Y
-			Body.ZIndex = 3
-			Body.Font = Enum.Font.GothamMedium
-			Body.Text = Notify.Content
-			Body.TextColor3 = Compkiller.Colors.SwitchColor
-			Body.TextSize = 11
-			Body.TextTransparency = 0.40
-			Body.TextXAlignment = Enum.TextXAlignment.Left
-			Body.TextYAlignment = Enum.TextYAlignment.Top
-			Body.TextWrapped = true
-			Body.LayoutOrder = 2
-			Body.Visible = Notify.Content ~= nil and Notify.Content ~= ""
-			local Pad = Instance.new("Frame")
-			Pad.Parent = TextColumn
-			Pad.BackgroundTransparency = 1
-			Pad.BorderSizePixel = 0
-			Pad.Size = UDim2.new(1, 0, 0, 4)
-			Pad.LayoutOrder = 3
-			BarTrack.Name = Compkiller:_RandomString()
-			BarTrack.Parent = Card
-			BarTrack.AnchorPoint = Vector2.new(0, 1)
-			BarTrack.BackgroundColor3 = Compkiller.Colors.StrokeColor
-			BarTrack.BackgroundTransparency = 0.40
-			BarTrack.BorderSizePixel = 0
-			BarTrack.Position = UDim2.new(0, 0, 1, 0)
-			BarTrack.Size = UDim2.new(1, 0, 0, 2)
-			BarTrack.ZIndex = 5
-			BarCorner.CornerRadius = UDim.new(1, 0)
-			BarCorner.Parent = BarTrack
-			BarFill.Name = Compkiller:_RandomString()
-			BarFill.Parent = BarTrack
-			BarFill.BackgroundColor3 = _barColor
-			BarFill.BorderSizePixel = 0
-			BarFill.Size = UDim2.new(0, 0, 1, 0)
-			BarFill.ZIndex = 5
-			BarFillCorner.CornerRadius = UDim.new(1, 0)
-			BarFillCorner.Parent = BarFill
-			local function _syncBodyVisibility()
-				Body.Visible = Body.Text ~= nil and Body.Text ~= ""
-			end
-			local Close = function()
-				if _stopSpin then
-					_stopSpin()
-					_stopSpin = nil
-				end
-				Compkiller:_Animation(
-					Card,
-					TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
-					{ Position = UDim2.new(1, 320, 0, 0) }
-				)
-				task.wait(0.2)
-				Compkiller:_Animation(
-					BlockFrame,
-					TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
-					{ Size = UDim2.new(1, 0, 0, 0) }
-				)
-				task.wait(0.28)
-				BlockFrame:Destroy()
-			end
-			local Show = function()
-				Compkiller:_Animation(
-					Card,
-					TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-					{ Position = UDim2.new(0, 0, 0, 0) }
-				)
-			end
-			if typeof(Notify.Duration) == "number" and Notify.Duration ~= math.huge then
-				Compkiller:_Animation(
-					BarFill,
-					TweenInfo.new(Notify.Duration, Enum.EasingStyle.Linear),
-					{ Size = UDim2.new(1, 0, 1, 0) }
-				)
-				return task.delay(0.2, function()
-					Show()
-					task.delay(Notify.Duration, Close)
-				end)
-			end
-			Show()
-			return {
-				Title = function(self, new)
-					Header.Text = new or ""
-				end,
-				Content = function(self, new)
-					Body.Text = new or ""
-					_syncBodyVisibility()
-				end,
-				SetColors = function(self, cfg)
-					if typeof(cfg) ~= "table" then
-						return
-					end
-					if typeof(cfg.BarColor) == "Color3" then
-						_barColor = cfg.BarColor
-						AccentBar.BackgroundColor3 = _barColor
-						CompLogo.ImageColor3 = _barColor
-						BarFill.BackgroundColor3 = _barColor
-					end
-					if typeof(cfg.IconBGColor) == "Color3" then
-						_bgColor = cfg.IconBGColor
-						IconBG.BackgroundColor3 = _bgColor
-					end
-					if typeof(cfg.StrokeColor) == "Color3" then
-						_stColor = cfg.StrokeColor
-						CardStroke.Color = _stColor
-					end
-				end,
-				SetProgress = function(self, new, Time)
-					if new > 1 then
-						new = new / 100
-					end
-					if Time and Time <= 0 then
-						BarFill.Size = UDim2.new(new, 0, 1, 0)
-						return
-					end
-					Compkiller:_Animation(
-						BarFill,
-						TweenInfo.new(Time or 0.85, (Time and Enum.EasingStyle.Linear) or Enum.EasingStyle.Quint),
-						{ Size = UDim2.new(new, 0, 1, 0) }
-					)
-				end,
-				SetSpin = function(self, enabled)
-					if enabled and not _stopSpin then
-						_stopSpin = _makeSpin(CompLogo)
-					elseif not enabled and _stopSpin then
-						_stopSpin()
-						_stopSpin = nil
-						CompLogo.Rotation = 0
-					end
-				end,
-				Close = Close,
-			}
-		end,
-	}
-	return Compkiller.NOTIFY_CACHE
+    if Compkiller.NOTIFY_CACHE and Compkiller.NOTIFY_CACHE._gui and Compkiller.NOTIFY_CACHE._gui.Parent ~= nil then
+        return Compkiller.NOTIFY_CACHE
+    end
+    Compkiller.NOTIFY_CACHE = nil
+
+    local Notification = Instance.new("ScreenGui")
+    local NotifyContainer = Instance.new("Frame")
+    local UIListLayout = Instance.new("UIListLayout")
+
+    Notification.Name = Compkiller:_RandomString()
+    Notification.Parent = CoreGui
+    Notification.ResetOnSpawn = false
+    Notification.ZIndexBehavior = Enum.ZIndexBehavior.Global
+
+    _pcall(function()
+        local _pfn = protect_gui or protectgui or (syn and syn.protect_gui)
+        if _pfn and not _islclosure(_pfn) then
+            _pfn(Notification)
+        end
+    end)
+
+    _pcall(function()
+        Notification:SetAttribute(_CK_GUI_TAG, true)
+    end)
+
+    _pcall(function()
+        if _CK_SAFE_DO and type(_CK_SAFE_DO) == "number" then
+            Notification.DisplayOrder = _CK_SAFE_DO
+        end
+    end)
+
+    NotifyContainer.Name = Compkiller:_RandomString()
+    NotifyContainer.Parent = Notification
+    NotifyContainer.AnchorPoint = Vector2.new(1, 0)
+    NotifyContainer.BackgroundTransparency = 1
+    NotifyContainer.BorderSizePixel = 0
+    NotifyContainer.Position = UDim2.new(1, -12, 0, 10)
+    NotifyContainer.Size = UDim2.new(0, 280, 1, 0)
+    NotifyContainer.ClipsDescendants = false
+
+    UIListLayout.Parent = NotifyContainer
+    UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+    UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    UIListLayout.Padding = UDim.new(0, 6)
+
+    local LayoutREF = 0
+
+    local function _makeSpin(img)
+        if not Compkiller.AnimationsEnabled then
+            return function() end
+        end
+        local active = true
+        local t = _ckSpawn(function()
+            local rot = 0
+            while active and img and img.Parent and Compkiller.AnimationsEnabled do
+                rot = (rot + 4) % 360
+                img.Rotation = rot
+                task.wait(0.02)
+            end
+        end)
+        return function()
+            active = false
+            pcall(function()
+                task.cancel(t)
+            end)
+        end
+    end
+
+    Compkiller.NOTIFY_CACHE = {
+        _gui = Notification,
+        new = function(Notify)
+            Notify = Compkiller.__CONFIG(Notify, {
+                Icon = Compkiller.Logo,
+                SpinIcon = false,
+                Color = nil,
+                BarColor = nil,
+                IconBGColor = nil,
+                StrokeColor = nil,
+                Title = "Notification",
+                Content = "",
+                Duration = 3,
+            })
+
+            local _hl = Compkiller.Colors.Highlight
+            local _base = (typeof(Notify.Color) == "Color3" and Notify.Color) or _hl
+            local _barColor = (typeof(Notify.BarColor) == "Color3" and Notify.BarColor) or _base
+            local _bgColor = (typeof(Notify.IconBGColor) == "Color3" and Notify.IconBGColor)
+                or Compkiller.Colors.BlockColor
+            local _stColor = (typeof(Notify.StrokeColor) == "Color3" and Notify.StrokeColor) or _base
+            local accent = _barColor
+
+            LayoutREF = LayoutREF - 1
+
+            local BlockFrame = Instance.new("Frame")
+            local Card = Instance.new("Frame")
+            local CardCorner = Instance.new("UICorner")
+            local CardStroke = Instance.new("UIStroke")
+            local AccentBar = Instance.new("Frame")
+            local AccentCorner = Instance.new("UICorner")
+            local IconBG = Instance.new("Frame")
+            local IconBGCorner = Instance.new("UICorner")
+            local CompLogo = Instance.new("ImageLabel")
+            local TextColumn = Instance.new("Frame")
+            local TextLayout = Instance.new("UIListLayout")
+            local Header = Instance.new("TextLabel")
+            local Body = Instance.new("TextLabel")
+            local BarTrack = Instance.new("Frame")
+            local BarCorner = Instance.new("UICorner")
+            local BarFill = Instance.new("Frame")
+            local BarFillCorner = Instance.new("UICorner")
+
+            BlockFrame.Name = Compkiller:_RandomString()
+            BlockFrame.Parent = NotifyContainer
+            BlockFrame.AnchorPoint = Vector2.new(1, 0)
+            BlockFrame.BackgroundTransparency = 1
+            BlockFrame.BorderSizePixel = 0
+            BlockFrame.ClipsDescendants = false
+            BlockFrame.Size = UDim2.new(1, 0, 0, 0)
+            BlockFrame.LayoutOrder = LayoutREF
+            BlockFrame.AutomaticSize = Enum.AutomaticSize.Y
+
+            Card.Name = Compkiller:_RandomString()
+            Card.Parent = BlockFrame
+            Card.BackgroundColor3 = Compkiller.Colors.BGDBColor
+            Card.BackgroundTransparency = 0.05
+            Card.BorderSizePixel = 0
+            Card.ClipsDescendants = false
+            Card.Size = UDim2.new(1, 0, 0, 0)
+            Card.AutomaticSize = Enum.AutomaticSize.Y
+            Card.ZIndex = 2
+            Card.Position = UDim2.new(1, 300, 0, 0)
+
+            CardCorner.CornerRadius = UDim.new(0, 8)
+            CardCorner.Parent = Card
+
+            CardStroke.Color = _stColor
+            CardStroke.Transparency = 0.82
+            CardStroke.Thickness = 1
+            CardStroke.Parent = Card
+
+            AccentBar.Name = Compkiller:_RandomString()
+            AccentBar.Parent = Card
+            AccentBar.BackgroundColor3 = _barColor
+            AccentBar.BorderSizePixel = 0
+            AccentBar.Position = UDim2.new(0, 0, 0, 8)
+            AccentBar.Size = UDim2.new(0, 3, 1, -16)
+            AccentBar.ZIndex = 4
+
+            AccentCorner.CornerRadius = UDim.new(1, 0)
+            AccentCorner.Parent = AccentBar
+
+            IconBG.Name = Compkiller:_RandomString()
+            IconBG.Parent = Card
+            IconBG.BackgroundColor3 = _bgColor
+            IconBG.BackgroundTransparency = 0.10
+            IconBG.BorderSizePixel = 0
+            IconBG.AnchorPoint = Vector2.new(0, 0.5)
+            IconBG.Position = UDim2.new(0, 10, 0.5, 0)
+            IconBG.Size = UDim2.new(0, 40, 0, 40)         
+            IconBG.ZIndex = 3
+
+            IconBGCorner.CornerRadius = UDim.new(1, 0)     
+            IconBGCorner.Parent = IconBG
+
+
+            CompLogo.Name = Compkiller:_RandomString()
+            CompLogo.Parent = IconBG
+            CompLogo.BackgroundTransparency = 1
+            CompLogo.BorderSizePixel = 0
+            CompLogo.AnchorPoint = Vector2.new(0.5, 0.5)
+            CompLogo.Position = UDim2.new(0.5, 0, 0.5, 0)
+            CompLogo.Size = UDim2.new(1, -8, 1, -8)    
+            CompLogo.SizeConstraint = Enum.SizeConstraint.RelativeXY
+            CompLogo.ScaleType = Enum.ScaleType.Fit     
+            CompLogo.ResampleMode = Enum.ResamplerMode.Pixelated  
+            CompLogo.ZIndex = 5
+            CompLogo.ImageColor3 = Color3.new(1, 1, 1)
+
+
+            if
+                tostring(Notify.Icon):find("rbxassetid://", 1, true)
+                or tostring(Notify.Icon):find("cache%-ck%-", 1, true)
+            then
+                CompLogo.Image = Notify.Icon
+            else
+                CompLogo.Image = Compkiller:_GetIcon(Notify.Icon)
+            end
+
+            local _stopSpin = nil
+            if Notify.SpinIcon then
+                _stopSpin = _makeSpin(CompLogo)
+            end
+
+            TextColumn.Name = Compkiller:_RandomString()
+            TextColumn.Parent = Card
+            TextColumn.BackgroundTransparency = 1
+            TextColumn.BorderSizePixel = 0
+            TextColumn.Position = UDim2.new(0, 56, 0, 8)
+            TextColumn.Size = UDim2.new(1, -60, 0, 0)
+            TextColumn.AutomaticSize = Enum.AutomaticSize.Y
+            TextColumn.ZIndex = 3
+            TextColumn.ClipsDescendants = false
+
+            TextLayout.Parent = TextColumn
+            TextLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            TextLayout.Padding = UDim.new(0, 3)
+            TextLayout.FillDirection = Enum.FillDirection.Vertical
+
+            Header.Name = Compkiller:_RandomString()
+            Header.Parent = TextColumn
+            Header.BackgroundTransparency = 1
+            Header.BorderSizePixel = 0
+            Header.Size = UDim2.new(1, 0, 0, 0)
+            Header.AutomaticSize = Enum.AutomaticSize.Y
+            Header.ZIndex = 3
+            Header.Font = Enum.Font.GothamBold
+            Header.Text = Notify.Title
+            Header.TextColor3 = Compkiller.Colors.SwitchColor
+            Header.TextSize = 13
+            Header.TextXAlignment = Enum.TextXAlignment.Left
+            Header.TextYAlignment = Enum.TextYAlignment.Top
+            Header.TextWrapped = true
+            Header.LayoutOrder = 1
+
+            Body.Name = Compkiller:_RandomString()
+            Body.Parent = TextColumn
+            Body.BackgroundTransparency = 1
+            Body.BorderSizePixel = 0
+            Body.Size = UDim2.new(1, 0, 0, 0)
+            Body.AutomaticSize = Enum.AutomaticSize.Y
+            Body.ZIndex = 3
+            Body.Font = Enum.Font.GothamMedium
+            Body.Text = Notify.Content
+            Body.TextColor3 = Compkiller.Colors.SwitchColor
+            Body.TextSize = 11
+            Body.TextTransparency = 0.40
+            Body.TextXAlignment = Enum.TextXAlignment.Left
+            Body.TextYAlignment = Enum.TextYAlignment.Top
+            Body.TextWrapped = true
+            Body.LayoutOrder = 2
+            Body.Visible = Notify.Content ~= nil and Notify.Content ~= ""
+
+            local Pad = Instance.new("Frame")
+            Pad.Parent = TextColumn
+            Pad.BackgroundTransparency = 1
+            Pad.BorderSizePixel = 0
+            Pad.Size = UDim2.new(1, 0, 0, 4)
+            Pad.LayoutOrder = 3
+
+            BarTrack.Name = Compkiller:_RandomString()
+            BarTrack.Parent = Card
+            BarTrack.AnchorPoint = Vector2.new(0, 1)
+            BarTrack.BackgroundColor3 = Compkiller.Colors.StrokeColor
+            BarTrack.BackgroundTransparency = 0.40
+            BarTrack.BorderSizePixel = 0
+            BarTrack.Position = UDim2.new(0, 0, 1, 0)
+            BarTrack.Size = UDim2.new(1, 0, 0, 2)
+            BarTrack.ZIndex = 5
+
+            BarCorner.CornerRadius = UDim.new(1, 0)
+            BarCorner.Parent = BarTrack
+
+            BarFill.Name = Compkiller:_RandomString()
+            BarFill.Parent = BarTrack
+            BarFill.BackgroundColor3 = _barColor
+            BarFill.BorderSizePixel = 0
+            BarFill.Size = UDim2.new(0, 0, 1, 0)
+            BarFill.ZIndex = 5
+
+            BarFillCorner.CornerRadius = UDim.new(1, 0)
+            BarFillCorner.Parent = BarFill
+
+            local function _syncBodyVisibility()
+                Body.Visible = Body.Text ~= nil and Body.Text ~= ""
+            end
+
+            local _closed = false
+            local Close = function()
+                if _closed then return end
+                _closed = true
+                if _stopSpin then _stopSpin(); _stopSpin = nil end
+                if Compkiller.AnimationsEnabled then
+                    Compkiller:_Animation(
+                        Card,
+                        TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+                        { Position = UDim2.new(1, 320, 0, 0) }
+                    )
+                    task.wait(0.2)
+                    if BlockFrame and BlockFrame.Parent then
+                        Compkiller:_Animation(
+                            BlockFrame,
+                            TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.In),
+                            { Size = UDim2.new(1, 0, 0, 0) }
+                        )
+                        task.wait(0.28)
+                    end
+                end
+                pcall(function() BlockFrame:Destroy() end)
+            end
+
+            local Show = function()
+                Compkiller:_Animation(
+                    Card,
+                    TweenInfo.new(0.45, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
+                    { Position = UDim2.new(0, 0, 0, 0) }
+                )
+            end
+
+            if typeof(Notify.Duration) == "number" and Notify.Duration ~= math.huge then
+                Compkiller:_Animation(
+                    BarFill,
+                    TweenInfo.new(Notify.Duration, Enum.EasingStyle.Linear),
+                    { Size = UDim2.new(1, 0, 1, 0) }
+                )
+                return task.delay(0.2, function()
+                    Show()
+                    task.delay(Notify.Duration, Close)
+                end)
+            end
+
+            Show()
+
+            return {
+                Title = function(self, new)
+                    Header.Text = new or ""
+                end,
+                Content = function(self, new)
+                    Body.Text = new or ""
+                    _syncBodyVisibility()
+                end,
+                SetColors = function(self, cfg)
+                    if typeof(cfg) ~= "table" then return end
+                    if typeof(cfg.BarColor) == "Color3" then
+                        _barColor = cfg.BarColor
+                        AccentBar.BackgroundColor3 = _barColor
+                        CompLogo.ImageColor3 = _barColor
+                        BarFill.BackgroundColor3 = _barColor
+                    end
+                    if typeof(cfg.IconBGColor) == "Color3" then
+                        _bgColor = cfg.IconBGColor
+                        IconBG.BackgroundColor3 = _bgColor
+                    end
+                    if typeof(cfg.StrokeColor) == "Color3" then
+                        _stColor = cfg.StrokeColor
+                        CardStroke.Color = _stColor
+                    end
+                end,
+                SetProgress = function(self, new, Time)
+                    if new > 1 then new = new / 100 end
+                    if Time and Time <= 0 then
+                        BarFill.Size = UDim2.new(new, 0, 1, 0)
+                        return
+                    end
+                    Compkiller:_Animation(
+                        BarFill,
+                        TweenInfo.new(Time or 0.85, (Time and Enum.EasingStyle.Linear) or Enum.EasingStyle.Quint),
+                        { Size = UDim2.new(new, 0, 1, 0) }
+                    )
+                end,
+                SetSpin = function(self, enabled)
+                    if enabled and not _stopSpin then
+                        _stopSpin = _makeSpin(CompLogo)
+                    elseif not enabled and _stopSpin then
+                        _stopSpin()
+                        _stopSpin = nil
+                        CompLogo.Rotation = 0
+                    end
+                end,
+                Close = Close,
+            }
+        end,
+    }
+    return Compkiller.NOTIFY_CACHE
 end
 function Compkiller:EnableAdvancedOptimizations(enabled)
 	_OPT.Enabled = (enabled == true)
@@ -9601,7 +9655,11 @@ function Compkiller:_SmartAnimation(Self, Info, Property)
 			_OPT.ActiveTweenMap[dedupKey] = nil
 		end
 	end
-	local tween = TweenService:Create(Self, newInfo, Property)
+	local _twOk2, tween = pcall(TweenService.Create, TweenService, Self, newInfo, Property)
+	if not _twOk2 or not tween then
+		for prop, val in pairs(Property) do pcall(function() Self[prop] = val end) end
+		return _OPT._DummyTween
+	end
 	table.insert(_OPT.ActiveTweens, tween)
 	for prop in pairs(Property) do
 		_OPT.ActiveTweenMap[tostring(Self) .. "|" .. prop] = tween
