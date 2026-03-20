@@ -8659,7 +8659,7 @@ function Compkiller.new(Config)
 		ExpireText.Text = _expireDisplay
 		WindowLabel.Text = config.WindowName
 		if WindowArgs._HideAvatar then
-			UserProfile.Image = Compkiller:CacheImage("rbxassetid://9613855156")--HIDECOG
+			UserProfile.Image = Compkiller:CacheImage("rbxassetid://9613855144")--HIDECOG
 		else
 			UserProfile.Image = config.UserProfile
 		end
