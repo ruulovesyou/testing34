@@ -4125,7 +4125,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 -- ────────────────────────────────────────────────────────────────────────────────────────
 
 	--updated
-	
+
 	function Args:AddSlider(Config: Slider)
 			Config = Compkiller.__CONFIG(Config , {
 				Name = 'Slider',
