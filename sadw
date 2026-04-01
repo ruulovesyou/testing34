@@ -407,14 +407,13 @@ Compkiller.LastDrag = tick();
 Compkiller.Flags = {};
 
 
-
+local Compkiller = {}
 
 local icons = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/fonts"))()
+local lesfont = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/fonts"))()
+
 Compkiller.Lucide = icons
-
-
-local font = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/fonts"))()
-Compkiller.FontAwesome = font
+Compkiller.FontAwesome = lesfont
 
 
 
