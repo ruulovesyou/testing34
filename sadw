@@ -13,30 +13,6 @@
 		Compkiller:CustomIconHighlight()
 --]]
 
-
---[[
-╔══════════════════════════════════════════════════════════════════════════════════════════════╗
-║                                                                                              ║
-║  🚨  IMPORTANT: THIS FILE CONTAINS SIX SEPARATE COMPKILLER CODE SECTIONS  🚨                ║
-║                                                                                              ║
-║  [SECTION 1: GLOBAL SETTINGS & THEME]  ──────────────────────────────────────  (SECTION_1)  ║
-║  [SECTION 2: WINDOW CREATION]          ──────────────────────────────────────  (SECTION_2)  ║
-║  [SECTION 3: TAB SYSTEM]               ──────────────────────────────────────  (SECTION_3)  ║
-║  [SECTION 4: SECTION SYSTEM]           ──────────────────────────────────────  (SECTION_4)  ║
-║  [SECTION 5: ELEMENT FUNCTIONS]        ──────────────────────────────────────  (SECTION_5)  ║
-║  [SECTION 6: SPECIAL SYSTEMS]          ──────────────────────────────────────  (SECTION_6)  ║
-║                                                                                              ║
-║  ⚠️  DO NOT MERGE - MAINTAIN SEPARATION WITH CLEAR DELIMITERS  ⚠️                            ║
-║                                                                                              ║
-╚══════════════════════════════════════════════════════════════════════════════════════════════╝
-
-
-
---]]
--- ══════════════════════════════════════════════════════════════════════════════════════════
--- ║ [COMP KILLER - GLOBAL SETTINGS & THEME] ────────────────────────────────── (SECTION 1) ║
--- ══════════════════════════════════════════════════════════════════════════════════════════
-
 --- Export Types ---
 
 export type cloneref = (target: Instance) -> Instance;
@@ -3679,15 +3655,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 	local Args = {};
 
-
--- ══════════════════════════════════════════════════════════════════════════════════════════
--- ║ [COMP KILLER - ELEMENT FUNCTIONS] ──────────────────────────────────────── (SECTION_1) ║
--- ══════════════════════════════════════════════════════════════════════════════════════════
-
--- ────────────────────────────────────────────────────────────────────────────────────────
--- ║ → Toggles (Toggle + MiniToggle) ──────────────────────────────────────────── (5.1) ║
--- ────────────────────────────────────────────────────────────────────────────────────────
-
 	function Args:AddToggle(Config : Toggle)
 		Config = Compkiller.__CONFIG(Config,{
 			Name = "Toggle",
@@ -3768,11 +3735,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		return Args;
 	end;
-
-
--- ────────────────────────────────────────────────────────────────────────────────────────
--- ║ → Keybinds (Keybind + MiniKeybind) ───────────────────────────────────────── (5.7) ║
--- ────────────────────────────────────────────────────────────────────────────────────────
 
 	function Args:AddKeybind(Config : Keybind)
 		Config = Compkiller.__CONFIG(Config,{
@@ -3872,11 +3834,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		return Args;
 	end;
 
-
--- ────────────────────────────────────────────────────────────────────────────────────────
--- ║ → ColorPickers (ColorPicker + MiniColorPicker) ───────────────────────────── (5.6) ║
--- ────────────────────────────────────────────────────────────────────────────────────────
-
 	function Args:AddColorPicker(Config: ColorPicker)
 		Config = Compkiller.__CONFIG(Config,{
 			Name = "ColorPicker",
@@ -3956,11 +3913,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		return Args;
 	end;
-
-
--- ────────────────────────────────────────────────────────────────────────────────────────
--- ║ → Buttons ─────────────────────────────────────────────────────────────────── (5.2) ║
--- ────────────────────────────────────────────────────────────────────────────────────────
 
 	function Args:AddButton(Config: Button)
 		Config = Compkiller.__CONFIG(Config , {
@@ -4118,11 +4070,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		return Args;
 	end;
-
-
--- ────────────────────────────────────────────────────────────────────────────────────────
--- ║ → Sliders ─────────────────────────────────────────────────────────────────── (5.3) ║
--- ────────────────────────────────────────────────────────────────────────────────────────
 
 	function Args:AddSlider(Config: Slider)
 		Config = Compkiller.__CONFIG(Config , {
@@ -4466,11 +4413,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		return Args;
 	end;
 
-
--- ────────────────────────────────────────────────────────────────────────────────────────
--- ║ → Helpers & Paragraphs ────────────────────────────────────────────────────── (5.8) ║
--- ────────────────────────────────────────────────────────────────────────────────────────
-
 	function Args:AddParagraph(Config: Paragraph) -- request by Neptune
 		Config = Compkiller.__CONFIG(Config, {
 			Title = "Paragraph",
@@ -4619,11 +4561,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		return Args;
 	end;
-
-
--- ────────────────────────────────────────────────────────────────────────────────────────
--- ║ → Textboxes ───────────────────────────────────────────────────────────────── (5.5) ║
--- ────────────────────────────────────────────────────────────────────────────────────────
 
 	function Args:AddTextBox(Config: TextBoxConfig)
 		Config = Compkiller.__CONFIG(Config , {
@@ -4865,11 +4802,6 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		return Args;
 	end;
-
-
--- ────────────────────────────────────────────────────────────────────────────────────────
--- ║ → Dropdowns (including AddLinkOption / LinkValues) ────────────────────────── (5.4) ║
--- ────────────────────────────────────────────────────────────────────────────────────────
 
 	function Args:AddDropdown(Config : Dropdown)
 		Config = Compkiller.__CONFIG(Config,{
@@ -5360,11 +5292,6 @@ function Compkiller:ChangeHighlightColor(NewColor: Color3)
 		end;
 	end;
 end;
-
-
--- ══════════════════════════════════════════════════════════════════════════════════════════
--- ║ [COMP KILLER - WINDOW CREATION] ───────────────────────────────────────── (SECTION_2) ║
--- ══════════════════════════════════════════════════════════════════════════════════════════
 
 function Compkiller.new(Config : Window)
 
@@ -6005,11 +5932,6 @@ function Compkiller.new(Config : Window)
 	function WindowArgs:SetVisible(bool: boolean)
 		CompKiller.Enabled = bool;
 	end;
-
-
--- ══════════════════════════════════════════════════════════════════════════════════════════
--- ║ [COMP KILLER - TAB SYSTEM] ─────────────────────────────────────────────── (SECTION_3) ║
--- ══════════════════════════════════════════════════════════════════════════════════════════
 
 	function WindowArgs:DrawCategory(config : Category)
 		config = config or {};
@@ -8300,11 +8222,6 @@ function Compkiller.new(Config : Window)
 		--TabArgs.LeftThread();
 		--TabArgs.RightThread();
 
-
--- ══════════════════════════════════════════════════════════════════════════════════════════
--- ║ [COMP KILLER - SECTION SYSTEM] ─────────────────────────────────────────── (SECTION_4) ║
--- ══════════════════════════════════════════════════════════════════════════════════════════
-
 		function TabArgs:DrawSection(config: Section)
 			config = Compkiller.__CONFIG(config,{
 				Name = "Section",
@@ -9086,11 +9003,6 @@ function Compkiller.new(Config : Window)
 
 	return WindowArgs;
 end;
-
-
--- ══════════════════════════════════════════════════════════════════════════════════════════
--- ║ [COMP KILLER - SPECIAL SYSTEMS] ────────────────────────────────────────── (SECTION_6) ║
--- ══════════════════════════════════════════════════════════════════════════════════════════
 
 function Compkiller:GetDate(Time)
 	Time = Time or tick();
