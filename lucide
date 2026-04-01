@@ -1,6 +1,4 @@
-
-
-local lucideIcons = {
+{
 	['lucide-mouse-2'] = "rbxassetid://10088146939",
 	['lucide-internet'] = "rbxassetid://12785195438",
 	['lucide-earth'] = "rbxassetid://115986292591138",
@@ -824,12 +822,3 @@ local lucideIcons = {
 	["lucide-zoom-in"] = "rbxassetid://10747384552",
 	["lucide-zoom-out"] = "rbxassetid://10747384679",
 };
-
-
-return lucideIcons
-
-
-
-
-
-
