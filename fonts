@@ -1,5 +1,4 @@
-
-local Fonts = {
+{
 	a = "rbxassetid://74244459944328",
 	['accessible-icon'] = "rbxassetid://135242143909610",
 	accusoft = "rbxassetid://94057545767519",
@@ -186,6 +185,3 @@ local Fonts = {
 	volleyball = "rbxassetid://73870192536894",
 	['magnifying-glass'] = "rbxassetid://74387839235930",
 };
-
-return Fonts
-
