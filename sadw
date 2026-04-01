@@ -408,7 +408,7 @@ Compkiller.Flags = {};
 
 
 
-Compkiller.Lucide = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/lucide?t=" .. tostring(os.time())))()
+Compkiller.Lucide = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/fonts"))()
 
 
 
