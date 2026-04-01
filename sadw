@@ -406,8 +406,9 @@ Compkiller.IaDrag = false;
 Compkiller.LastDrag = tick();
 Compkiller.Flags = {};
 
-Compkiller.Lucide = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/lucide"))()
-Compkiller.FontAwesome = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/fonts"))()
+
+local Compkiller.Lucide = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/lucide"))()
+local Compkiller.FontAwesome = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/fonts"))()
 
 
 
