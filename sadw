@@ -430,8 +430,17 @@ Compkiller.IaDrag = false;
 Compkiller.LastDrag = tick();
 Compkiller.Flags = {};
 
-Compkiller.Lucide = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/lucide"))()
-Compkiller.FontAwesome = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/fonts"))()
+do
+	local ok1, result1 = pcall(function()
+		return loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/lucide"))()
+	end)
+	Compkiller.Lucide = (ok1 and type(result1) == "table" and result1) or {}
+
+	local ok2, result2 = pcall(function()
+		return loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/fonts"))()
+	end)
+	Compkiller.FontAwesome = (ok2 and type(result2) == "table" and result2) or {}
+end
 
 
 function Compkiller:OptimizeMode(v)
