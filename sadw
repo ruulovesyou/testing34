@@ -406,7 +406,9 @@ Compkiller.IaDrag = false;
 Compkiller.LastDrag = tick();
 Compkiller.Flags = {};
 
-local Compkiller.Lucide = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/lucide"))()
+
+
+Compkiller.Lucide = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/lucide"))()
 
 
 
