@@ -408,11 +408,13 @@ Compkiller.Flags = {};
 
 
 
-Compkiller.Lucide = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/fonts"))()
+
+local icons = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/fonts"))()
+Compkiller.Lucide = icons
 
 
-
-Compkiller.FontAwesome = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/fonts"))()
+local font = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/fonts"))()
+Compkiller.FontAwesome = font
 
 
 
