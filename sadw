@@ -4302,28 +4302,19 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 
 	local BaseZ_Index = BaseParent.ZIndex + (math.random(1,15) * 100);
 
-	local DropdownWindow  = Instance.new("Frame")
-	local UIStroke        = Instance.new("UIStroke")
-	local UICorner        = Instance.new("UICorner")
-	local SearchContainer = Instance.new("Frame")
-	local SearchBox       = Instance.new("TextBox")
-	local SearchCorner    = Instance.new("UICorner")
-	local ClearBtn        = Instance.new("TextButton")
-	local SearchSep       = Instance.new("Frame")
-	local ScrollingFrame  = Instance.new("ScrollingFrame")
-	local UIListLayout    = Instance.new("UIListLayout")
-	local NoResultsLabel  = Instance.new("TextLabel")
+	local DropdownWindow = Instance.new("Frame")
+	local UIStroke = Instance.new("UIStroke")
+	local UICorner = Instance.new("UICorner")
+	local ScrollingFrame = Instance.new("ScrollingFrame")
+	local UIListLayout = Instance.new("UIListLayout")
 	local ToggleDb = Compkiller.__SIGNAL(false);
 	local EventOut = Compkiller.__SIGNAL(0);
-
-	local SEARCH_H = 30;
 
 	DropdownWindow.Name = Compkiller:_RandomString()
 	DropdownWindow.Parent = Window
 	DropdownWindow.BackgroundColor3 = Compkiller.Colors.BlockBackground
 	DropdownWindow.BorderColor3 = Color3.fromRGB(0, 0, 0)
 	DropdownWindow.BorderSizePixel = 0
-	DropdownWindow.ClipsDescendants = true
 	DropdownWindow.Position = UDim2.new(123, 0, 123, 0)
 	DropdownWindow.Size = UDim2.new(0, 190, 0, 200)
 	DropdownWindow.ZIndex = BaseZ_Index
@@ -4359,76 +4350,14 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	UICorner.CornerRadius = UDim.new(0, 6)
 	UICorner.Parent = DropdownWindow
 
-	-- Search container (fixed at top, never scrolls)
-	SearchContainer.Name = Compkiller:_RandomString()
-	SearchContainer.Parent = DropdownWindow
-	SearchContainer.BackgroundTransparency = 1
-	SearchContainer.BorderSizePixel = 0
-	SearchContainer.Position = UDim2.new(0, 0, 0, 0)
-	SearchContainer.Size = UDim2.new(1, 0, 0, SEARCH_H)
-	SearchContainer.ZIndex = BaseZ_Index + 8
-
-	SearchBox.Name = Compkiller:_RandomString()
-	SearchBox.Parent = SearchContainer
-	SearchBox.AnchorPoint = Vector2.new(0.5, 0.5)
-	SearchBox.BackgroundColor3 = Compkiller.Colors.DropColor
-	SearchBox.BackgroundTransparency = 0.18
-	SearchBox.BorderSizePixel = 0
-	SearchBox.Position = UDim2.new(0.5, 0, 0.5, 0)
-	SearchBox.Size = UDim2.new(1, -10, 0, 20)
-	SearchBox.ZIndex = BaseZ_Index + 9
-	SearchBox.Font = Enum.Font.GothamMedium
-	SearchBox.PlaceholderText = "Search options..."
-	SearchBox.PlaceholderColor3 = Compkiller.Colors.SwitchColor
-	SearchBox.Text = ""
-	SearchBox.TextColor3 = Compkiller.Colors.SwitchColor
-	SearchBox.TextSize = 12
-	SearchBox.TextXAlignment = Enum.TextXAlignment.Left
-	SearchBox.ClearTextOnFocus = false
-
-	table.insert(Compkiller.Elements.SwitchColor, { Element = SearchBox, Property = "TextColor3" });
-	table.insert(Compkiller.Elements.DropColor,   { Element = SearchBox, Property = "BackgroundColor3" });
-
-	SearchCorner.CornerRadius = UDim.new(0, 4)
-	SearchCorner.Parent = SearchBox
-
-	ClearBtn.Name = Compkiller:_RandomString()
-	ClearBtn.Parent = SearchBox
-	ClearBtn.AnchorPoint = Vector2.new(1, 0.5)
-	ClearBtn.BackgroundTransparency = 1
-	ClearBtn.BorderSizePixel = 0
-	ClearBtn.Position = UDim2.new(1, -4, 0.5, 0)
-	ClearBtn.Size = UDim2.new(0, 14, 0, 14)
-	ClearBtn.ZIndex = BaseZ_Index + 10
-	ClearBtn.Font = Enum.Font.GothamBold
-	ClearBtn.Text = "✕"
-	ClearBtn.TextColor3 = Compkiller.Colors.SwitchColor
-	ClearBtn.TextSize = 10
-	ClearBtn.TextTransparency = 0.4
-	ClearBtn.Visible = false
-
-	table.insert(Compkiller.Elements.SwitchColor, { Element = ClearBtn, Property = "TextColor3" });
-
-	SearchSep.Name = Compkiller:_RandomString()
-	SearchSep.Parent = DropdownWindow
-	SearchSep.AnchorPoint = Vector2.new(0.5, 0)
-	SearchSep.BackgroundColor3 = Compkiller.Colors.LineColor
-	SearchSep.BackgroundTransparency = 0.5
-	SearchSep.BorderSizePixel = 0
-	SearchSep.Position = UDim2.new(0.5, 0, 0, SEARCH_H)
-	SearchSep.Size = UDim2.new(1, -10, 0, 1)
-	SearchSep.ZIndex = BaseZ_Index + 7
-
-	table.insert(Compkiller.Elements.LineColor, { Element = SearchSep, Property = "BackgroundColor3" });
-
 	ScrollingFrame.Parent = DropdownWindow
 	ScrollingFrame.Active = true
-	ScrollingFrame.AnchorPoint = Vector2.new(0.5, 1)
+	ScrollingFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 	ScrollingFrame.BackgroundTransparency = 1.000
 	ScrollingFrame.BorderColor3 = Color3.fromRGB(0, 0, 0)
 	ScrollingFrame.BorderSizePixel = 0
-	ScrollingFrame.Position = UDim2.new(0.5, 0, 1, 0)
-	ScrollingFrame.Size = UDim2.new(1, -5, 1, -(SEARCH_H + 1))
+	ScrollingFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
+	ScrollingFrame.Size = UDim2.new(1, -5, 1, -5)
 	ScrollingFrame.ZIndex = BaseZ_Index + 5
 	ScrollingFrame.BottomImage = ""
 	ScrollingFrame.ScrollBarThickness = 0
@@ -4442,23 +4371,6 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
 		ScrollingFrame.CanvasSize = UDim2.fromOffset(UIListLayout.AbsoluteContentSize.X,UIListLayout.AbsoluteContentSize.Y)
 	end);
-
-	NoResultsLabel.Name = Compkiller:_RandomString()
-	NoResultsLabel.Parent = ScrollingFrame
-	NoResultsLabel.BackgroundTransparency = 1
-	NoResultsLabel.BorderSizePixel = 0
-	NoResultsLabel.Size = UDim2.new(1, -10, 0, 20)
-	NoResultsLabel.ZIndex = BaseZ_Index + 6
-	NoResultsLabel.Font = Enum.Font.GothamMedium
-	NoResultsLabel.Text = "No results found"
-	NoResultsLabel.TextColor3 = Compkiller.Colors.SwitchColor
-	NoResultsLabel.TextSize = 12
-	NoResultsLabel.TextTransparency = 0.5
-	NoResultsLabel.TextXAlignment = Enum.TextXAlignment.Center
-	NoResultsLabel.Visible = false
-	NoResultsLabel.LayoutOrder = 999999
-
-	table.insert(Compkiller.Elements.SwitchColor, { Element = NoResultsLabel, Property = "TextColor3" });
 
 	local ToggleUI = function(bool)
 		local IsSame = ToggleDb:GetValue() == bool;
@@ -4485,28 +4397,20 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 				DropdownWindow.Position = DropPosition;
 			end;
 
-			local listH = math.clamp(UIListLayout.AbsoluteContentSize.Y + 10, 10, 200 - SEARCH_H - 1);
-
 			Compkiller:_Animation(DropdownWindow,TweenInfo.new(0.2),{
 				BackgroundTransparency = 0,
 				Position = MainPosition,
-				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, listH + SEARCH_H + 1)
+				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, math.clamp(UIListLayout.AbsoluteContentSize.Y + 10,10 , 200))
 			})
 
 			Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
 				Transparency = 0
 			})
-
-			task.defer(function()
-				SearchBox:CaptureFocus();
-			end);
 		else
-			local listH = math.clamp(UIListLayout.AbsoluteContentSize.Y / 1.5, 10, 200 - SEARCH_H - 1);
-
 			Compkiller:_Animation(DropdownWindow,TweenInfo.new(0.2),{
 				BackgroundTransparency = 1,
 				Position = DropPosition,
-				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, listH + SEARCH_H + 1)
+				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, math.clamp(UIListLayout.AbsoluteContentSize.Y / 1.5, 10 , 200))
 			})
 
 			Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
@@ -4522,8 +4426,6 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	local Default = nil;
 	local Values = nil;
 	local IsMulti = false;
-	local ItemCache = {};
-	local filterToken = 0;
 
 	local DrawButton = function()
 		local DropdownItem = Instance.new("Frame")
@@ -4591,9 +4493,6 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 		for i,v in next,  __signals do
 			v:Disconnect();
 		end;
-
-		table.clear(__signals);
-		table.clear(ItemCache);
 	end;
 
 	local IsDefault = function(v)
@@ -4603,48 +4502,6 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	local MatchDefault = function(v,DataFrame)
 		return (typeof(DataFrame) == 'table' and (DataFrame[v] or table.find(DataFrame,v))) or DataFrame == v;
 	end;
-
-	local ApplyFilter = function()
-		local query = SearchBox.Text:lower();
-		local count = 0;
-		local order = 0;
-
-		for rawName, entry in next, ItemCache do
-			local isMatch = (query == "") or (rawName:find(query, 1, true) ~= nil);
-			entry.frame.Visible = isMatch;
-
-			if isMatch then
-				order += 1;
-				entry.frame.LayoutOrder = order;
-				count += 1;
-			end;
-		end;
-
-		ScrollingFrame.CanvasSize = UDim2.fromOffset(0, count * 30);
-		NoResultsLabel.Visible = (count == 0);
-	end;
-
-	local ScheduleFilter = function()
-		filterToken += 1;
-		local myToken = filterToken;
-		task.delay(0.1, function()
-			if filterToken == myToken then
-				ApplyFilter();
-			end;
-		end);
-	end;
-
-	SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
-		ClearBtn.Visible = SearchBox.Text ~= "";
-		ScheduleFilter();
-	end);
-
-	ClearBtn.MouseButton1Click:Connect(function()
-		SearchBox.Text = "";
-		ClearBtn.Visible = false;
-		ApplyFilter();
-		SearchBox:CaptureFocus();
-	end);
 
 	local UpdateDropdown = function()
 		local DataFrame;
@@ -4661,12 +4518,6 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 			bth.DropdownItem.Parent = ScrollingFrame;
 
 			bth.Value = v;
-
-			ItemCache[tostring(v):lower()] = {
-				frame = bth.DropdownItem,
-				text  = bth.BlockText,
-				line  = bth.BlockLine,
-			};
 
 			table.insert(__signals , ToggleDb:Connect(function(bool)
 				if bool then
@@ -4738,8 +4589,6 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 				end);
 			end;
 		end;
-
-		ApplyFilter();
 	end;
 
 	BaseParent.MouseButton1Click:Connect(function()
@@ -5237,8 +5086,10 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		local UIStroke = Instance.new("UIStroke")
 		local UICorner = Instance.new("UICorner")
 		local SliderInput = Instance.new("Frame")
+		local SliderFillGradient = Instance.new("UIGradient")
 		local UICorner_2 = Instance.new("UICorner")
 		local Frame = Instance.new("Frame")
+		local KnobStroke = Instance.new("UIStroke")
 		local UICorner_3 = Instance.new("UICorner")
 		local UIScale = Instance.new("UIScale")
 		local ValueText = Instance.new("TextLabel")
@@ -5335,6 +5186,18 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		UICorner_2.CornerRadius = UDim.new(0, 6)
 		UICorner_2.Parent = SliderInput
 
+		-- UIGradient on fill bar: subtle highlight-to-base fade for depth
+		SliderFillGradient.Color = ColorSequence.new{
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 180, 180)),
+		}
+		SliderFillGradient.Transparency = NumberSequence.new{
+			NumberSequenceKeypoint.new(0, 0.15),
+			NumberSequenceKeypoint.new(1, 0.45),
+		}
+		SliderFillGradient.Rotation = 90
+		SliderFillGradient.Parent = SliderInput
+
 		Frame.Parent = SliderInput
 		Frame.AnchorPoint = Vector2.new(1, 0.5)
 		Frame.BackgroundColor3 = Compkiller.Colors.SwitchColor
@@ -5349,6 +5212,18 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		table.insert(Compkiller.Elements.SwitchColor , {
 			Element = Frame,
 			Property = 'BackgroundColor3'
+		});
+
+		-- UIStroke on knob for subtle 3D border/depth effect
+		KnobStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+		KnobStroke.Color = Compkiller.Colors.HighStrokeColor
+		KnobStroke.Transparency = 0.400
+		KnobStroke.Thickness = 1.5
+		KnobStroke.Parent = Frame
+
+		table.insert(Compkiller.Elements.HighStrokeColor , {
+			Element = KnobStroke,
+			Property = "Color"
 		});
 
 		UICorner_3.CornerRadius = UDim.new(3, 0)
@@ -7109,7 +6984,7 @@ function Compkiller.new(Config : Window)
 		CategoryText.BorderSizePixel = 0
 		CategoryText.Position = UDim2.new(0, 5, 0, 8)
 		CategoryText.Size = UDim2.new(1, 200, 0, 10)
-		CategoryText.Font = Enum.Font.Gotham
+		CategoryText.Font = Enum.Font.GothamMedium
 		CategoryText.Text = config.Name
 		CategoryText.TextColor3 = Compkiller.Colors.SwitchColor
 		CategoryText.TextSize = 16.000
@@ -9386,6 +9261,10 @@ function Compkiller.new(Config : Window)
 			local UIStroke = Instance.new("UIStroke")
 			local UIListLayout = Instance.new("UIListLayout")
 			local Header = Instance.new("Frame")
+			local HeaderStroke = Instance.new("UIStroke")
+			local HeaderCorner = Instance.new("UICorner")
+			local HeaderSep = Instance.new("Frame")
+			local HeaderSepGradient = Instance.new("UIGradient")
 			local SectionText = Instance.new("TextLabel")
 			local SectionClose = Instance.new("ImageLabel")
 
@@ -9430,14 +9309,60 @@ function Compkiller.new(Config : Window)
 			UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 			UIListLayout.Padding = UDim.new(0, 5)
 
+			-- Header: semi-transparent background with contextual UIStroke border
 			Header.Name = Compkiller:_RandomString()
 			Header.Parent = Section
-			Header.BackgroundTransparency = 1.000
+			Header.BackgroundColor3 = Compkiller.Colors.BlockColor
+			Header.BackgroundTransparency = 0.500
 			Header.BorderColor3 = Color3.fromRGB(0, 0, 0)
 			Header.BorderSizePixel = 0
 			Header.LayoutOrder = -100
 			Header.Size = UDim2.new(1, 0, 0, 35)
 			Header.ZIndex = 9
+
+			table.insert(Compkiller.Elements.BlockColor , {
+				Element = Header,
+				Property = "BackgroundColor3"
+			});
+
+			HeaderCorner.CornerRadius = UDim.new(0, 6)
+			HeaderCorner.Parent = Header
+
+			HeaderStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+			HeaderStroke.Color = Compkiller.Colors.HighStrokeColor
+			HeaderStroke.Transparency = 0.650
+			HeaderStroke.Parent = Header
+
+			table.insert(Compkiller.Elements.HighStrokeColor , {
+				Element = HeaderStroke,
+				Property = "Color"
+			});
+
+			-- Fading separator beneath header
+			HeaderSep.Name = Compkiller:_RandomString()
+			HeaderSep.Parent = Section
+			HeaderSep.AnchorPoint = Vector2.new(0.5, 0)
+			HeaderSep.BackgroundColor3 = Compkiller.Colors.Highlight
+			HeaderSep.BackgroundTransparency = 0.700
+			HeaderSep.BorderSizePixel = 0
+			HeaderSep.LayoutOrder = -99
+			HeaderSep.Size = UDim2.new(1, 0, 0, 1)
+			HeaderSep.ZIndex = 9
+
+			table.insert(Compkiller.Elements.Highlight , {
+				Element = HeaderSep,
+				Property = "BackgroundColor3"
+			});
+
+			-- UIGradient fades separator at both edges
+			HeaderSepGradient.Transparency = NumberSequence.new{
+				NumberSequenceKeypoint.new(0.00, 1.00),
+				NumberSequenceKeypoint.new(0.08, 0.20),
+				NumberSequenceKeypoint.new(0.50, 0.00),
+				NumberSequenceKeypoint.new(0.92, 0.20),
+				NumberSequenceKeypoint.new(1.00, 1.00),
+			}
+			HeaderSepGradient.Parent = HeaderSep
 
 			SectionText.Name = Compkiller:_RandomString()
 			SectionText.Parent = Header
@@ -9448,7 +9373,7 @@ function Compkiller.new(Config : Window)
 			SectionText.Position = UDim2.new(0, 12, 0.5, 0)
 			SectionText.Size = UDim2.new(0, 200, 0, 25)
 			SectionText.ZIndex = 10
-			SectionText.Font = Enum.Font.GothamMedium
+			SectionText.Font = Enum.Font.GothamBold
 			SectionText.Text = config.Name;
 			SectionText.TextColor3 = Compkiller.Colors.SwitchColor
 			SectionText.TextSize = 14.000
