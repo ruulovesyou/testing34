@@ -407,7 +407,7 @@ Compkiller.LastDrag = tick();
 Compkiller.Flags = {};
 
 
-
+local Compkiller = Compkiller or {}
 
 local icons = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/fonts"))()
 
