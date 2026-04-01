@@ -1,7 +1,19 @@
 --[[
     		Compkiller Interface
+
+    Author: 4lpaca
+    License: MIT
+    Github: https://github.com/4lpaca-pin/CompKiller
+    Original: compkiller.net
+
+        Version: 2.6
+    - Improved Performance Mode
+    	Compkiller:OptimizeMode(< boolean >)
+  	- Added Auto Color Logo
+		Compkiller:CustomIconHighlight()
 --]]
 
+--- Export Types ---
 
 export type cloneref = (target: Instance) -> Instance;
 
@@ -340,153 +352,6 @@ local Players: Players = cloneref(game:GetService('Players'));
 local HttpService: HttpService = cloneref(game:GetService('HttpService'));
 local LocalPlayer: Player = Players.LocalPlayer;
 local CoreGui: PlayerGui = (gethui and gethui()) or (get_hidden_gui and get_hidden_gui()) or cloneref(game:FindFirstChild('CoreGui')) or cloneref(LocalPlayer.PlayerGui);
-
--- ── JANITOR: single source of truth for all connections ──────────────────────
-local _Janitor = {
-	_conns = {},
-	_threads = {},
-	_instances = {},
-};
-
-function _Janitor:Add(conn)
-	if conn and typeof(conn) == "RBXScriptConnection" then
-		table.insert(self._conns, conn);
-	end;
-	return conn;
-end;
-
-function _Janitor:AddThread(t)
-	if t then table.insert(self._threads, t); end;
-	return t;
-end;
-
-function _Janitor:AddInstance(inst)
-	if inst then table.insert(self._instances, inst); end;
-	return inst;
-end;
-
-function _Janitor:Cleanup()
-	for _, c in ipairs(self._conns) do pcall(function() c:Disconnect() end); end;
-	for _, t in ipairs(self._threads) do pcall(function() task.cancel(t) end); end;
-	for _, i in ipairs(self._instances) do pcall(function() i:Destroy() end); end;
-	self._conns = {};
-	self._threads = {};
-	self._instances = {};
-end;
-
--- ── STEALTH NAMES: cryptographically-noise instance names ─────────────────────
-local _STEALTH_PREFIX = {"Rbl","RbxI","RbxS","Sys","Svc","Gui","Hud","Ui"};
-local _STEALTH_SUFFIX = {"_v2","Service","Handler","Layer","Stack","Core","Base"};
-
-local function _StealthName()
-	local rng = math.random;
-	local hex = string.format("%04X%04X", rng(0,0xFFFF), rng(0,0xFFFF));
-	local pre = _STEALTH_PREFIX[rng(1,#_STEALTH_PREFIX)];
-	local suf = _STEALTH_SUFFIX[rng(1,#_STEALTH_SUFFIX)];
-	return pre..hex..suf;
-end;
-
--- ── POSITION MEMORY: persist last window position across re-executes ──────────
-local _POS_KEY = "__ckWinPos";
-local function _SavePos(pos: UDim2)
-	pcall(function()
-		getgenv()[_POS_KEY] = {xs=pos.X.Scale, xo=pos.X.Offset, ys=pos.Y.Scale, yo=pos.Y.Offset};
-	end);
-end;
-local function _LoadPos(): UDim2?
-	local ok, raw = pcall(function() return getgenv()[_POS_KEY] end);
-	if ok and type(raw) == "table" then
-		return UDim2.new(raw.xs, raw.xo, raw.ys, raw.yo);
-	end;
-	return nil;
-end;
-
--- ── STEALTH MODE toggle: reduces monitoring + name changes when true ──────────
-local StealthMode = true;
-
--- ── PURE-MATH LAYOUT HELPERS (replace all UIListLayout usage) ─────────────────
--- #1  Horizontal right-to-left layout for LinkValues bars (padding 8 px)
---     Call after each child is added to the row frame.
-local _LINK_PAD = 8;
-local function _layoutLinkH(frame)
-	local children = {};
-	for _, c in ipairs(frame:GetChildren()) do
-		if c:IsA("GuiObject") then
-			table.insert(children, c);
-		end;
-	end;
-	-- Sort by LayoutOrder ascending so -N (last added) ends up rightmost
-	table.sort(children, function(a, b)
-		return (a.LayoutOrder or 0) > (b.LayoutOrder or 0);
-	end);
-	local xOff = 0;
-	for _, c in ipairs(children) do
-		local w = c.Size.X.Offset;
-		c.AnchorPoint = Vector2.new(1, 0.5);
-		c.Position    = UDim2.new(1, -(xOff), 0.5, 0);
-		xOff = xOff + w + _LINK_PAD;
-	end;
-end;
-
--- #2  Vertical stacking layout with configurable pixel gap, no UIListLayout.
---     Positions every direct Frame/GuiObject child top-to-bottom.
-local function _layoutChildrenV(frame, gap)
-	gap = gap or 0;
-	local yOff = 0;
-	for _, c in ipairs(frame:GetChildren()) do
-		if c:IsA("GuiObject") then
-			c.Position = UDim2.new(0.5, 0, 0, yOff);
-			c.AnchorPoint = Vector2.new(0.5, 0);
-			yOff = yOff + c.Size.Y.Offset + gap;
-		end;
-	end;
-end;
-
--- #3  Compute total stacked height of direct GuiObject children (for size tweens).
-local function _computeChildrenH(frame, gap)
-	gap = gap or 0;
-	local h, n = 0, 0;
-	for _, c in ipairs(frame:GetChildren()) do
-		if c:IsA("GuiObject") then
-			h = h + c.Size.Y.Offset;
-			n = n + 1;
-		end;
-	end;
-	if n > 1 then h = h + (n - 1) * gap; end;
-	return h;
-end;
-
--- ── INTEGRITY MONITOR: light debounced parent/visible check ──────────────────
-local function _IntegrityMonitor(screenGui: ScreenGui, safeParent: Instance)
-	if not StealthMode then return; end;
-	local debounce = false;
-	local lastDisplayOrder = screenGui.DisplayOrder;
-	_Janitor:Add(screenGui:GetPropertyChangedSignal("Parent"):Connect(function()
-		if debounce then return end; debounce = true;
-		task.delay(0.5 + math.random() * 0.3, function()
-			debounce = false;
-			if screenGui and screenGui.Parent ~= safeParent then
-				pcall(function() screenGui.Parent = safeParent; end);
-			end;
-		end);
-	end));
-	_Janitor:Add(screenGui:GetPropertyChangedSignal("Enabled"):Connect(function()
-		if debounce then return end; debounce = true;
-		task.delay(0.3 + math.random() * 0.2, function()
-			debounce = false;
-			if screenGui and not screenGui.Enabled then
-				pcall(function() screenGui.Enabled = true; end);
-			end;
-		end);
-	end));
-	_Janitor:Add(screenGui:GetPropertyChangedSignal("DisplayOrder"):Connect(function()
-		if screenGui.DisplayOrder ~= lastDisplayOrder then
-			task.delay(0.2, function()
-				pcall(function() screenGui.DisplayOrder = lastDisplayOrder; end);
-			end);
-		end;
-	end));
-end;
 local Mouse: Mouse = LocalPlayer:GetMouse();
 local CurrentCamera: Camera? = cloneref(workspace.CurrentCamera);
 
@@ -545,55 +410,9 @@ Compkiller.Lucide = loadstring(game:HttpGet("https://raw.githubusercontent.com/r
 Compkiller.FontAwesome = loadstring(game:HttpGet("https://raw.githubusercontent.com/ruulovesyou/testing34/refs/heads/main/fonts"))()
 
 
+
 function Compkiller:OptimizeMode(v)
 	Compkiller.PerformanceMode = v;
-end;
-
--- ── DEVICE SCALING ────────────────────────────────────────────────────────────
--- Reads Config.ScaleFactor (default 1.0) and auto-adjusts all open Window
--- MainFrames to the current viewport size, then keeps them in sync on resize.
--- Usage: Compkiller:ApplyDeviceScaling()  (call once after creating your window)
-Compkiller.ScaleFactor = 1.0;
-
-function Compkiller:ApplyDeviceScaling(scaleFactor)
-	-- Allow caller to override; fallback to instance field or 1.0
-	scaleFactor = tonumber(scaleFactor) or Compkiller.ScaleFactor or 1.0;
-	Compkiller.ScaleFactor = scaleFactor;
-
-	local function _computeSize()
-		local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080);
-		if Compkiller:_IsMobile() then
-			-- Mobile: scale from base mobile size
-			local bW = Compkiller.Scale.Mobile.X.Offset;
-			local bH = Compkiller.Scale.Mobile.Y.Offset;
-			local sf = math.clamp(math.min(vp.X / 800, vp.Y / 600), 0.55, 1.0) * scaleFactor;
-			return UDim2.new(0, math.round(bW * sf), 0, math.round(bH * sf));
-		else
-			local bW = Compkiller.Scale.Window.X.Offset;
-			local bH = Compkiller.Scale.Window.Y.Offset;
-			local sf = math.clamp(math.min(vp.X / 1920, vp.Y / 1080), 0.65, 1.25) * scaleFactor;
-			return UDim2.new(0, math.round(bW * sf), 0, math.round(bH * sf));
-		end;
-	end;
-
-	local function _applyToWindows(sz)
-		for _, gui in ipairs(Compkiller.Windows) do
-			local mf = gui:FindFirstChildWhichIsA("Frame");
-			if mf then
-				-- Small stealth delay before heavy resize in StealthMode
-				if StealthMode then task.wait(math.random(1, 30) / 1000); end;
-				Compkiller:_Animation(mf, TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Size = sz});
-			end;
-		end;
-	end;
-
-	-- Apply immediately
-	_applyToWindows(_computeSize());
-
-	-- Keep synced on camera viewport changes (handles window resize / fullscreen)
-	_Janitor:Add(workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
-		_applyToWindows(_computeSize());
-	end));
 end;
 
 function Compkiller:IsStudio()
@@ -664,7 +483,7 @@ function Compkiller:_GetIcon(name : string , font_aws) : string
 end;
 
 function Compkiller:_RandomString() : string
-	return _StealthName();
+	return "CK="..string.char(math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102),math.random(64,102));	
 end;
 
 function Compkiller:_IsMouseOverFrame(Frame : Frame) : boolean
@@ -685,41 +504,25 @@ function Compkiller:_Rounding(num: number, numDecimalPlaces: number) : number
 end;
 
 function Compkiller:_Animation(Self: Instance , Info: TweenInfo , Property :{[K] : V})
-	if not Self or not Self.Parent then return nil; end;
-	if Compkiller.PerformanceMode then
-		for k,v in next, Property do pcall(function() Self[k] = v; end); end;
-		return nil;
-	end;
-	-- StealthMode: add small random delay (1-30 ms) before tweens > 0.3 s (feature #6)
-	if StealthMode and Info and Info.Time and Info.Time > 0.3 then
-		task.wait(math.random(1, 30) / 1000);
-	end;
-	local ok, Tween = pcall(function()
-		return TweenService:Create(Self, Info or TweenInfo.new(0.25, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), Property);
-	end);
-	if ok and Tween then
-		Tween:Play();
-		return Tween;
-	end;
-	return nil;
+	local Tween = TweenService:Create(Self , Info or TweenInfo.new(0.25) , Property);
+
+	Tween:Play();
+
+	return Tween;
 end;
 
 function Compkiller:_Input(Frame : Frame , Callback : () -> ()) : TextButton
-	local Button = Instance.new('TextButton', Frame);
-	Button.Name = _StealthName();
+	local Button = Instance.new('TextButton',Frame);
+
 	Button.ZIndex = Frame.ZIndex + 10;
-	Button.Size = UDim2.fromScale(1, 1);
+	Button.Size = UDim2.fromScale(1,1);
 	Button.BackgroundTransparency = 1;
 	Button.TextTransparency = 1;
-	Button.Text = "";
+
 	if Callback then
-		_Janitor:Add(Button.MouseButton1Click:Connect(function()
-			task.spawn(function()
-				local ok, err = pcall(Callback);
-				if not ok then warn("[CK] Callback error: "..tostring(err)); end;
-			end);
-		end));
+		Button.MouseButton1Click:Connect(Callback);
 	end;
+
 	return Button;
 end;
 
@@ -736,11 +539,6 @@ function Compkiller:GetCalculatePosition(planePos: number, planeNormal: number, 
 end;
 
 function Compkiller:_Blur(element : Frame , WindowRemote) : RBXScriptSignal
-	-- StealthMode: skip heavy blur/DepthOfField entirely (feature #6)
-	if StealthMode then
-		return game.Changed:Connect(function() end);
-	end;
-
 	if Compkiller.SecureMode and not Compkiller.SecurityConfig.BlurEnabled then
 		return game.Changed:Connect(function() end);
 	end;
@@ -850,18 +648,25 @@ function Compkiller:_Blur(element : Frame , WindowRemote) : RBXScriptSignal
 		end;
 	end;
 
-	local rbxsignal = _Janitor:Add(CurrentCamera:GetPropertyChangedSignal('CFrame'):Connect(UpdateFunction));
-	local loopThread = _Janitor:Add(UserInputService.InputChanged:Connect(function(Input)
+	local rbxsignal = CurrentCamera:GetPropertyChangedSignal('CFrame'):Connect(UpdateFunction)
+	local loopThread = UserInputService.InputChanged:Connect(function(Input)
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch then
 			pcall(UpdateFunction);
 		end;
-	end));
+	end);
+
+	local THREAD = task.spawn(function()
+		while true do task.wait(0.1)
+			pcall(UpdateFunction);
+		end;
+	end);
 
 	disconnect = function()
-		pcall(function() rbxsignal:Disconnect(); end);
-		pcall(function() loopThread:Disconnect(); end);
-		pcall(function() if Part then Part:Destroy(); end; end);
-		pcall(function() if DepthOfField then DepthOfField:Destroy(); end; end);
+		rbxsignal:Disconnect();
+		loopThread:Disconnect();
+		task.cancel(THREAD);
+		Part:Destroy();
+		DepthOfField:Destroy();
 	end;
 
 	element.Destroying:Connect(disconnect);
@@ -897,11 +702,11 @@ function Compkiller:_AddDragBlacklist(Frame: Frame)
 		SET_BLACKLIST(false);
 	end);
 
-	_Janitor:Add(UserInputService.InputChanged:Connect(function()
+	UserInputService.InputChanged:Connect(function()
 		if not Compkiller:_IsMouseOverFrame(Frame) then
 			SET_BLACKLIST(false);
-		end;
-	end));
+		end
+	end);
 end;
 
 function Compkiller:_GetWindowFromElement(Element)
@@ -961,13 +766,9 @@ function Compkiller.__SIGNAL(default)
 end;
 
 function Compkiller:_Hover(Frame: Frame , OnHover: () -> any?, Release: () -> any?)
-	if not Frame then return; end;
-	_Janitor:Add(Frame.MouseEnter:Connect(function()
-		task.spawn(function() local ok,e = pcall(OnHover); if not ok then warn("[CK] Hover: "..tostring(e)); end; end);
-	end));
-	_Janitor:Add(Frame.MouseLeave:Connect(function()
-		task.spawn(function() local ok,e = pcall(Release); if not ok then warn("[CK] Leave: "..tostring(e)); end; end);
-	end));
+	Frame.MouseEnter:Connect(OnHover);
+
+	Frame.MouseLeave:Connect(Release);
 end;
 
 function Compkiller.__CONFIG(config , default)
@@ -983,63 +784,58 @@ function Compkiller.__CONFIG(config , default)
 end;
 
 function Compkiller:Drag(InputFrame: Frame, MoveFrame: Frame, Speed : number)
-	local dragActive = false;
-	local targetPos: UDim2 = MoveFrame.Position;
-	local dragStart: Vector3;
-	local frameStart: UDim2;
-	local lerpConn;
+	local dragToggle: boolean = false;
+	local dragStart: Vector3 = nil;
+	local startPos: UDim2 = nil;
+	local Tween = TweenInfo.new(Speed);
 
-	local LERP_SPEED = 1 / math.max(Speed or 0.1, 0.02);
+	local updateInput = function(input)
+		local delta = input.Position - dragStart;
+		local position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X,
+			startPos.Y.Scale, startPos.Y.Offset + delta.Y);
 
-	_Janitor:Add(InputFrame.InputBegan:Connect(function(input)
-		if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and #Compkiller.DragBlacklist <= 0 then
-			dragActive = true;
-			dragStart = input.Position;
-			frameStart = MoveFrame.Position;
-			Compkiller.LastDrag = tick();
-			Compkiller.IaDrag = true;
+		Compkiller:_Animation(MoveFrame,Tween,{
+			Position = position
+		});
+	end;
 
-			if not lerpConn then
-				lerpConn = _Janitor:Add(RunService.RenderStepped:Connect(function(dt)
-					if not dragActive then
-						lerpConn:Disconnect(); lerpConn = nil;
-						_SavePos(MoveFrame.Position);
-						return;
-					end;
-					local t = math.min(1, dt * LERP_SPEED * 8);
-					MoveFrame.Position = MoveFrame.Position:Lerp(targetPos, t);
-				end));
-			end;
-
-			_Janitor:Add(input.Changed:Connect(function()
+	InputFrame.InputBegan:Connect(function(input)
+		if (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) and #Compkiller.DragBlacklist <= 0 then 
+			dragToggle = true
+			dragStart = input.Position
+			startPos = MoveFrame.Position
+			input.Changed:Connect(function()
 				if input.UserInputState == Enum.UserInputState.End then
-					dragActive = false;
+					dragToggle = false;
 					Compkiller.IS_DRAG_MOVE = false;
-					Compkiller.IaDrag = false;
-				end;
-			end));
-		end;
-	end));
+				end
+			end)
+		end
 
-	_Janitor:Add(UserInputService.InputChanged:Connect(function(input)
-		if (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) and #Compkiller.DragBlacklist <= 0 then
-			if dragActive then
+		if not Compkiller.IsDrage and dragToggle then
+			Compkiller.LastDrag = tick();
+		end;
+
+		Compkiller.IaDrag = dragToggle;
+	end)
+
+	UserInputService.InputChanged:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch and #Compkiller.DragBlacklist <= 0 then
+			if dragToggle then
 				Compkiller.IS_DRAG_MOVE = true;
-				local delta = input.Position - dragStart;
-				targetPos = UDim2.new(frameStart.X.Scale, frameStart.X.Offset + delta.X, frameStart.Y.Scale, frameStart.Y.Offset + delta.Y);
-			end;
+				updateInput(input)
+			else
+				Compkiller.IS_DRAG_MOVE = false;
+			end
 		else
 			if #Compkiller.DragBlacklist > 0 then
-				dragActive = false;
+				dragToggle = false
 				Compkiller.IS_DRAG_MOVE = false;
-			end;
-		end;
-	end));
+			end
+		end
 
-	local saved = _LoadPos();
-	if saved then
-		task.defer(function() pcall(function() MoveFrame.Position = saved; targetPos = saved; end); end);
-	end;
+		Compkiller.IaDrag = dragToggle;
+	end);
 end;
 
 function Compkiller:_IsMobile()
@@ -1093,9 +889,6 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 		UICorner_2.CornerRadius = UDim.new(1, 0)
 		UICorner_2.Parent = ToggleValue;
 
-		-- Exponential easing for smooth knob movement (feature #4)
-		local _knobTween = TweenInfo.new(0.28, Enum.EasingStyle.Exponential, Enum.EasingDirection.Out);
-
 		local ToggleElement = function(bool,noChange)
 			if not noChange then
 				Default = bool;
@@ -1104,21 +897,21 @@ function Compkiller:_AddLinkValue(Name , Default , GlobalBlock , LinkValues , re
 			if bool then
 				Toggle:SetAttribute('Enabled',true);
 
-				Compkiller:_Animation(ToggleValue, _knobTween, {
+				Compkiller:_Animation(ToggleValue,rep.Tween,{
 					Position = UDim2.new(0.75, 0, 0.5, 0)
 				})
 
-				Compkiller:_Animation(Toggle, _knobTween, {
+				Compkiller:_Animation(Toggle,rep.Tween,{
 					BackgroundColor3 = Compkiller.Colors.Toggle
 				})
 			else
 				Toggle:SetAttribute('Enabled',false);
 
-				Compkiller:_Animation(ToggleValue, _knobTween, {
+				Compkiller:_Animation(ToggleValue,rep.Tween,{
 					Position = UDim2.new(0.25, 0, 0.5, 0)
 				})
 
-				Compkiller:_Animation(Toggle, _knobTween, {
+				Compkiller:_Animation(Toggle,rep.Tween,{
 					BackgroundColor3 = Compkiller.Colors.DropColor
 				})
 			end;
@@ -1545,7 +1338,7 @@ function Compkiller:_CreateBlock(Signal)
 	local GlobalBlock = Instance.new("Frame")
 	local BlockText = Instance.new("TextLabel")
 	local LinkValues = Instance.new("Frame")
-	-- NO UIListLayout: manual horizontal right-align via _layoutLinkH helper
+	local UIListLayout = Instance.new("UIListLayout")
 	local BlockLine = Instance.new("Frame")
 
 	if Compkiller:_IsMobile() then
@@ -1590,9 +1383,12 @@ function Compkiller:_CreateBlock(Signal)
 	LinkValues.Size = UDim2.new(1, 0, 0, 18)
 	LinkValues.ZIndex = 11
 
-	-- Manual horizontal layout: re-run _layoutLinkH whenever a child is added
-	LinkValues.ChildAdded:Connect(function() _layoutLinkH(LinkValues); end);
-	LinkValues.ChildRemoved:Connect(function() _layoutLinkH(LinkValues); end);
+	UIListLayout.Parent = LinkValues
+	UIListLayout.FillDirection = Enum.FillDirection.Horizontal
+	UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	UIListLayout.Padding = UDim.new(0, 8)
 
 	BlockLine.Name = Compkiller:_RandomString()
 	BlockLine.Parent = GlobalBlock
@@ -1746,7 +1542,6 @@ function Compkiller:CacheImage(id: string) : string
 		imagesize
 	);
 
-	task.wait(math.random() * 0.15);  -- jitter to break AC timing patterns
 	local json = game:HttpGet(endpoint);
 
 	local JSON_Decode = select(2, pcall(function()
@@ -2360,7 +2155,7 @@ function Compkiller:_AddColorPickerPanel(Button: ImageButton , Callback: (Color:
 		end;
 	end)
 
-	_Janitor:Add(UserInputService.InputBegan:Connect(function(Input)
+	UserInputService.InputBegan:Connect(function(Input)
 		if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 			if not Compkiller:_IsMouseOverFrame(ColorPickerWindow) then
 				ToggleUI(false);
@@ -2441,7 +2236,7 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 	local HeaderFrame = Instance.new("Frame")
 	local HeadLabel = Instance.new("TextLabel")
 	local MainFrame = Instance.new("Frame")
-	-- NO UIListLayout: _computeChildrenH + ChildAdded replaces it
+	local UIListLayout = Instance.new("UIListLayout")
 	local MovingFrame = Instance.new("Frame")
 
 	Keybinds.Name = Compkiller:_RandomString()
@@ -2550,13 +2345,10 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 	MainFrame.ZIndex = 156;
 	MainFrame.ClipsDescendants = true;
 
-	-- Pure-math vertical layout for MainFrame (was UIListLayout Padding=5)
-	local _KB_GAP = 5;
-	local function _relayoutKB()
-		_layoutChildrenV(MainFrame, _KB_GAP);
-	end;
-	MainFrame.ChildAdded:Connect(_relayoutKB);
-	MainFrame.ChildRemoved:Connect(_relayoutKB);
+	UIListLayout.Parent = MainFrame
+	UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	UIListLayout.Padding = UDim.new(0, 5)
 
 	MovingFrame.Name = Compkiller:_RandomString()
 	MovingFrame.Parent = Keybinds
@@ -2575,13 +2367,11 @@ function Compkiller:_DrawKeybinds(Window: ScreenGui)
 
 	Ref.THREAD = task.spawn(function()
 		while true do task.wait()
-			-- Pure-math: compute stacked height of MainFrame children (gap=5)
-			local _kbH = _computeChildrenH(MainFrame, _KB_GAP);
 			Compkiller:_Animation(MainFrame,TweenInfo.new(0.4),{
-				Size = UDim2.new(1, 30, 1, _kbH + 1)
+				Size = UDim2.new(1, 30, 1, UIListLayout.AbsoluteContentSize.Y + 1)
 			});
 
-			if _kbH > 1 then
+			if UIListLayout.AbsoluteContentSize.Y > 1 then
 				Compkiller:_Animation(IconFrame,TweenInfo.new(0.25),{
 					BackgroundTransparency = 0.3
 				})
@@ -2819,7 +2609,7 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 	local UIStroke = Instance.new("UIStroke")
 	local UICorner = Instance.new("UICorner")
 	local ElementObjs = Instance.new("Frame")
-	-- NO UIListLayout: _computeChildrenH drives size in ToggleUI
+	local UIListLayout = Instance.new("UIListLayout")
 
 	KeybindHandler.Name = Compkiller:_RandomString()
 	KeybindHandler.Parent = Window
@@ -2858,13 +2648,9 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 	ElementObjs.Size = UDim2.new(1, -5, 1, -5)
 	ElementObjs.ZIndex = Zindex + SubIndex + 10
 
-	-- Pure-math vertical layout for ElementObjs (no gap, was UIListLayout Center)
-	local _KB_ELEM_GAP = 0;
-	local function _relayoutKBElems()
-		_layoutChildrenV(ElementObjs, _KB_ELEM_GAP);
-	end;
-	ElementObjs.ChildAdded:Connect(_relayoutKBElems);
-	ElementObjs.ChildRemoved:Connect(_relayoutKBElems);
+	UIListLayout.Parent = ElementObjs
+	UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
 	local refreshPF = function()
 		if Compkiller.PerformanceMode then
@@ -2885,11 +2671,10 @@ function Compkiller:_KeybindHandler(Parent: Frame , ObjectType: string , Element
 	local ToggleUI = function(bool)
 		if bool then
 			KeybindHandler.Position = UDim2.new(0,Parent.AbsolutePosition.X + 225,0,Parent.AbsolutePosition.Y)
-			-- Pure-math height from stacked children
-			local _ekH = _computeChildrenH(ElementObjs, _KB_ELEM_GAP);
+
 			Compkiller:_Animation(KeybindHandler,TweenInfo.new(0.25),{
 				BackgroundTransparency = 0,
-				Size = UDim2.new(0, 225, 0, _ekH + 5)
+				Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y + 5)
 			});
 
 			Compkiller:_Animation(UIStroke,TweenInfo.new(0.3),{
@@ -3385,7 +3170,7 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		local UIStroke = Instance.new("UIStroke")
 		local UICorner = Instance.new("UICorner")
 		local Elements = Instance.new("Frame")
-		-- NO UIListLayout: _computeChildrenH + ChildAdded handles sizing
+		local UIListLayout = Instance.new("UIListLayout")
 		local Toggl = false;
 
 		local ToggleUI = function(bool)
@@ -3411,12 +3196,11 @@ function Compkiller:_LoadOption(Value , TabSignal)
 				if not IsSameValue then
 					ExtractElement.Position = DropPosition
 				end;
-				-- Pure-math height from stacked elements (no gap)
-				local _opH = _computeChildrenH(Elements, 0);
+
 				Compkiller:_Animation(ExtractElement , Tween , {
 					Position = MainPosition,
 					BackgroundTransparency = 0,
-					Size = UDim2.new(0, 225, 0, _opH)
+					Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y)
 				});
 
 				Compkiller:_Animation(UIStroke , Tween , {
@@ -3425,11 +3209,11 @@ function Compkiller:_LoadOption(Value , TabSignal)
 
 			else
 				Signal:Fire(false);
-				local _opH = _computeChildrenH(Elements, 0);
+
 				Compkiller:_Animation(ExtractElement , Tween , {
 					Position = DropPosition,
 					BackgroundTransparency = 1,
-					Size = UDim2.new(0, 225, 0, math.max(_opH - 10, 0))
+					Size = UDim2.new(0, 225, 0, UIListLayout.AbsoluteContentSize.Y - 10)
 				});
 
 				Compkiller:_Animation(UIStroke , Tween , {
@@ -3492,12 +3276,10 @@ function Compkiller:_LoadOption(Value , TabSignal)
 		Elements.Size = UDim2.new(1, -5, 1,-1)
 		Elements.ZIndex = BaseZ_Index + 20
 
-		-- Pure-math vertical layout for Elements (no gap, replaces UIListLayout)
-		local function _relayoutOpt()
-			_layoutChildrenV(Elements, 0);
-		end;
-		Elements.ChildAdded:Connect(_relayoutOpt);
-		Elements.ChildRemoved:Connect(_relayoutOpt);
+		UIListLayout.Parent = Elements
+		UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+		UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		UIListLayout.Padding = UDim.new(0, 0)
 
 		ToggleUI(false);
 
@@ -3528,13 +3310,9 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	local UIStroke = Instance.new("UIStroke")
 	local UICorner = Instance.new("UICorner")
 	local ScrollingFrame = Instance.new("ScrollingFrame")
-	-- NO UIListLayout: manual Y math used instead (feature #5)
+	local UIListLayout = Instance.new("UIListLayout")
 	local ToggleDb = Compkiller.__SIGNAL(false);
 	local EventOut = Compkiller.__SIGNAL(0);
-
-	-- Row height and gap constants for pure-math layout
-	local _ROW_H  = 20;   -- px per dropdown row
-	local _ROW_GAP = 2;   -- px gap between rows
 
 	DropdownWindow.Name = Compkiller:_RandomString()
 	DropdownWindow.Parent = Window
@@ -3588,7 +3366,15 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	ScrollingFrame.BottomImage = ""
 	ScrollingFrame.ScrollBarThickness = 0
 	ScrollingFrame.TopImage = ""
-	-- Canvas updated manually after each layout pass (no UIListLayout)
+
+	UIListLayout.Parent = ScrollingFrame
+	UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	UIListLayout.Padding = UDim.new(0, 10)
+
+	UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
+		ScrollingFrame.CanvasSize = UDim2.fromOffset(UIListLayout.AbsoluteContentSize.X,UIListLayout.AbsoluteContentSize.Y)
+	end);
 
 	local ToggleUI = function(bool)
 		local IsSame = ToggleDb:GetValue() == bool;
@@ -3614,39 +3400,26 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 			if not IsSame then
 				DropdownWindow.Position = DropPosition;
 			end;
-			-- Show search box when list has more than 6 items (feature #2)
-			SearchBox.Visible = (#(Values or {}) > 6);
-			SearchBox.Text = "";
-			_searchText = "";
-			-- Compute scroll area Y offset using pure math (no UIListLayout)
-			local extraH = SearchBox.Visible and _SEARCH_H or 0;
-			-- Adjust ScrollingFrame position/size to leave room for search box
-			ScrollingFrame.Position = SearchBox.Visible
-				and UDim2.new(0.5, 0, 0, _SEARCH_H + 2)
-				or  UDim2.new(0.5, 0, 0.5, 0);
-			ScrollingFrame.Size = SearchBox.Visible
-				and UDim2.new(1, -5, 1, -(_SEARCH_H + 6))
-				or  UDim2.new(1, -5, 1, -5);
-			-- Content height = count * row stride + padding (pure math)
-			local rowCount = math.min(#(Values or {}), _POOL_MAX);
-			local contentH = rowCount * (_ROW_H + _ROW_GAP) + 6;
-			if StealthMode then task.wait(math.random(1, 30) / 1000); end;
-			Compkiller:_Animation(DropdownWindow, TweenInfo.new(0.2, Enum.EasingStyle.Quint), {
+
+			Compkiller:_Animation(DropdownWindow,TweenInfo.new(0.2),{
 				BackgroundTransparency = 0,
 				Position = MainPosition,
-				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, math.clamp(contentH + extraH, 10, 200))
-			});
-			Compkiller:_Animation(UIStroke, TweenInfo.new(0.2), {Transparency = 0});
+				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, math.clamp(UIListLayout.AbsoluteContentSize.Y + 10,10 , 200))
+			})
+
+			Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
+				Transparency = 0
+			})
 		else
-			SearchBox.Visible = false;
-			local rowCount = math.min(#(Values or {}), _POOL_MAX);
-			local contentH = rowCount * (_ROW_H + _ROW_GAP) + 6;
-			Compkiller:_Animation(DropdownWindow, TweenInfo.new(0.2, Enum.EasingStyle.Quint), {
+			Compkiller:_Animation(DropdownWindow,TweenInfo.new(0.2),{
 				BackgroundTransparency = 1,
 				Position = DropPosition,
-				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, math.clamp(contentH / 1.5, 10, 200))
-			});
-			Compkiller:_Animation(UIStroke, TweenInfo.new(0.2), {Transparency = 1});
+				Size = UDim2.new(0, BaseParent.AbsoluteSize.X - 1, 0, math.clamp(UIListLayout.AbsoluteContentSize.Y / 1.5, 10 , 200))
+			})
+
+			Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
+				Transparency = 1
+			})
 		end;
 	end;
 
@@ -3663,13 +3436,11 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 		local BlockText = Instance.new("TextLabel")
 		local BlockLine = Instance.new("Frame")
 
-		-- No LayoutOrder needed; position set manually via Y math
 		DropdownItem.Name = Compkiller:_RandomString()
 		DropdownItem.BackgroundTransparency = 1.000
 		DropdownItem.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		DropdownItem.BorderSizePixel = 0
-		DropdownItem.Size = UDim2.new(1, -1, 0, _ROW_H)
-		DropdownItem.Position = UDim2.fromOffset(0, 0);  -- overridden in layout pass
+		DropdownItem.Size = UDim2.new(1, -1, 0, 20)
 		DropdownItem.ZIndex = BaseZ_Index + 6
 
 		BlockText.Name = Compkiller:_RandomString()
@@ -3716,168 +3487,17 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 		};
 	end;
 
-	-- Object pool: reuse frames instead of creating/destroying (feature #2, max 8-10 slots)
-	local _pool = {};
-	local _POOL_MAX = 9;
-
-	local function _acquireItem()
-		local item = table.remove(_pool);
-		if item then
-			item.DropdownItem.Visible = true;
-			return item;
-		end;
-		return DrawButton();
-	end;
-
-	local function _releaseItem(item)
-		if not item or not item.DropdownItem then return; end;
-		item.DropdownItem.Visible = false;
-		item.DropdownItem.Parent = nil;
-		if #_pool < _POOL_MAX then
-			table.insert(_pool, item);
-		end;
-	end;
-
-	-- Search box (feature #2): shown when list has > 6 entries
-	local _searchText = "";
-	local _SEARCH_H  = 22;  -- height of search row; used in Y offset math
-	local SearchBox = Instance.new("TextBox");
-	SearchBox.Name = _StealthName();
-	SearchBox.Parent = DropdownWindow;
-	SearchBox.BackgroundColor3 = Compkiller.Colors.DropColor;
-	SearchBox.BackgroundTransparency = 0.6;
-	SearchBox.BorderSizePixel = 0;
-	SearchBox.Size = UDim2.new(1, -8, 0, _SEARCH_H - 4);
-	SearchBox.Position = UDim2.new(0, 4, 0, 4);
-	SearchBox.ZIndex = BaseZ_Index + 10;
-	SearchBox.Font = Enum.Font.GothamMedium;
-	SearchBox.PlaceholderText = "Search...";
-	SearchBox.PlaceholderColor3 = Color3.fromRGB(120, 120, 120);
-	SearchBox.Text = "";
-	SearchBox.TextColor3 = Compkiller.Colors.SwitchColor;
-	SearchBox.TextSize = 11;
-	SearchBox.ClearTextOnFocus = false;
-	SearchBox.Visible = false;
-	do
-		local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, 3); c.Parent = SearchBox;
-	end;
-	-- Scroll area starts below search box; otherwise at top
-	-- Adjusted in ToggleUI based on SearchBox.Visible
-
-	-- ── Pure-math layout helper ───────────────────────────────────────────────
-	-- Places all visible children of ScrollingFrame using Y = i * (ROW_H+GAP)
-	-- and updates CanvasSize. No UIListLayout involved.
-	local _activeItems = {};  -- ordered list of currently visible pool items
-
-	local function _layoutItems()
-		local topPad = 3;
-		local totalH = topPad;
-		for idx, item in ipairs(_activeItems) do
-			local yOff = topPad + (idx - 1) * (_ROW_H + _ROW_GAP);
-			item.DropdownItem.Position = UDim2.fromOffset(0, yOff);
-			item.DropdownItem.Size     = UDim2.new(1, -1, 0, _ROW_H);
-			totalH = yOff + _ROW_H;
-		end;
-		ScrollingFrame.CanvasSize = UDim2.fromOffset(0, totalH + 4);
-	end;
-
 	local ClearDropdown = function()
-		for _, item in ipairs(_activeItems) do
-			_releaseItem(item);
+		for i,v in next , ScrollingFrame:GetChildren() do
+			if v:IsA('Frame') then
+				v:Destroy();
+			end;
 		end;
-		_activeItems = {};
-		for i, v in next, __signals do pcall(function() v:Disconnect(); end); end;
-		__signals = {};
+
+		for i,v in next,  __signals do
+			v:Disconnect();
+		end;
 	end;
-
-	-- Re-render items matching current _searchText using pool + pure Y math
-	local function _renderFiltered(filteredValues, DataFrame)
-		-- Release all active items back to pool
-		ClearDropdown();
-
-		local yOff = 3;
-		for idx, v in ipairs(filteredValues) do
-			if StealthMode then task.wait(0); end;  -- yield to avoid frame spike on large lists
-			local bth = _acquireItem();
-			bth.BlockText.Text = tostring(v);
-			bth.Value = v;
-			bth.DropdownItem.Position = UDim2.fromOffset(0, yOff);
-			bth.DropdownItem.Parent = ScrollingFrame;
-			table.insert(_activeItems, bth);
-			yOff = yOff + _ROW_H + _ROW_GAP;
-
-			-- ToggleDb visibility wiring
-			table.insert(__signals, ToggleDb:Connect(function(bool)
-				if bool then
-					Compkiller:_Animation(bth.BlockText, TweenInfo.new(0.2), {
-						TextTransparency = ((IsDefault(v) or MatchDefault(v, DataFrame)) and 0) or 0.5
-					});
-					Compkiller:_Animation(bth.BlockLine, TweenInfo.new(0.2), {BackgroundTransparency = 0});
-				else
-					Compkiller:_Animation(bth.BlockText, TweenInfo.new(0.2), {TextTransparency = 1});
-					Compkiller:_Animation(bth.BlockLine, TweenInfo.new(0.2), {BackgroundTransparency = 1});
-				end;
-			end));
-
-			if ToggleDb:GetValue() then
-				Compkiller:_Animation(bth.BlockText, TweenInfo.new(0.2), {
-					TextTransparency = ((IsDefault(v) or MatchDefault(v, DataFrame)) and 0) or 0.5
-				});
-			end;
-
-			if IsMulti then
-				if typeof(DataFrame) == "table" then
-					if IsDefault(v) or MatchDefault(v, DataFrame) then
-						DataFrame[v] = true;
-					else
-						DataFrame[v] = DataFrame[v] ~= nil and DataFrame[v] or false;
-					end;
-				end;
-				Compkiller:_Animation(bth.BlockText, TweenInfo.new(0.2), {
-					TextTransparency = (typeof(DataFrame) == "table" and DataFrame[v] and 0) or 0.5
-				});
-				Compkiller:_Input(bth.DropdownItem, function()
-					if typeof(DataFrame) == "table" then
-						DataFrame[v] = not DataFrame[v];
-					end;
-					Compkiller:_Animation(bth.BlockText, TweenInfo.new(0.2), {
-						TextTransparency = (typeof(DataFrame) == "table" and DataFrame[v] and 0) or 0.5
-					});
-					Callback(DataFrame);
-				end);
-			else
-				Compkiller:_Input(bth.DropdownItem, function()
-					-- Dim previous selection
-					for _, ai in ipairs(_activeItems) do
-						if ai ~= bth then
-							Compkiller:_Animation(ai.BlockText, TweenInfo.new(0.2), {TextTransparency = 0.5});
-						end;
-					end;
-					Default = v;
-					Compkiller:_Animation(bth.BlockText, TweenInfo.new(0.2), {TextTransparency = 0});
-					Callback(v);
-				end);
-			end;
-		end;
-
-		-- Update canvas height
-		ScrollingFrame.CanvasSize = UDim2.fromOffset(0, math.max(yOff, 10));
-	end;
-
-	-- Live search filter on TextChanged (feature #2)
-	_Janitor:Add(SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
-		_searchText = SearchBox.Text:lower();
-		if not Values then return; end;
-		local filtered = {};
-		for _, v in ipairs(Values) do
-			if _searchText == "" or tostring(v):lower():find(_searchText, 1, true) then
-				table.insert(filtered, v);
-			end;
-		end;
-		-- Build a fresh DataFrame snapshot for multi
-		local df = IsMulti and {} or nil;
-		_renderFiltered(filtered, df);
-	end));
 
 	local IsDefault = function(v)
 		return (typeof(Default) == 'table' and (Default[v] or table.find(Default,v))) or Default == v;
@@ -3888,25 +3508,91 @@ function Compkiller:_LoadDropdown(BaseParent: TextButton , Callback: () -> any)
 	end;
 
 	local UpdateDropdown = function()
-		-- Build the value list filtered by current search text
-		local filteredValues = {};
-		for _, v in ipairs(Values or {}) do
-			if _searchText == "" or tostring(v):lower():find(_searchText, 1, true) then
-				table.insert(filteredValues, v);
-			end;
-		end;
-
-		-- Build a fresh DataFrame for multi-select state tracking
 		local DataFrame;
+
 		if IsMulti then
 			DataFrame = {};
-			for _, v in ipairs(Values or {}) do
-				DataFrame[v] = IsDefault(v);
-			end;
 		end;
 
-		-- Use pool + pure Y math layout (feature #2 & #5)
-		_renderFiltered(filteredValues, DataFrame);
+		for i,v in next , Values do
+			local bth = DrawButton();
+
+			bth.BlockText.Text = tostring(v);
+
+			bth.DropdownItem.Parent = ScrollingFrame;
+
+			bth.Value = v;
+
+			table.insert(__signals , ToggleDb:Connect(function(bool)
+				if bool then
+					Compkiller:_Animation(bth.BlockText,TweenInfo.new(0.2),{
+						TextTransparency = ((IsDefault(v) or MatchDefault(v,DataFrame)) and 0) or 0.5
+					});
+
+					Compkiller:_Animation(bth.BlockLine,TweenInfo.new(0.2),{
+						BackgroundTransparency = 0
+					});
+				else
+					Compkiller:_Animation(bth.BlockText,TweenInfo.new(0.2),{
+						TextTransparency = 1
+					});
+
+					Compkiller:_Animation(bth.BlockLine,TweenInfo.new(0.2),{
+						BackgroundTransparency = 1
+					});
+				end;
+			end));
+
+			if ToggleDb:GetValue() then
+				Compkiller:_Animation(bth.BlockText,TweenInfo.new(0.2),{
+					TextTransparency = ((IsDefault(v) or MatchDefault(v,DataFrame)) and 0) or 0.5
+				});
+			end;
+
+			if IsDefault(v) and not IsMulti then
+				DataFrame = bth;
+			end;
+
+			if IsMulti then
+				if IsDefault(v) or MatchDefault(v,DataFrame) then
+					DataFrame[v] = true;
+				else
+					DataFrame[v] = false;
+				end;
+
+				Compkiller:_Animation(bth.BlockText,TweenInfo.new(0.2),{
+					TextTransparency = ((MatchDefault(v,DataFrame)) and 0) or 0.5
+				});
+
+				Compkiller:_Input(bth.DropdownItem,function()
+					DataFrame[v] = not DataFrame[v];
+
+					Compkiller:_Animation(bth.BlockText,TweenInfo.new(0.2),{
+						TextTransparency = ((MatchDefault(v,DataFrame)) and 0) or 0.5
+					});
+
+					Callback(DataFrame)
+				end);
+			else
+				Compkiller:_Input(bth.DropdownItem,function()
+					if DataFrame then
+						Compkiller:_Animation(DataFrame.BlockText,TweenInfo.new(0.2),{
+							TextTransparency = ((IsDefault(v) or MatchDefault(v,DataFrame)) and 0) or 0.5
+						});
+					end;
+
+					Default = v;
+
+					DataFrame = bth;
+
+					Compkiller:_Animation(bth.BlockText,TweenInfo.new(0.2),{
+						TextTransparency = ((IsDefault(v) or MatchDefault(v,DataFrame)) and 0) or 0.5
+					});
+
+					Callback(DataFrame.Value)
+				end);
+			end;
+		end;
 	end;
 
 	BaseParent.MouseButton1Click:Connect(function()
@@ -3995,24 +3681,21 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		local Toggle = Block:AddLink('Toggle' , Config.Default);
 
-		_Janitor:Add(Toggle.Input.MouseButton1Click:Connect(function()
-			local newVal = not Config.Default;
-			if newVal == Config.Default then return; end;  -- guard (always true here, but safe)
-			Config.Default = newVal;
+		Toggle.Input.MouseButton1Click:Connect(function()
+			Config.Default = not Config.Default;
+
 			Toggle.ChangeValue(Config.Default);
+
 			Block:SetTransparency((Config.Default and 0.1) or 0.3);
-			task.spawn(function()
-				local ok, err = pcall(Config.Callback, Config.Default);
-				if not ok then warn("[CK] Toggle callback error: "..tostring(err)); end;
-			end);
-		end));
+
+			Config.Callback(Config.Default);
+		end);
 
 		local Args = {};
 
 		Args.Flag = Config.Flag;
 
 		function Args:SetValue(value)
-			if value == Config.Default then return; end;  -- fire callback only on actual change
 			Config.Default = value;
 
 			Toggle.ChangeValue(Config.Default);
@@ -4332,67 +4015,9 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			end;
 		end);
 
-		do
-			local _btnCooldown = false;
-
-			-- Ripple helper: spawns a circle that expands from the click position (feature #3)
-			-- In StealthMode ripples are skipped entirely to avoid detection (feature #6)
-			local function _doRipple(clickX, clickY)
-				if StealthMode then return; end;  -- skip ripple in StealthMode
-				local relX = clickX - Frame.AbsolutePosition.X;
-				local relY = clickY - Frame.AbsolutePosition.Y;
-				local ripple = Instance.new("Frame");
-				ripple.Name = _StealthName();
-				ripple.Parent = Frame;
-				ripple.BackgroundColor3 = Color3.fromRGB(255, 255, 255);
-				ripple.BackgroundTransparency = 0.7;
-				ripple.BorderSizePixel = 0;
-				ripple.AnchorPoint = Vector2.new(0.5, 0.5);
-				ripple.Position = UDim2.fromOffset(relX, relY);
-				ripple.Size = UDim2.fromOffset(0, 0);
-				ripple.ZIndex = Frame.ZIndex + 5;
-				ripple.ClipsDescendants = false;
-				do
-					local uc = Instance.new("UICorner");
-					uc.CornerRadius = UDim.new(1, 0);
-					uc.Parent = ripple;
-				end;
-				-- Expand to cover button with Quint easing, then fade out
-				local maxDim = math.max(Frame.AbsoluteSize.X, Frame.AbsoluteSize.Y) * 2.2;
-				Compkiller:_Animation(ripple,
-					TweenInfo.new(0.3, Enum.EasingStyle.Quint, Enum.EasingDirection.Out),
-					{Size = UDim2.fromOffset(maxDim, maxDim), BackgroundTransparency = 1}
-				);
-				task.delay(0.32, function() pcall(function() ripple:Destroy(); end); end);
-			end;
-
-			-- Hook the input button to capture click position for ripple
-			local InputBtn = Compkiller:_Input(Frame, function() end);  -- placeholder
-			_Janitor:Add(InputBtn.MouseButton1Down:Connect(function()
-				if _btnCooldown then return; end;
-				_btnCooldown = true;
-
-				-- Small stealth delay before heavy operations (feature #6)
-				if StealthMode then task.wait(math.random(1, 30) / 1000); end;
-
-				-- Spawn ripple at current mouse position
-				_doRipple(Mouse.X, Mouse.Y);
-
-				-- Brief highlight flash (Quint)
-				Compkiller:_Animation(Frame, TweenInfo.new(0.08, Enum.EasingStyle.Quint), {BackgroundTransparency = 0});
-				task.delay(0.08, function()
-					Compkiller:_Animation(Frame, TweenInfo.new(0.18, Enum.EasingStyle.Quint), {BackgroundTransparency = 0.1});
-				end);
-
-				-- 0.3 s debounce then fire callback (feature #3)
-				task.spawn(function()
-					local ok, err = pcall(Config.Callback);
-					if not ok then warn("[CK] Button callback error: "..tostring(err)); end;
-					task.wait(0.3 + math.random() * 0.05);
-					_btnCooldown = false;
-				end);
-			end));
-		end;
+		Compkiller:_Input(Frame,function()
+			Config.Callback();
+		end);
 
 		local Args = {};
 
@@ -4644,14 +4269,14 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		end;
 
 		do
-			_Janitor:Add(SliderBar.InputBegan:Connect(function(Input)
+			SliderBar.InputBegan:Connect(function(Input)
 				if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 					IsHold = true
 					Update(Input)
 				end
 			end)
 
-			_Janitor:Add(SliderBar.InputEnded:Connect(function(Input)
+			SliderBar.InputEnded:Connect(function(Input)
 				if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
 					if UserInputService.TouchEnabled then
 						if not Compkiller:_IsMouseOverFrame(SliderBar) then
@@ -4663,7 +4288,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 				end
 			end)
 
-			_Janitor:Add(UserInputService.InputChanged:Connect(function(Input)
+			UserInputService.InputChanged:Connect(function(Input)
 				if IsHold then
 					if (Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch)  then
 						if UserInputService.TouchEnabled then
@@ -5224,7 +4849,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		local BlockText = Instance.new("TextLabel")
 		local BlockLine = Instance.new("Frame")
 		local LinkValues = Instance.new("Frame")
-		-- NO UIListLayout: _layoutLinkH ChildAdded wire handles right-to-left layout
+		local UIListLayout = Instance.new("UIListLayout")
 		local ValueItems = Instance.new("Frame")
 		local UIStroke = Instance.new("UIStroke")
 		local UICorner = Instance.new("UICorner")
@@ -5289,9 +4914,12 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		LinkValues.Size = UDim2.new(1, 0, 0, 18)
 		LinkValues.ZIndex = Zindex + 3
 
-		-- Pure-math horizontal right-align (replaces UIListLayout Padding=8)
-		LinkValues.ChildAdded:Connect(function() _layoutLinkH(LinkValues); end);
-		LinkValues.ChildRemoved:Connect(function() _layoutLinkH(LinkValues); end);
+		UIListLayout.Parent = LinkValues
+		UIListLayout.FillDirection = Enum.FillDirection.Horizontal
+		UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+		UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+		UIListLayout.Padding = UDim.new(0, 8)
 
 		ValueItems.Name = Compkiller:_RandomString()
 		ValueItems.Parent = Dropdown
@@ -5672,11 +5300,7 @@ function Compkiller.new(Config : Window)
 		if Compkiller:_IsMobile() then
 			Config.Scale = Compkiller.Scale.Mobile;
 		else
-			local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920,1080);
-			local scaleFactor = math.clamp(math.min(vp.X / 1920, vp.Y / 1080), 0.65, 1.25);
-			local baseW = Compkiller.Scale.Window.X.Offset;
-			local baseH = Compkiller.Scale.Window.Y.Offset;
-			Config.Scale = UDim2.new(0, math.round(baseW * scaleFactor), 0, math.round(baseH * scaleFactor));
+			Config.Scale = Compkiller.Scale.Window;
 		end;
 	end;
 
@@ -5700,25 +5324,6 @@ function Compkiller.new(Config : Window)
 		PerformanceMode = false,
 		Notify = Compkiller.newNotify()
 	};
-
-	function WindowArgs:Unload()
-		_Janitor:Cleanup();
-		for _, t in ipairs(self.THREADS) do pcall(function() task.cancel(t); end); end;
-		self.THREADS = {};
-		self.Tabs = {};
-		self.SelectedTab = nil;
-		if CompKiller then pcall(function() CompKiller:Destroy(); end); end;
-		for k in next, Compkiller.Flags do Compkiller.Flags[k] = nil; end;
-		warn("[CK] Library unloaded.");
-	end;
-
-	function WindowArgs:AddUnbind(layout, frame)
-		_Janitor:Add(layout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
-			if frame then
-				pcall(function() frame.CanvasSize = UDim2.fromOffset(0, layout.AbsoluteContentSize.Y); end);
-			end;
-		end));
-	end;
 
 	WindowArgs.Username = LocalPlayer.Name;
 
@@ -5752,18 +5357,13 @@ function Compkiller.new(Config : Window)
 		TabButtonScrollingFrame.CanvasSize = UDim2.fromOffset(0,UIListLayout.AbsoluteContentSize.Y)
 	end);
 
-	CompKiller.Name = _StealthName();
-	CompKiller.ResetOnSpawn = false;
+	CompKiller.Name = "u?name=compkiller_?"..Compkiller:_RandomString();
+	CompKiller.Parent = CoreGui;
+	CompKiller.ResetOnSpawn = false
 	CompKiller.IgnoreGuiInset = true;
 	CompKiller.ZIndexBehavior = Enum.ZIndexBehavior.Global;
-	pcall(function()
-		local protect = protect_gui or protectgui or (syn and syn.protect_gui);
-		if protect then protect(CompKiller); end;
-		CompKiller.Parent = CoreGui;
-	end) or pcall(function()
-		CompKiller.Parent = LocalPlayer.PlayerGui;
-	end);
-	_IntegrityMonitor(CompKiller, CompKiller.Parent);
+
+	Compkiller.ProtectGui(CompKiller);
 
 	WindowArgs.Root = CompKiller;
 
@@ -8780,7 +8380,7 @@ function Compkiller.new(Config : Window)
 				local frameFound = 0;
 				local allscale = 0;
 
-				for i,v: Frame in next , Childrens do
+				for i,v: Frame in next , Childrens do task.wait();
 					if v:IsA('Frame') then
 						if v ~= Section then
 							frameFound += 1;
@@ -8832,18 +8432,20 @@ function Compkiller.new(Config : Window)
 				refresh();
 			end;
 
-			_Janitor:Add(Section.ChildAdded:Connect(function()
-				task.defer(refreshScale);
-			end));
+			Section.ChildAdded:Connect(function()
+				task.wait()
+				refreshScale();
+			end)
 
 			Section:SetAttribute('HEIGHTSCALE',UIListLayout.AbsoluteContentSize.Y);
 
-			_Janitor:Add(UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
-				Section:SetAttribute('HEIGHTSCALE', math.max(UIListLayout.AbsoluteContentSize.Y, Section:GetAttribute('HEIGHTSCALE')));
-				refresh();
-			end));
+			UIListLayout:GetPropertyChangedSignal('AbsoluteContentSize'):Connect(function()
+				Section:SetAttribute('HEIGHTSCALE',math.max(UIListLayout.AbsoluteContentSize.Y , Section:GetAttribute('HEIGHTSCALE')));
 
-			_Janitor:Add(TabOpenSignal:Connect(function(bool)
+				refresh()
+			end);
+
+			TabOpenSignal:Connect(function(bool)
 				if bool then
 					Compkiller:_Animation(Section,TweenInfo.new(0.21),{
 						BackgroundTransparency = 0
@@ -8888,9 +8490,9 @@ function Compkiller.new(Config : Window)
 				refreshScale();
 			end);
 
-			task.delay(0.5, function()
+			task.delay(2.5,function()
 				refresh();
-				task.defer(refreshScale);
+				refreshScale();
 			end);
 
 			Header.MouseEnter:Connect(function()
@@ -9667,8 +9269,8 @@ end;
 function Compkiller:Loader(IconId,Duration)
 	local CompKiller = Instance.new("ScreenGui")
 
-	CompKiller.Name = _StealthName()
-	pcall(function() CompKiller.Parent = CoreGui; end)
+	CompKiller.Name = Compkiller:_RandomString()
+	CompKiller.Parent = CoreGui
 	CompKiller.Enabled = true
 	CompKiller.ResetOnSpawn = false
 	CompKiller.IgnoreGuiInset = true
@@ -9975,9 +9577,10 @@ function Compkiller.newNotify()
 					Size = UDim2.new(1, 0, 1, 0)
 				});
 
-				return task.delay(0.2 + math.random() * 0.1, function()
+				return task.delay(0.25,function()
 					Show();
-					task.delay(Notify.Duration + 0.15 + math.random() * 0.1, Close);
+
+					task.delay(Notify.Duration + 0.2,Close)
 				end);
 			end;
 
