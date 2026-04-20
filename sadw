@@ -1,3 +1,4 @@
+--modify
 --[[
     		Compkiller Interface
 
@@ -3962,961 +3963,33 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 -- ║ → Buttons ─────────────────────────────────────────────────────────────────── (5.2) ║
 -- ────────────────────────────────────────────────────────────────────────────────────────
 
-    --update
-    local Animations = true 
-
-    function Args:AddButton(Config: Button)
-        Config = Compkiller.__CONFIG(Config, {
-            Name = 'Button',
-            Callback = function() end
-        });
-
-        -- Instance Creation
-        local Button = Instance.new("Frame")
-        local BlockLine = Instance.new("Frame")
-        local MainFrame = Instance.new("Frame")
-        local UIStroke = Instance.new("UIStroke")
-        local TopHighlight = Instance.new("UIStroke")
-        local UICorner = Instance.new("UICorner")
-        local TextLabel = Instance.new("TextLabel")
-
-        -- Setup for Mobile
-        if Compkiller:_IsMobile() then
-            Compkiller:_AddDragBlacklist(Button);
-        end;
-
-        -- Button Container
-        Button.Name = Compkiller:_RandomString()
-        Button.Parent = Parent
-        Button.BackgroundTransparency = 1.000
-        Button.BorderSizePixel = 0
-        Button.Size = UDim2.new(1, 0, 0, 42)
-        Button.ZIndex = Zindex + 5
-
-        -- Bottom Separator (BlockLine)
-        BlockLine.Name = "Separator"
-        BlockLine.Parent = Button
-        BlockLine.AnchorPoint = Vector2.new(0.5, 1)
-        BlockLine.BackgroundColor3 = Compkiller.Colors.LineColor
-        BlockLine.BackgroundTransparency = 0.95
-        BlockLine.BorderSizePixel = 0
-        BlockLine.Position = UDim2.new(0.5, 0, 1, 0)
-        BlockLine.Size = UDim2.new(1, -40, 0, 1)
-        BlockLine.ZIndex = Zindex + 6
-
-        -- Main Interactive Frame
-        MainFrame.Name = "MainFrame"
-        MainFrame.Parent = Button
-        MainFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-        MainFrame.BackgroundColor3 = Compkiller.Colors.Highlight
-        MainFrame.BackgroundTransparency = 0.1
-        MainFrame.BorderSizePixel = 0
-        MainFrame.Position = UDim2.new(0.5, 0, 0.5, 0)
-        MainFrame.Size = UDim2.new(1, -36, 0, 32)
-        MainFrame.ZIndex = Zindex + 7
-
-        -- Styling
-        UICorner.CornerRadius = UDim.new(0, 6)
-        UICorner.Parent = MainFrame
-
-        UIStroke.Color = Color3.new(0, 0, 0)
-        UIStroke.Transparency = 0.8
-        UIStroke.Thickness = 1
-        UIStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-        UIStroke.Parent = MainFrame
-
-        TopHighlight.Color = Color3.new(1, 1, 1)
-        TopHighlight.Transparency = 0.75
-        TopHighlight.Thickness = 1
-        TopHighlight.Parent = MainFrame
-
-        -- Text Label
-        TextLabel.Parent = MainFrame
-        TextLabel.AnchorPoint = Vector2.new(0.5, 0.5)
-        TextLabel.BackgroundTransparency = 1.000
-        TextLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
-        TextLabel.Size = UDim2.new(1, 0, 1, 0)
-        TextLabel.ZIndex = Zindex + 8
-        TextLabel.Font = Enum.Font.BuilderSansExtraBold
-        TextLabel.Text = Config.Name
-        TextLabel.TextColor3 = Color3.new(1, 1, 1)
-        TextLabel.TextSize = 11.000
-        TextLabel.TextStrokeTransparency = 0.9
-
-        -- Animation Helper
-        local function PlayTween(instance, info, property)
-            if Animations then
-                Compkiller:_Animation(instance, info, property)
-            else
-                for prop, val in pairs(property) do
-                    instance[prop] = val
-                end
-            end
-        end
-
-        -- Interaction States (Hover/Press)
-        local function UpdateScale(targetScale, duration)
-            local targetSize = UDim2.new(targetScale, -36 * targetScale, 0, 32 * targetScale)
-            if Animations then
-                Compkiller:_Animation(MainFrame, TweenInfo.new(duration, Enum.EasingStyle.Quart), {
-                    Size = targetSize
-                })
-            else
-                MainFrame.Size = targetSize
-            end
-        end
-
-        Compkiller:_Hover(MainFrame, function()
-            PlayTween(MainFrame, TweenInfo.new(0.3), { BackgroundTransparency = 0 })
-            UpdateScale(1.02, 0.3)
-        end, function()
-            PlayTween(MainFrame, TweenInfo.new(0.3), { BackgroundTransparency = 0.1 })
-            UpdateScale(1.0, 0.3)
-        end)
-
-        Compkiller:_Input(MainFrame, function()
-            UpdateScale(0.94, 0.1)
-            if Animations then task.wait(0.1) end
-            UpdateScale(1.02, 0.2)
-            Config.Callback()
-        end)
-
-        -- Handle Library Signal Visibility
-        local Args = {}
-        Args.Signal = Signal:Connect(function(bool)
-            local tInfo = TweenInfo.new(0.35)
-            PlayTween(MainFrame, tInfo, { BackgroundTransparency = bool and 0.1 or 1 })
-            PlayTween(BlockLine, tInfo, { BackgroundTransparency = bool and 0.95 or 1 })
-            PlayTween(TextLabel, tInfo, { TextTransparency = bool and 0 or 1 })
-            PlayTween(UIStroke, tInfo, { Transparency = bool and 0.8 or 1 })
-            PlayTween(TopHighlight, tInfo, { Transparency = bool and 0.75 or 1 })
-        end)
-
-        function Args:SetText(t)
-            Config.Name = t
-            TextLabel.Text = t
-        end
-
-        function Args:GetText()
-            return TextLabel.Text
-        end
-
-        return Args
-    end
-
-
--- ────────────────────────────────────────────────────────────────────────────────────────
--- ║ → Sliders ─────────────────────────────────────────────────────────────────── (5.3) ║
--- ────────────────────────────────────────────────────────────────────────────────────────
-
-    --update
-    function Args:AddSlider(Config)
-        Config = Compkiller.__CONFIG(Config, {
-            Name = 'Slider',
-            Default = 50,
-            Min = 0,
-            Max = 100,
-            Type = "",
-            Round = 0,
-            Callback = function() end,
-            Flag = nil,
-            Anims = true -- Master animation toggle
-        });
-
-
-        local anims = Animations
-
-        -- Interaction Color Palette
-        local colors = {
-            Accent = Color3.fromRGB(0, 229, 255),  -- Vibrant Cyan from image
-            Track = Color3.fromRGB(28, 29, 34),    -- Dark Track
-            TextMain = Color3.fromRGB(255, 255, 255),
-            TextDim = Color3.fromRGB(92, 93, 99),  -- Muted Value text
-            Line = Color3.fromRGB(26, 27, 32)      -- Bottom Separator
-        }
-
-        -- UI Instance Construction
-        local Slider = Instance.new("Frame")
-        local BlockText = Instance.new("TextLabel")
-        local BlockLine = Instance.new("Frame")
-        local SliderBar = Instance.new("Frame")
-        local UICorner = Instance.new("UICorner")
-        local SliderInput = Instance.new("Frame")
-        local UICorner_2 = Instance.new("UICorner")
-        local Handle = Instance.new("Frame")
-        local UICorner_3 = Instance.new("UICorner")
-        local ValueText = Instance.new("TextLabel")
-
-        Compkiller:_AddDragBlacklist(Slider);
-
-        -- Main Container
-        Slider.Name = Compkiller:_RandomString()
-        Slider.Parent = Parent
-        Slider.BackgroundTransparency = 1.000
-        Slider.BorderSizePixel = 0
-        Slider.Size = UDim2.new(1, -1, 0, 50)
-        Slider.ZIndex = Zindex + 1
-
-        -- Slider Name Label
-        BlockText.Name = "Title"
-        BlockText.Parent = Slider
-        BlockText.BackgroundTransparency = 1.000
-        BlockText.Position = UDim2.new(0, 12, 0, 2)
-        BlockText.Size = UDim2.new(1, -20, 0, 25)
-        BlockText.ZIndex = Zindex + 2
-        BlockText.Font = Enum.Font.GothamMedium
-        BlockText.Text = Config.Name
-        BlockText.TextColor3 = colors.TextMain
-        BlockText.TextSize = 14.000
-        BlockText.TextXAlignment = Enum.TextXAlignment.Left
-
-        -- Value Display (Right Aligned)
-        ValueText.Name = "Value"
-        ValueText.Parent = Slider
-        ValueText.BackgroundTransparency = 1.000
-        ValueText.Position = UDim2.new(0, 12, 0, 2)
-        ValueText.Size = UDim2.new(1, -20, 0, 25)
-        ValueText.ZIndex = Zindex + 4
-        ValueText.Font = Enum.Font.GothamMedium
-        ValueText.Text = tostring(Config.Default)..tostring(Config.Type)
-        ValueText.TextColor3 = colors.TextDim
-        ValueText.TextSize = 13.000
-        ValueText.TextXAlignment = Enum.TextXAlignment.Right
-
-        -- Interaction Track
-        SliderBar.Name = "Track"
-        SliderBar.Parent = Slider
-        SliderBar.AnchorPoint = Vector2.new(0.5, 1)
-        SliderBar.BackgroundColor3 = colors.Track
-        SliderBar.BorderSizePixel = 0
-        SliderBar.Position = UDim2.new(0.5, 0, 1, -12)
-        SliderBar.Size = UDim2.new(1, -25, 0, 10)
-        SliderBar.ZIndex = Zindex + 3
-
-        UICorner.CornerRadius = UDim.new(1, 0)
-        UICorner.Parent = SliderBar
-
-        -- Progress Fill (Cyan)
-        SliderInput.Name = "Fill"
-        SliderInput.Parent = SliderBar
-        SliderInput.BackgroundColor3 = colors.Accent
-        SliderInput.BorderSizePixel = 0
-        SliderInput.Size = UDim2.new(math.clamp((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0, 1), 0, 1, 0)
-        SliderInput.ZIndex = Zindex + 4
-
-        UICorner_2.CornerRadius = UDim.new(1, 0)
-        UICorner_2.Parent = SliderInput
-
-        -- Circular Handle (White)
-        Handle.Name = "Handle"
-        Handle.Parent = SliderInput
-        Handle.AnchorPoint = Vector2.new(0.5, 0.5)
-        Handle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        Handle.Position = UDim2.new(1, 0, 0.5, 0)
-        Handle.Size = UDim2.new(0, 12, 0, 12)
-        Handle.ZIndex = Zindex + 5
-
-        UICorner_3.CornerRadius = UDim.new(1, 0)
-        UICorner_3.Parent = Handle
-
-        -- Separator Line
-        BlockLine.Name = "Separator"
-        BlockLine.Parent = Slider
-        BlockLine.AnchorPoint = Vector2.new(0.5, 1)
-        BlockLine.BackgroundColor3 = colors.Line
-        BlockLine.BorderSizePixel = 0
-        BlockLine.Position = UDim2.new(0.5, 0, 1, 0)
-        BlockLine.Size = UDim2.new(1, -26, 0, 1)
-        BlockLine.ZIndex = Zindex + 2
-
-        -- Hover Logic
-        Compkiller:_Hover(SliderBar, function()
-            if anims then
-                Compkiller:_Animation(ValueText, TweenInfo.new(0.2), {TextColor3 = Color3.fromRGB(255, 255, 255)})
-            end
-        end, function()
-            if anims then
-                Compkiller:_Animation(ValueText, TweenInfo.new(0.2), {TextColor3 = colors.TextDim})
-            end
-        end)
-
-        local IsHold = false;
-
-        local Update = function(Input)
-            local SizeScale = math.clamp((((Input.Position.X) - SliderBar.AbsolutePosition.X) / SliderBar.AbsoluteSize.X), 0, 1);
-            local Main = ((Config.Max - Config.Min) * SizeScale) + Config.Min;
-            local Value = Compkiller:_Rounding(Main, Config.Round);
-            local Size = (Value - Config.Min) / (Config.Max - Config.Min);
-
-            if anims then
-                TweenService:Create(SliderInput, TweenInfo.new(0.15, Enum.EasingStyle.Quad), {
-                    Size = UDim2.new(Size, 0, 1, 0)
-                }):Play();
-            else
-                SliderInput.Size = UDim2.new(Size, 0, 1, 0)
-            end
-
-            Config.Default = Value;
-            ValueText.Text = tostring(Config.Default)..tostring(Config.Type)
-            Config.Callback(Value)
-        end;
-
-        -- Connection Listeners
-        SliderBar.InputBegan:Connect(function(Input)
-            if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-                IsHold = true
-                Update(Input)
-                if anims then
-                    TweenService:Create(Handle, TweenInfo.new(0.2, Enum.EasingStyle.Back), {Size = UDim2.new(0, 14, 0, 14)}):Play()
-                end
-            end
-        end)
-
-        SliderBar.InputEnded:Connect(function(Input)
-            if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
-                IsHold = false
-                if anims then
-                    TweenService:Create(Handle, TweenInfo.new(0.2), {Size = UDim2.new(0, 12, 0, 12)}):Play()
-                end
-            end
-        end)
-
-        UserInputService.InputChanged:Connect(function(Input)
-            if IsHold and (Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch) then
-                Update(Input)
-            end
-        end);
-
-        -- Public API
-        local Args = {};
-        Args.Flag = Config.Flag;
-
-        function Args:SetValue(Value)
-            Config.Default = Value;
-            ValueText.Text = tostring(Config.Default)..tostring(Config.Type)
-            local Size = (Value - Config.Min) / (Config.Max - Config.Min);
-
-            if anims then
-                Compkiller:_Animation(SliderInput, TweenInfo.new(0.35), {
-                    Size = UDim2.new(Size, 0, 1, 0)
-                });
-            else
-                SliderInput.Size = UDim2.new(Size, 0, 1, 0)
-            end
-            Config.Callback(Value);
-        end;
-
-        function Args:GetValue()
-            return Config.Default;
-        end;
-
-        return Args;
-    end
-
--- ────────────────────────────────────────────────────────────────────────────────────────
--- ║ → Helpers & Paragraphs ────────────────────────────────────────────────────── (5.8) ║
--- ────────────────────────────────────────────────────────────────────────────────────────
-
-	--update
-	-- AddParagraph Component
-	function Args:AddParagraph(Config)
-		Config = Compkiller.__CONFIG(Config, {
-			Title = "Paragraph",
-			Content = "",
-			Icon = "rbxassetid://11422155687" -- Lucide icon placeholder
+	function Args:AddButton(Config: Button)
+		Config = Compkiller.__CONFIG(Config , {
+			Name = 'Button',
+			Callback = function() end
 		});
 
-		local Paragraph = Instance.new("Frame")
-		local HeaderIcon = Instance.new("ImageLabel")
-		local BlockText = Instance.new("TextLabel")
-		local DescriptionText = Instance.new("TextLabel")
+		local Button = Instance.new("Frame")
 		local BlockLine = Instance.new("Frame")
+		local Frame = Instance.new("Frame")
+		local UIStroke = Instance.new("UIStroke")
+		local UICorner = Instance.new("UICorner")
+		local TextLabel = Instance.new("TextLabel")
 
 		if Compkiller:_IsMobile() then
-			Compkiller:_AddDragBlacklist(Paragraph);
+			Compkiller:_AddDragBlacklist(Button);
 		end;
 
-		-- Main Container
-		Paragraph.Name = Compkiller:_RandomString()
-		Paragraph.Parent = Parent
-		Paragraph.BackgroundTransparency = 1.000
-		Paragraph.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		Paragraph.BorderSizePixel = 0
-		Paragraph.Size = UDim2.new(1, -1, 0, 40)
-		Paragraph.ZIndex = Zindex + 2
-		Paragraph.ClipsDescendants = false
-
-		-- UI Section Hover Effect (Modern Minimalist Feature)
-		Paragraph.MouseEnter:Connect(function()
-			Compkiller:_Animation(Paragraph, TweenInfo.new(0.3), { BackgroundTransparency = 0.985 })
-		end)
-		Paragraph.MouseLeave:Connect(function()
-			Compkiller:_Animation(Paragraph, TweenInfo.new(0.3), { BackgroundTransparency = 1.000 })
-		end)
-
-		-- Header Icon
-		HeaderIcon.Name = Compkiller:_RandomString()
-		HeaderIcon.Parent = Paragraph
-		HeaderIcon.BackgroundTransparency = 1.000
-		HeaderIcon.Position = UDim2.new(0, 20, 0, 20)
-		HeaderIcon.Size = UDim2.new(0, 18, 0, 18)
-		HeaderIcon.Image = Config.Icon
-		HeaderIcon.ImageColor3 = Color3.fromRGB(255, 255, 255)
-		HeaderIcon.ImageTransparency = 0.2 -- opacity: 0.8
-		HeaderIcon.ZIndex = Zindex + 3
-
-		-- Title
-		BlockText.Name = Compkiller:_RandomString()
-		BlockText.Parent = Paragraph
-		BlockText.BackgroundTransparency = 1.000
-		BlockText.Position = UDim2.new(0, 48, 0, 20)
-		BlockText.Size = UDim2.new(1, -68, 0, 18)
-		BlockText.ZIndex = Zindex + 3
-		BlockText.Font = Enum.Font.GothamMedium -- Replicates 600 weight Inter
-		BlockText.Text = Config.Title
-		BlockText.TextColor3 = Color3.fromRGB(255, 255, 255) -- rgba(255,255,255,0.95)
-		BlockText.TextSize = 16.000 -- 1rem
-		BlockText.TextXAlignment = Enum.TextXAlignment.Left
-		BlockText.RichText = true
-
-		-- Content Body
-		DescriptionText.Name = Compkiller:_RandomString()
-		DescriptionText.Parent = Paragraph
-		DescriptionText.BackgroundTransparency = 1.000
-		DescriptionText.Position = UDim2.new(0, 48, 0, 46)
-		DescriptionText.Size = UDim2.new(1, -68, 1, -46)
-		DescriptionText.ZIndex = Zindex + 3
-		DescriptionText.Font = Enum.Font.Gotham -- Replicates 400 weight Inter
-		DescriptionText.Text = Config.Content
-		DescriptionText.TextColor3 = Color3.fromRGB(212, 212, 216) -- #d4d4d8
-		DescriptionText.TextSize = 14.000 -- 0.875rem
-		DescriptionText.TextWrapped = true
-		DescriptionText.TextXAlignment = Enum.TextXAlignment.Left
-		DescriptionText.TextYAlignment = Enum.TextYAlignment.Top
-		DescriptionText.RichText = true
-
-		-- Bottom Divider
-		BlockLine.Name = Compkiller:_RandomString()
-		BlockLine.Parent = Paragraph
-		BlockLine.AnchorPoint = Vector2.new(0.5, 1)
-		BlockLine.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		BlockLine.BackgroundTransparency = 0.92 -- rgba(255, 255, 255, 0.08)
-		BlockLine.BorderSizePixel = 0
-		BlockLine.Position = UDim2.new(0.5, 0, 1, 0)
-		BlockLine.Size = UDim2.new(1, -40, 0, 1)
-		BlockLine.ZIndex = Zindex + 4
-
-		local BasePadding = 28;
-
-		local UpdateScale = function()
-			if not DescriptionText.Text:byte() then
-				Compkiller:_Animation(Paragraph, TweenInfo.new(0.15), {
-					Size = UDim2.new(1, -1, 0, 18 + BasePadding)
-				});
-			else
-				local ContentScale = TextService:GetTextSize(DescriptionText.Text, DescriptionText.TextSize, DescriptionText.Font, Vector2.new(Paragraph.AbsoluteSize.X - 68, math.huge));
-				Compkiller:_Animation(Paragraph, TweenInfo.new(0.15), {
-					Size = UDim2.new(1, -1, 0, 18 + ContentScale.Y + BasePadding + 10)
-				});
-			end;
-		end;
-
-		UpdateScale();
-
-		local Args = {};
-		function Args:SetTitle(title) BlockText.Text = title; UpdateScale(); end;
-		function Args:SetContent(content) DescriptionText.Text = content; UpdateScale(); end;
-
-		return Args;
-	end;
-
-
-	-- AddToggle (Helper) Component
-	function Args:AddToggle(Config)
-		Config = Compkiller.__CONFIG(Config, {
-			Title = "System Toggle",
-			HelperText = "Helper tooltip text here.",
-			Icon = "rbxassetid://11422155687", -- Settings Icon
-			Keybind = "E",
-			State = false
-		});
-
-		local Toggle = Instance.new("Frame")
-		local HeaderIcon = Instance.new("ImageLabel")
-		local BlockText = Instance.new("TextLabel")
-		local BlockLine = Instance.new("Frame")
-		
-		local HelperIcon = Instance.new("ImageLabel")
-		local Tooltip = Instance.new("CanvasGroup")
-		local TooltipCorner = Instance.new("UICorner")
-		local TooltipStroke = Instance.new("UIStroke")
-		local TooltipText = Instance.new("TextLabel")
-		
-		local Badge = Instance.new("Frame")
-		local BadgeCorner = Instance.new("UICorner")
-		local BadgeStroke = Instance.new("UIStroke")
-		local BadgeText = Instance.new("TextLabel")
-		
-		local SwitchTrack = Instance.new("Frame")
-		local SwitchTrackCorner = Instance.new("UICorner")
-		local SwitchTrackStroke = Instance.new("UIStroke")
-		local SwitchKnob = Instance.new("Frame")
-		local SwitchKnobCorner = Instance.new("UICorner")
-		local ToggleBtn = Instance.new("TextButton")
-
-		-- Toggle Container
-		Toggle.Name = Compkiller:_RandomString()
-		Toggle.Parent = Parent
-		Toggle.BackgroundTransparency = 1.000
-		Toggle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		Toggle.Size = UDim2.new(1, -1, 0, 60)
-		Toggle.ZIndex = Zindex + 2
-
-		Toggle.MouseEnter:Connect(function()
-			Compkiller:_Animation(Toggle, TweenInfo.new(0.3), { BackgroundTransparency = 0.985 })
-		end)
-		Toggle.MouseLeave:Connect(function()
-			Compkiller:_Animation(Toggle, TweenInfo.new(0.3), { BackgroundTransparency = 1.000 })
-		end)
-
-		HeaderIcon.Name = Compkiller:_RandomString()
-		HeaderIcon.Parent = Toggle
-		HeaderIcon.BackgroundTransparency = 1.000
-		HeaderIcon.Position = UDim2.new(0, 20, 0.5, -9)
-		HeaderIcon.Size = UDim2.new(0, 18, 0, 18)
-		HeaderIcon.Image = Config.Icon
-		HeaderIcon.ImageColor3 = Color3.fromRGB(255, 255, 255)
-		HeaderIcon.ImageTransparency = 0.2
-		HeaderIcon.ZIndex = Zindex + 3
-
-		BlockText.Name = Compkiller:_RandomString()
-		BlockText.Parent = Toggle
-		BlockText.BackgroundTransparency = 1.000
-		BlockText.Position = UDim2.new(0, 48, 0.5, -9)
-		BlockText.Size = UDim2.new(1, -200, 0, 18)
-		BlockText.ZIndex = Zindex + 3
-		BlockText.Font = Enum.Font.GothamMedium
-		BlockText.Text = Config.Title
-		BlockText.TextColor3 = Color3.fromRGB(255, 255, 255)
-		BlockText.TextSize = 16.000
-		BlockText.TextXAlignment = Enum.TextXAlignment.Left
-
-		-- Interactive Helper Icon
-		HelperIcon.Name = Compkiller:_RandomString()
-		HelperIcon.Parent = Toggle
-		HelperIcon.BackgroundTransparency = 1.000
-		HelperIcon.AnchorPoint = Vector2.new(1, 0.5)
-		HelperIcon.Position = UDim2.new(1, -100, 0.5, 0)
-		HelperIcon.Size = UDim2.new(0, 18, 0, 18)
-		HelperIcon.Image = "rbxassetid://11422155687" -- help-circle icon
-		HelperIcon.ImageColor3 = Color3.fromRGB(255, 255, 255)
-		HelperIcon.ImageTransparency = 0.5
-		HelperIcon.ZIndex = Zindex + 5
-
-		-- Floating Tooltip
-		Tooltip.Name = Compkiller:_RandomString()
-		Tooltip.Parent = Toggle
-		Tooltip.AnchorPoint = Vector2.new(0.5, 1)
-		Tooltip.BackgroundColor3 = Color3.fromRGB(24, 24, 27) -- #18181b
-		Tooltip.Position = UDim2.new(1, -100, 0.5, -15) -- Placed above Helper Icon
-		Tooltip.Size = UDim2.new(0, 220, 0, 40)
-		Tooltip.ZIndex = Zindex + 10
-		Tooltip.GroupTransparency = 1 -- Hidden by default
-		
-		TooltipCorner.CornerRadius = UDim.new(0, 8)
-		TooltipCorner.Parent = Tooltip
-
-		TooltipStroke.Color = Color3.fromRGB(255, 255, 255)
-		TooltipStroke.Transparency = 0.9 -- Subtle 0.1 border
-		TooltipStroke.Parent = Tooltip
-
-		TooltipText.Name = Compkiller:_RandomString()
-		TooltipText.Parent = Tooltip
-		TooltipText.BackgroundTransparency = 1
-		TooltipText.Size = UDim2.new(1, -20, 1, -20)
-		TooltipText.Position = UDim2.new(0, 10, 0, 10)
-		TooltipText.Font = Enum.Font.Gotham
-		TooltipText.Text = Config.HelperText
-		TooltipText.TextColor3 = Color3.fromRGB(255, 255, 255)
-		TooltipText.TextSize = 12.000
-		TooltipText.TextWrapped = true
-		TooltipText.ZIndex = Zindex + 11
-
-		local TooltipSize = TextService:GetTextSize(TooltipText.Text, TooltipText.TextSize, TooltipText.Font, Vector2.new(200, math.huge))
-		Tooltip.Size = UDim2.new(0, 220, 0, TooltipSize.Y + 20)
-
-		-- Hover Tooltip Logic
-		HelperIcon.MouseEnter:Connect(function()
-			Compkiller:_Animation(HelperIcon, TweenInfo.new(0.2), { ImageColor3 = Color3.fromRGB(59, 130, 246), ImageTransparency = 0 })
-			Compkiller:_Animation(Tooltip, TweenInfo.new(0.2), { GroupTransparency = 0, Position = UDim2.new(1, -100, 0.5, -20) })
-		end)
-		HelperIcon.MouseLeave:Connect(function()
-			Compkiller:_Animation(HelperIcon, TweenInfo.new(0.2), { ImageColor3 = Color3.fromRGB(255, 255, 255), ImageTransparency = 0.5 })
-			Compkiller:_Animation(Tooltip, TweenInfo.new(0.2), { GroupTransparency = 1, Position = UDim2.new(1, -100, 0.5, -15) })
-		end)
-
-		-- Hotkey Badge (KBD)
-		Badge.Name = Compkiller:_RandomString()
-		Badge.Parent = Toggle
-		Badge.AnchorPoint = Vector2.new(1, 0.5)
-		Badge.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		Badge.BackgroundTransparency = 0.95
-		Badge.Position = UDim2.new(1, -74, 0.5, 0)
-		Badge.Size = UDim2.new(0, 20, 0, 18)
-		Badge.ZIndex = Zindex + 3
-
-		BadgeCorner.CornerRadius = UDim.new(0, 6)
-		BadgeCorner.Parent = Badge
-
-		BadgeStroke.Color = Color3.fromRGB(255, 255, 255)
-		BadgeStroke.Transparency = 0.9
-		BadgeStroke.Parent = Badge
-
-		BadgeText.Parent = Badge
-		BadgeText.BackgroundTransparency = 1
-		BadgeText.Size = UDim2.new(1, 0, 1, 0)
-		BadgeText.Font = Enum.Font.Code -- Monospace Terminal Font
-		BadgeText.Text = Config.Keybind
-		BadgeText.TextColor3 = Color3.fromRGB(161, 161, 170)
-		BadgeText.TextSize = 11.000
-		BadgeText.ZIndex = Zindex + 4
-
-		-- Switch Track
-		SwitchTrack.Name = Compkiller:_RandomString()
-		SwitchTrack.Parent = Toggle
-		SwitchTrack.AnchorPoint = Vector2.new(1, 0.5)
-		SwitchTrack.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		SwitchTrack.BackgroundTransparency = 0.95
-		SwitchTrack.Position = UDim2.new(1, -20, 0.5, 0)
-		SwitchTrack.Size = UDim2.new(0, 46, 0, 23)
-		SwitchTrack.ZIndex = Zindex + 3
-
-		SwitchTrackCorner.CornerRadius = UDim.new(1, 0)
-		SwitchTrackCorner.Parent = SwitchTrack
-
-		SwitchTrackStroke.Color = Color3.fromRGB(255, 255, 255)
-		SwitchTrackStroke.Transparency = 0.88
-		SwitchTrackStroke.Parent = SwitchTrack
-
-		-- Switch Knob
-		SwitchKnob.Name = Compkiller:_RandomString()
-		SwitchKnob.Parent = SwitchTrack
-		SwitchKnob.AnchorPoint = Vector2.new(0, 0.5)
-		SwitchKnob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		SwitchKnob.Position = UDim2.new(0, 2, 0.5, 0)
-		SwitchKnob.Size = UDim2.new(0, 19, 0, 19)
-		SwitchKnob.ZIndex = Zindex + 4
-
-		SwitchKnobCorner.CornerRadius = UDim.new(1, 0)
-		SwitchKnobCorner.Parent = SwitchKnob
-
-		-- Bottom Line
-		BlockLine.Name = Compkiller:_RandomString()
-		BlockLine.Parent = Toggle
-		BlockLine.AnchorPoint = Vector2.new(0.5, 1)
-		BlockLine.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		BlockLine.BackgroundTransparency = 0.92
-		BlockLine.BorderSizePixel = 0
-		BlockLine.Position = UDim2.new(0.5, 0, 1, 0)
-		BlockLine.Size = UDim2.new(1, -40, 0, 1)
-		BlockLine.ZIndex = Zindex + 4
-
-		-- Logic & Interaction
-		local Args = {}
-		local Toggled = Config.State
-
-		function Args:SetState(bool)
-			Toggled = bool
-			if Toggled then
-				Compkiller:_Animation(SwitchKnob, TweenInfo.new(0.2, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), { Position = UDim2.new(1, -21, 0.5, 0) })
-				Compkiller:_Animation(SwitchTrack, TweenInfo.new(0.2), { BackgroundColor3 = Color3.fromRGB(99, 102, 241), BackgroundTransparency = 0.8 })
-				Compkiller:_Animation(SwitchTrackStroke, TweenInfo.new(0.2), { Color = Color3.fromRGB(99, 102, 241), Transparency = 0.5 })
-			else
-				Compkiller:_Animation(SwitchKnob, TweenInfo.new(0.2, Enum.EasingStyle.Cubic, Enum.EasingDirection.Out), { Position = UDim2.new(0, 2, 0.5, 0) })
-				Compkiller:_Animation(SwitchTrack, TweenInfo.new(0.2), { BackgroundColor3 = Color3.fromRGB(255, 255, 255), BackgroundTransparency = 0.95 })
-				Compkiller:_Animation(SwitchTrackStroke, TweenInfo.new(0.2), { Color = Color3.fromRGB(255, 255, 255), Transparency = 0.88 })
-			end
-		end
-
-		Args:SetState(Toggled)
-
-		ToggleBtn.Parent = Toggle
-		ToggleBtn.Size = UDim2.new(1, 0, 1, 0)
-		ToggleBtn.BackgroundTransparency = 1
-		ToggleBtn.Text = ""
-		ToggleBtn.ZIndex = Zindex + 5
-
-		ToggleBtn.MouseButton1Click:Connect(function()
-			Toggled = not Toggled
-			Args:SetState(Toggled)
-			if Args.Signal then Args.Signal:Fire(Toggled) end
-		end)
-
-		return Args
-	end
-
--- ────────────────────────────────────────────────────────────────────────────────────────
--- ║ → Textboxes ───────────────────────────────────────────────────────────────── (5.5) ║
--- ────────────────────────────────────────────────────────────────────────────────────────
-
-	--update
-	function Args:AddTextBox(Config: TextBoxConfig)
-		Config = Compkiller.__CONFIG(Config , {
-			Name = "TextBox",
-			Default = "",
-			Placeholder = "Placeholder",
-			Numeric = false,
-			Icon = true, -- Optional toggle from design
-			Callback = function() end,
-		});
-
-		-- Main Row Container (content-row)
-		local TextBox = Instance.new("Frame")
-		local AccentLine = Instance.new("Frame") -- New: Left accent line from hover effects
-		local LeftGroup = Instance.new("Frame") -- Flex-like group for Icon + Label
-		local BlockText = Instance.new("TextLabel")
-		local LinkValues = Instance.new("Frame") -- The Input Box Wrapper
-		local UIStroke = Instance.new("UIStroke")
-		local UICorner = Instance.new("UICorner")
-		local InputGroup = Instance.new("UIListLayout") -- To handle Icon + Input spacing
-		local SettingIcon = Instance.new("ImageLabel") -- Lucide Icon relocated inside
-		local TextBox_2 = Instance.new("TextBox") -- The actual input field
-		local BlockLine = Instance.new("Frame") -- The row separator
-
-		-- Row Setup
-		TextBox.Name = Compkiller:_RandomString()
-		TextBox.Parent = Parent
-		TextBox.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		TextBox.BackgroundTransparency = 1.000 -- Starts transparent, glows on hover
-		TextBox.BorderSizePixel = 0
-		TextBox.Size = UDim2.new(1, 0, 0, 64) -- Increased height for "Elite" spacing
-		TextBox.ZIndex = Zindex + 1
-
-		-- Left Accent Line
-		AccentLine.Name = "Accent"
-		AccentLine.Parent = TextBox
-		AccentLine.AnchorPoint = Vector2.new(0, 0.5)
-		AccentLine.BackgroundColor3 = Color3.fromHex("#00d7ff")
-		AccentLine.BorderSizePixel = 0
-		AccentLine.Position = UDim2.new(0, 2, 0.5, 0)
-		AccentLine.Size = UDim2.new(0, 2, 0, 0) -- Starts at 0 height, grows on hover
-		AccentLine.ZIndex = Zindex + 5
-
-		-- Label Label (BlockText)
-		BlockText.Name = "Label"
-		BlockText.Parent = TextBox
-		BlockText.AnchorPoint = Vector2.new(0, 0.5)
-		BlockText.BackgroundTransparency = 1.000
-		BlockText.Position = UDim2.new(0, 24, 0.5, 0) -- Generous 24px padding
-		BlockText.Size = UDim2.new(0.4, 0, 0, 20)
-		BlockText.ZIndex = Zindex + 2
-		BlockText.Font = Enum.Font.BuilderSansMedium -- Inter alternative
-		BlockText.Text = Config.Name
-		BlockText.TextColor3 = Color3.fromHex("#FFFFFF")
-		BlockText.TextSize = 14
-		BlockText.TextXAlignment = Enum.TextXAlignment.Left
-
-		-- Input Box Wrapper (LinkValues)
-		LinkValues.Name = "InputBox"
-		LinkValues.Parent = TextBox
-		LinkValues.AnchorPoint = Vector2.new(1, 0.5)
-		LinkValues.BackgroundColor3 = Color3.fromHex("#09090b")
-		LinkValues.BorderSizePixel = 0
-		LinkValues.Position = UDim2.new(1, -24, 0.5, 0)
-		LinkValues.Size = UDim2.new(0, 150, 0, 32) -- Increased box size
-		LinkValues.ZIndex = Zindex + 3
-
-		UICorner.CornerRadius = UDim.new(0, 10)
-		UICorner.Parent = LinkValues
-
-		UIStroke.Color = Color3.fromHex("#3f3f46") -- Zinc 700
-		UIStroke.Thickness = 1
-		UIStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-		UIStroke.Parent = LinkValues
-
-		InputGroup.Parent = LinkValues
-		InputGroup.FillDirection = Enum.FillDirection.Horizontal
-		InputGroup.VerticalAlignment = Enum.VerticalAlignment.Center
-		InputGroup.Padding = UDim.new(0, 8)
-		InputGroup.SortOrder = Enum.SortOrder.LayoutOrder
-
-		-- Internal Padding for InputGroup
-		local UIPadding = Instance.new("UIPadding")
-		UIPadding.PaddingLeft = UDim.new(0, 12)
-		UIPadding.Parent = LinkValues
-
-		-- Setting Icon (Relocated inside box)
-		SettingIcon.Name = "Icon"
-		SettingIcon.Parent = LinkValues
-		SettingIcon.BackgroundTransparency = 1
-		SettingIcon.Size = UDim2.fromOffset(12, 12)
-		SettingIcon.Image = "rbxassetid://10734950309" -- Example Lucide Gear ID
-		SettingIcon.ImageColor3 = Color3.fromHex("#a1a1aa")
-		SettingIcon.ImageTransparency = 0.4
-		SettingIcon.Visible = Config.Icon
-
-		-- Input Field (TextBox_2)
-		TextBox_2.Parent = LinkValues
-		TextBox_2.BackgroundTransparency = 1
-		TextBox_2.Size = UDim2.new(1, -25, 1, 0)
-		TextBox_2.ZIndex = Zindex + 5
-		TextBox_2.Font = Enum.Font.RobotoMono -- JetBrains Mono alternative
-		TextBox_2.PlaceholderText = Config.Placeholder
-		TextBox_2.Text = Config.Default
-		TextBox_2.TextColor3 = Color3.fromHex("#FFFFFF")
-		TextBox_2.TextSize = 11
-		TextBox_2.TextXAlignment = Enum.TextXAlignment.Left
-
-		-- Row Separator (BlockLine)
-		BlockLine.Name = "Separator"
-		BlockLine.Parent = TextBox
-		BlockLine.AnchorPoint = Vector2.new(0.5, 1)
-		BlockLine.BackgroundColor3 = Color3.fromHex("#3f3f46")
-		BlockLine.BackgroundTransparency = 0.75
-		BlockLine.BorderSizePixel = 0
-		BlockLine.Position = UDim2.new(0.5, 0, 1, 0)
-		BlockLine.Size = UDim2.new(1, -48, 0, 1) -- Centered with side margins
-
-		-- Update Logic
-		local Update = function()
-			local scale = TextService:GetTextSize(TextBox_2.Text, TextBox_2.TextSize, TextBox_2.Font, Vector2.new(math.huge, math.huge))
-			local base = TextService:GetTextSize(TextBox_2.PlaceholderText, TextBox_2.TextSize, TextBox_2.Font, Vector2.new(math.huge, math.huge))
-			
-			local mainWidth = math.max(scale.X, base.X)
-			local iconSpace = Config.Icon and 28 or 0
-			
-			Compkiller:_Animation(LinkValues, TweenInfo.new(0.3, Enum.EasingStyle.Quart), {
-				Size = UDim2.fromOffset(math.clamp(mainWidth + 32 + iconSpace, 150, TextBox.AbsoluteSize.X * 0.55), 32)
-			})
-		end
-
-		-- Hover & Focus Effects
-		TextBox.MouseEnter:Connect(function()
-			Compkiller:_Animation(TextBox, TweenInfo.new(0.4), {BackgroundTransparency = 0.965})
-			Compkiller:_Animation(BlockText, TweenInfo.new(0.4), {Position = UDim2.new(0, 28, 0.5, 0)})
-			Compkiller:_Animation(AccentLine, TweenInfo.new(0.3), {Size = UDim2.new(0, 2, 0, 16)})
-			Compkiller:_Animation(UIStroke, TweenInfo.new(0.3), {Color = Color3.fromHex("#00d7ff"), Transparency = 0.8})
-		end)
-
-		TextBox.MouseLeave:Connect(function()
-			Compkiller:_Animation(TextBox, TweenInfo.new(0.4), {BackgroundTransparency = 1})
-			Compkiller:_Animation(BlockText, TweenInfo.new(0.4), {Position = UDim2.new(0, 24, 0.5, 0)})
-			Compkiller:_Animation(AccentLine, TweenInfo.new(0.3), {Size = UDim2.new(0, 2, 0, 0)})
-			Compkiller:_Animation(UIStroke, TweenInfo.new(0.3), {Color = Color3.fromHex("#3f3f46"), Transparency = 0})
-		end)
-
-		TextBox_2.Focused:Connect(function()
-			Compkiller:_Animation(UIStroke, TweenInfo.new(0.3), {Color = Color3.fromHex("#00d7ff"), Transparency = 0.4})
-			Compkiller:_Animation(SettingIcon, TweenInfo.new(0.3), {ImageColor3 = Color3.fromHex("#00d7ff"), ImageTransparency = 0.1})
-		end)
-
-		TextBox_2.FocusLost:Connect(function()
-			Compkiller:_Animation(UIStroke, TweenInfo.new(0.3), {Color = Color3.fromHex("#3f3f46"), Transparency = 0})
-			Compkiller:_Animation(SettingIcon, TweenInfo.new(0.3), {ImageColor3 = Color3.fromHex("#a1a1aa"), ImageTransparency = 0.4})
-		end)
-
-		-- Core Handlers
-		TextBox_2:GetPropertyChangedSignal('Text'):Connect(Update)
-		-- ... (Keep existing numeric parse and callback logic from previous version)
-
-		Update()
-		
-		local Args = {}
-		-- ... (Keep existing Args methods: SetValue, GetValue, etc.)
-		return Args
-	end
-
-
--- ────────────────────────────────────────────────────────────────────────────────────────
--- ║ → Dropdowns (including AddLinkOption / LinkValues) ────────────────────────── (5.4) ║
--- ────────────────────────────────────────────────────────────────────────────────────────
-
-	function Args:AddDropdown(Config : Dropdown)
-		Config = Compkiller.__CONFIG(Config,{
-			Name = "Dropdown",
-			Default = nil,
-			Values = {"Item 1","Item 2","Item 3"},
-			Multi = false,
-			Callback = function() end;
-		});
-
-		local DaTabarser = function(value)
-			if not value then return ''; end;
-
-			local Out;
-
-			if typeof(value) == 'table' then
-				if #value > 0 then
-					local x = {};
-
-					for i,v in next , value do
-						table.insert(x , tostring(v))
-					end;
-
-					Out = table.concat(x,' , ');
-				else
-					local x = {};
-
-					for i,v in next , value do
-						if v == true then
-							table.insert(x , tostring(i));
-						end			
-					end;
-
-					Out = table.concat(x,' , ');
-				end;
-			else
-				Out = tostring(value);
-			end;
-
-			return Out;
-		end;
-
-		local Dropdown = Instance.new("Frame")
-		local BlockText = Instance.new("TextLabel")
-		local BlockLine = Instance.new("Frame")
-		local LinkValues = Instance.new("Frame")
-		local UIListLayout = Instance.new("UIListLayout")
-		local ValueItems = Instance.new("Frame")
-		local UIStroke = Instance.new("UIStroke")
-		local UICorner = Instance.new("UICorner")
-		local ValueText = Instance.new("TextLabel")
-		local MainButton = Instance.new("ImageButton")
-
-		Dropdown.Name = Compkiller:_RandomString()
-		Dropdown.Parent = Parent
-		Dropdown.BackgroundTransparency = 1.000
-		Dropdown.BorderColor3 = Color3.fromRGB(0, 0, 0)
-		Dropdown.BorderSizePixel = 0
-		Dropdown.Size = UDim2.new(1, -1, 0, 55)
-		Dropdown.ZIndex = Zindex + 2
-
-		BlockText.Name = Compkiller:_RandomString()
-		BlockText.Parent = Dropdown
-		BlockText.BackgroundTransparency = 1.000
-		BlockText.BorderColor3 = Color3.fromRGB(0, 0, 0)
-		BlockText.BorderSizePixel = 0
-		BlockText.Position = UDim2.new(0, 12, 0, 1)
-		BlockText.Size = UDim2.new(1, -20, 0, 25)
-		BlockText.ZIndex = Zindex + 3
-		BlockText.Font = Enum.Font.GothamMedium
-		BlockText.Text = Config.Name
-		BlockText.TextColor3 = Compkiller.Colors.SwitchColor
-		BlockText.TextSize = 14.000
-		BlockText.TextTransparency = 0.100
-		BlockText.TextXAlignment = Enum.TextXAlignment.Left
-
-		if not BlockText.Text:byte() then
-			Dropdown.Size = UDim2.new(1, -1, 0, 25)
-		end;
-
-		table.insert(Compkiller.Elements.SwitchColor , {
-			Element = BlockText,
-			Property = 'TextColor3'
-		});
+		Button.Name = Compkiller:_RandomString()
+		Button.Parent = Parent
+		Button.BackgroundTransparency = 1.000
+		Button.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		Button.BorderSizePixel = 0
+		Button.Size = UDim2.new(1, -1, 0, 30)
+		Button.ZIndex = Zindex + 5
 
 		BlockLine.Name = Compkiller:_RandomString()
-		BlockLine.Parent = Dropdown
+		BlockLine.Parent = Button
 		BlockLine.AnchorPoint = Vector2.new(0.5, 1)
 		BlockLine.BackgroundColor3 = Compkiller.Colors.LineColor
 		BlockLine.BackgroundTransparency = 0.500
@@ -4924,20 +3997,1039 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		BlockLine.BorderSizePixel = 0
 		BlockLine.Position = UDim2.new(0.5, 0, 1, 0)
 		BlockLine.Size = UDim2.new(1, -26, 0, 1)
-		BlockLine.ZIndex = Zindex + 3
+		BlockLine.ZIndex = Zindex + 6
 
 		table.insert(Compkiller.Elements.LineColor,{
 			Element = BlockLine,
 			Property = "BackgroundColor3"
 		});
 
+		Frame.Parent = Button
+		Frame.AnchorPoint = Vector2.new(0.5, 0.5)
+		Frame.BackgroundColor3 = Compkiller.Colors.Highlight
+		Frame.BackgroundTransparency = 0.100
+		Frame.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		Frame.BorderSizePixel = 0
+		Frame.Position = UDim2.new(0.5, 0, 0.5, 0)
+		Frame.Size = UDim2.new(1, -15, 1, -5)
+		Frame.ZIndex = Zindex + 7;
+
+		table.insert(Compkiller.Elements.Highlight,{
+			Element = Frame,
+			Property = "BackgroundColor3"
+		});
+
+		UIStroke.Color = Compkiller.Colors.StrokeColor
+		UIStroke.Parent = Frame
+
+		table.insert(Compkiller.Elements.StrokeColor,{
+			Element = UIStroke,
+			Property = "Color"
+		});
+
+		UICorner.CornerRadius = UDim.new(0, 3)
+		UICorner.Parent = Frame
+
+		TextLabel.Parent = Frame
+		TextLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+		TextLabel.BackgroundTransparency = 1.000
+		TextLabel.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		TextLabel.BorderSizePixel = 0
+		TextLabel.Position = UDim2.new(0.5, 0, 0.5, 0)
+		TextLabel.Size = UDim2.new(1, 0, 1, 0)
+		TextLabel.ZIndex = Zindex + 8
+		TextLabel.Font = Enum.Font.GothamMedium
+		TextLabel.Text = Config.Name;
+		TextLabel.TextColor3 = Compkiller.Colors.SwitchColor
+		TextLabel.TextSize = 12.000
+		TextLabel.TextStrokeTransparency = 0.900
+
+		table.insert(Compkiller.Elements.SwitchColor , {
+			Element = TextLabel,
+			Property = 'TextColor3'
+		});
+
+		Compkiller:_Hover(Frame,function()
+			if Signal:GetValue() then
+				Compkiller:_Animation(Frame,TweenInfo.new(0.2),{
+					BackgroundTransparency = 0
+				})
+			end;
+		end,function()
+			if Signal:GetValue() then
+				Compkiller:_Animation(Frame,TweenInfo.new(0.2),{
+					BackgroundTransparency = 0.1
+				})
+			end;
+		end);
+
+		Compkiller:_Input(Frame,function()
+			Config.Callback();
+		end);
+
+		local Args = {};
+
+		Args.Signal = Signal:Connect(function(bool)
+			if bool then
+				Compkiller:_Animation(BlockLine, TweenInfo.new(0.35),{
+					BackgroundTransparency = 0.500
+				});
+
+				Compkiller:_Animation(Frame, TweenInfo.new(0.35),{
+					BackgroundTransparency = 0.1
+				});
+
+				Compkiller:_Animation(UIStroke, TweenInfo.new(0.35),{
+					Transparency = 0
+				});
+
+				Compkiller:_Animation(TextLabel, TweenInfo.new(0.35),{
+					TextStrokeTransparency = 0.900,
+					TextTransparency = 0
+				});
+
+			else
+				Compkiller:_Animation(BlockLine, TweenInfo.new(0.35),{
+					BackgroundTransparency = 1
+				});
+
+				Compkiller:_Animation(Frame, TweenInfo.new(0.35),{
+					BackgroundTransparency = 1
+				});
+
+				Compkiller:_Animation(UIStroke, TweenInfo.new(0.35),{
+					Transparency = 1
+				});
+
+				Compkiller:_Animation(TextLabel, TweenInfo.new(0.35),{
+					TextStrokeTransparency = 1,
+					TextTransparency = 1
+				});
+			end;
+		end);
+
+		function Args:SetText(t)
+			Config.Name = t;
+			TextLabel.Text = Config.Name;
+		end;
+
+		function Args:GetText()
+			return TextLabel.Text;
+		end;
+
+		return Args;
+	end;
+
+
+-- ────────────────────────────────────────────────────────────────────────────────────────
+-- ║ → Sliders ─────────────────────────────────────────────────────────────────── (5.3) ║
+-- ────────────────────────────────────────────────────────────────────────────────────────
+
+	function Args:AddSlider(Config: Slider)
+			Config = Compkiller.__CONFIG(Config , {
+				Name = 'Slider',
+				Default = 50,
+				Min = 0,
+				Max = 100,
+				Type = "",
+				Round = 0,
+				Callback = function() end
+			});
+
+			local Slider = Instance.new("Frame")
+			local BlockText = Instance.new("TextLabel")
+			local BlockLine = Instance.new("Frame")
+			local SliderBar = Instance.new("Frame")
+			local UIStroke = Instance.new("UIStroke")
+			local UICorner = Instance.new("UICorner")
+			local SliderInput = Instance.new("Frame")
+			local UICorner_2 = Instance.new("UICorner")
+			local Frame = Instance.new("Frame")
+			local UICorner_3 = Instance.new("UICorner")
+			local UIScale = Instance.new("UIScale")
+			local ValueText = Instance.new("TextLabel")
+			-- Added for Premium Modern Aesthetic
+			local InputGradient = Instance.new("UIGradient")
+			local HandleShadow = Instance.new("UIStroke")
+
+			Compkiller:_AddDragBlacklist(Slider);
+
+			Slider.Name = Compkiller:_RandomString()
+			Slider.Parent = Parent
+			Slider.BackgroundTransparency = 1.000
+			Slider.BorderColor3 = Color3.fromRGB(0, 0, 0)
+			Slider.BorderSizePixel = 0
+			Slider.Size = UDim2.new(1, -1, 0, 50) -- Increased slightly for breathing room
+			Slider.ZIndex = Zindex + 1
+
+			BlockText.Name = Compkiller:_RandomString()
+			BlockText.Parent = Slider
+			BlockText.BackgroundTransparency = 1.000
+			BlockText.BorderColor3 = Color3.fromRGB(0, 0, 0)
+			BlockText.BorderSizePixel = 0
+			BlockText.Position = UDim2.new(0, 12, 0, 2)
+			BlockText.Size = UDim2.new(1, -20, 0, 25)
+			BlockText.ZIndex = Zindex + 2
+			BlockText.Font = Enum.Font.GothamMedium -- Clean modern weight
+			BlockText.Text = Config.Name
+			BlockText.TextColor3 = Compkiller.Colors.SwitchColor
+			BlockText.TextSize = 15.000
+			BlockText.TextTransparency = 0.300 -- Muted, premium contrast
+			BlockText.TextXAlignment = Enum.TextXAlignment.Left
+
+			table.insert(Compkiller.Elements.SwitchColor , {
+				Element = BlockText,
+				Property = 'TextColor3'
+			});
+
+			BlockLine.Name = Compkiller:_RandomString()
+			BlockLine.Parent = Slider
+			BlockLine.AnchorPoint = Vector2.new(0.5, 1)
+			BlockLine.BackgroundColor3 = Compkiller.Colors.LineColor
+			BlockLine.BackgroundTransparency = 0.850 -- More subtle separator
+			BlockLine.BorderColor3 = Color3.fromRGB(0, 0, 0)
+			BlockLine.BorderSizePixel = 0
+			BlockLine.Position = UDim2.new(0.5, 0, 1, 0)
+			BlockLine.Size = UDim2.new(1, -26, 0, 1)
+			BlockLine.ZIndex = Zindex + 2
+			BlockLine.Visible = EnabledLine or false;
+
+			table.insert(Compkiller.Elements.LineColor,{
+				Element = BlockLine,
+				Property = "BackgroundColor3"
+			});
+
+			SliderBar.Name = Compkiller:_RandomString()
+			SliderBar.Parent = Slider
+			SliderBar.AnchorPoint = Vector2.new(0.5, 1)
+			SliderBar.BackgroundColor3 = Compkiller.Colors.DropColor
+			SliderBar.BorderColor3 = Color3.fromRGB(0, 0, 0)
+			SliderBar.BorderSizePixel = 0
+			SliderBar.ClipsDescendants = false -- Set to false so the circular handle doesn't clip
+			SliderBar.Position = UDim2.new(0.5, 0, 1, -10)
+			SliderBar.Size = UDim2.new(1, -25, 0, 8) -- Tactile 8px modern track
+			SliderBar.ZIndex = Zindex + 3
+
+			table.insert(Compkiller.Elements.DropColor , {
+				Element = SliderBar,
+				Property = "BackgroundColor3"
+			})
+
+			UIStroke.Color = Compkiller.Colors.StrokeColor
+			UIStroke.Parent = SliderBar
+
+			table.insert(Compkiller.Elements.StrokeColor,{
+				Element = UIStroke,
+				Property = "Color"
+			});
+
+			UICorner.CornerRadius = UDim.new(1, 0) -- Pill shape rounding
+			UICorner.Parent = SliderBar
+
+			SliderInput.Name = Compkiller:_RandomString()
+			SliderInput.Parent = SliderBar
+			SliderInput.AnchorPoint = Vector2.new(0, 0.5)
+			SliderInput.BackgroundColor3 = Compkiller.Colors.Highlight
+			SliderInput.BorderColor3 = Color3.fromRGB(0, 0, 0)
+			SliderInput.BorderSizePixel = 0
+			SliderInput.Position = UDim2.new(0, 0, 0.5, 0)
+			SliderInput.Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.045), 0, 1, 0)
+			SliderInput.ZIndex = Zindex + 4
+			
+			InputGradient.Color = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)),
+				ColorSequenceKeypoint.new(1, Color3.new(0.8, 0.9, 1)) -- Gives the cyan a subtle premium shine
+			})
+			InputGradient.Parent = SliderInput
+
+			table.insert(Compkiller.Elements.Highlight,{
+				Element = SliderInput,
+				Property = "BackgroundColor3"
+			});
+
+			UICorner_2.CornerRadius = UDim.new(1, 0)
+			UICorner_2.Parent = SliderInput
+
+			Frame.Parent = SliderInput
+			Frame.AnchorPoint = Vector2.new(0.5, 0.5)
+			Frame.BackgroundColor3 = Compkiller.Colors.SwitchColor
+			Frame.BorderColor3 = Color3.fromRGB(0, 0, 0)
+			Frame.BorderSizePixel = 0
+			Frame.Position = UDim2.new(1, 0, 0.5, 0)
+			Frame.Rotation = 0 -- Removed the 45 degree diamond rotation
+			Frame.Size = UDim2.new(0, 18, 0, 18) -- Modern circular handle
+			Frame.ZIndex = Zindex + 6
+			
+			HandleShadow.Color = Color3.fromRGB(0, 0, 0)
+			HandleShadow.Transparency = 0.5
+			HandleShadow.Thickness = 1
+			HandleShadow.Parent = Frame
+
+			table.insert(Compkiller.Elements.SwitchColor , {
+				Element = Frame,
+				Property = 'BackgroundColor3'
+			});
+
+			UICorner_3.CornerRadius = UDim.new(1, 0) -- Perfect circle
+			UICorner_3.Parent = Frame
+
+			UIScale.Parent = Frame
+			UIScale.Scale = 1.000
+
+			ValueText.Name = Compkiller:_RandomString()
+			ValueText.Parent = Slider
+			ValueText.BackgroundTransparency = 1.000
+			ValueText.BorderColor3 = Color3.fromRGB(0, 0, 0)
+			ValueText.BorderSizePixel = 0
+			ValueText.Position = UDim2.new(0, 12, 0, 2)
+			ValueText.Size = UDim2.new(1, -20, 0, 25)
+			ValueText.ZIndex = Zindex + 4
+			ValueText.Font = Enum.Font.GothamBold -- Bold to stand out
+			ValueText.Text = tostring(Config.Default)..tostring(Config.Type)
+			ValueText.TextColor3 = Compkiller.Colors.SwitchColor
+			ValueText.TextSize = 16.000
+			ValueText.TextTransparency = 0.400
+			ValueText.TextXAlignment = Enum.TextXAlignment.Right
+
+			table.insert(Compkiller.Elements.SwitchColor , {
+				Element = ValueText,
+				Property = 'TextColor3'
+			});
+
+			Compkiller:_Hover(SliderBar,function()
+				if Signal:GetValue() then
+					Compkiller:_Animation(ValueText,TweenInfo.new(0.2),{
+						TextTransparency = 0.0 -- Fully opaque on hover
+					})
+				end;
+			end,function()
+				if Signal:GetValue() then
+					Compkiller:_Animation(ValueText,TweenInfo.new(0.2),{
+						TextTransparency = 0.400
+					})
+				end;
+			end)	
+
+			local IsHold = false;
+
+			local Update = function(Input)
+				local SizeScale = math.clamp((((Input.Position.X) - SliderBar.AbsolutePosition.X) / SliderBar.AbsoluteSize.X), 0, 1);
+
+				local Main = ((Config.Max - Config.Min) * SizeScale) + Config.Min;
+
+				local Value = Compkiller:_Rounding(Main,Config.Round);
+
+				local PositionX = UDim2.fromScale(SizeScale, 1);
+
+				local Size = (Value - Config.Min) / (Config.Max - Config.Min);
+
+				TweenService:Create(SliderInput , TweenInfo.new(0.2),{
+					Size = UDim2.new(math.clamp(Size,0.045,1), 0, 1, 0)
+				}):Play();
+
+				Config.Default = Value;
+
+				ValueText.Text = tostring(Config.Default)..tostring(Config.Type)
+
+				Config.Callback(Value)
+			end;
+
+			do
+				SliderBar.InputBegan:Connect(function(Input)
+					if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+						IsHold = true
+						Update(Input)
+					end
+				end)
+
+				SliderBar.InputEnded:Connect(function(Input)
+					if Input.UserInputType == Enum.UserInputType.MouseButton1 or Input.UserInputType == Enum.UserInputType.Touch then
+						if UserInputService.TouchEnabled then
+							if not Compkiller:_IsMouseOverFrame(SliderBar) then
+								IsHold = false
+							end;
+						else
+							IsHold = false
+						end;
+					end
+				end)
+
+				UserInputService.InputChanged:Connect(function(Input)
+					if IsHold then
+						if (Input.UserInputType == Enum.UserInputType.MouseMovement or Input.UserInputType == Enum.UserInputType.Touch)  then
+							if UserInputService.TouchEnabled then
+								if not Compkiller:_IsMouseOverFrame(SliderBar) then
+									IsHold = false
+								else
+									Update(Input)
+								end;
+							else
+								Update(Input)
+							end;
+						end;
+					end;
+				end);
+			end;
+
+			local Args = {};
+
+			Args.Flag = Config.Flag;
+
+			function Args:SetValue(Value)
+				Config.Default = Value;
+
+				ValueText.Text = tostring(Config.Default)..tostring(Config.Type)
+
+				Compkiller:_Animation(SliderInput, TweenInfo.new(0.35),{
+					Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.045), 0, 1, 0)
+				});
+
+				Config.Callback(Value);
+			end;
+
+			function Args:SetText(str : string)
+				BlockText.Text = str or Config.Name
+			end;
+
+			function Args:GetText()
+				return BlockText.Text;
+			end;
+
+			Args.Signal = Signal:Connect(function(bool)
+				if bool then
+					Compkiller:_Animation(SliderInput, TweenInfo.new(0.35),{
+						Size = UDim2.new(math.max((Config.Default - Config.Min) / (Config.Max - Config.Min) , 0.045), 0, 1, 0)
+					});
+
+					Compkiller:_Animation(ValueText,Tween,{
+						TextTransparency = 0.400
+					})
+
+					Compkiller:_Animation(Frame,Tween,{
+						BackgroundTransparency = 0
+					})
+					
+					Compkiller:_Animation(HandleShadow,Tween,{
+						Transparency = 0.5
+					})
+
+					Compkiller:_Animation(SliderInput,Tween,{
+						BackgroundTransparency = 0
+					})
+
+					Compkiller:_Animation(UIStroke,Tween,{
+						Transparency = 0
+					})
+
+					Compkiller:_Animation(SliderBar,Tween,{
+						BackgroundTransparency = 0
+					})
+
+					Compkiller:_Animation(BlockLine,Tween,{
+						BackgroundTransparency = 0.850
+					})
+
+					Compkiller:_Animation(BlockText,Tween,{
+						TextTransparency = 0.300
+					})
+				else
+					Compkiller:_Animation(SliderInput, TweenInfo.new(0.35),{
+						Size = UDim2.new(0, 0, 1, 0)
+					});
+
+					Compkiller:_Animation(ValueText,Tween,{
+						TextTransparency = 1
+					})
+
+					Compkiller:_Animation(Frame,Tween,{
+						BackgroundTransparency = 1
+					})
+					
+					Compkiller:_Animation(HandleShadow,Tween,{
+						Transparency = 1
+					})
+
+					Compkiller:_Animation(SliderInput,Tween,{
+						BackgroundTransparency = 1
+					})
+
+					Compkiller:_Animation(UIStroke,Tween,{
+						Transparency = 1
+					})
+
+					Compkiller:_Animation(SliderBar,Tween,{
+						BackgroundTransparency = 1
+					})
+
+					Compkiller:_Animation(BlockLine,Tween,{
+						BackgroundTransparency = 1
+					})
+
+					Compkiller:_Animation(BlockText,Tween,{
+						TextTransparency = 1
+					})
+				end;
+			end);
+
+			function Args:GetValue()
+				return Config.Default;
+			end;
+
+			if Config.Flag then
+				Compkiller.Flags[Config.Flag] = Args;
+			end;
+
+			if not DisableStackKeybind then
+				local AutoKeybind = Compkiller:_KeybindHandler(Slider , "Number" , Args , Signal , Zindex , Config);
+
+				Args.AutoKeybind = AutoKeybind;
+			end;
+
+			return Args;
+		end;
+
+-- ────────────────────────────────────────────────────────────────────────────────────────
+-- ║ → Helpers & Paragraphs ────────────────────────────────────────────────────── (5.8) ║
+-- ────────────────────────────────────────────────────────────────────────────────────────
+
+
+	function Args:AddParagraph(Config: Paragraph) -- request by Neptune
+			Config = Compkiller.__CONFIG(Config, {
+				Title = "Paragraph",
+				Content = "",
+				Animation = true -- Optional toggle for the micro-animations
+			});
+
+			local paraAnim = Config.Animation
+
+			local Paragraph = Instance.new("Frame")
+			local ParagraphCorner = Instance.new("UICorner")
+			local BlockText = Instance.new("TextLabel")
+			local BlockLine = Instance.new("Frame")
+			local LineGradient = Instance.new("UIGradient")
+			local DescriptionText = Instance.new("TextLabel")
+
+			if Compkiller:_IsMobile() then
+				Compkiller:_AddDragBlacklist(Paragraph);
+			end;
+
+			-- Main Paragraph Container (Now supports hover background)
+			Paragraph.Name = Compkiller:_RandomString()
+			Paragraph.Parent = Parent
+			Paragraph.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+			Paragraph.BackgroundTransparency = 1.000 -- Invisible by default
+			Paragraph.BorderColor3 = Color3.fromRGB(0, 0, 0)
+			Paragraph.BorderSizePixel = 0
+			Paragraph.Size = UDim2.new(1, -1, 0, 40)
+			Paragraph.ZIndex = Zindex + 2
+			Paragraph.ClipsDescendants = true
+			
+			ParagraphCorner.CornerRadius = UDim.new(0, 10)
+			ParagraphCorner.Parent = Paragraph
+
+			-- Title Text (Premium Hierarchy: Bolder, Brighter)
+			BlockText.Name = Compkiller:_RandomString()
+			BlockText.Parent = Paragraph
+			BlockText.AnchorPoint = Vector2.new(0, 0)
+			BlockText.BackgroundTransparency = 1.000
+			BlockText.Position = UDim2.new(0, 16, 0, 14) -- Pushed in for premium padding
+			BlockText.Size = UDim2.new(1, -32, 0, 16)
+			BlockText.ZIndex = Zindex + 3
+			BlockText.Font = Enum.Font.GothamBold -- Increased font weight
+			BlockText.Text = Config.Title
+			BlockText.TextColor3 = Compkiller.Colors.SwitchColor
+			BlockText.TextSize = 14.000
+			BlockText.TextTransparency = 0.050 -- Opacity 0.95
+			BlockText.TextXAlignment = Enum.TextXAlignment.Left
+			BlockText.RichText = true
+
+			table.insert(Compkiller.Elements.SwitchColor , {
+				Element = BlockText,
+				Property = 'TextColor3'
+			});
+
+			-- Sleek Gradient Separator
+			BlockLine.Name = Compkiller:_RandomString()
+			BlockLine.Parent = Paragraph
+			BlockLine.AnchorPoint = Vector2.new(0.5, 1)
+			BlockLine.BackgroundColor3 = Compkiller.Colors.LineColor
+			BlockLine.BackgroundTransparency = 0.500
+			BlockLine.BorderSizePixel = 0
+			BlockLine.Position = UDim2.new(0.5, 0, 1, 0)
+			BlockLine.Size = UDim2.new(1, -32, 0, 1)
+			BlockLine.ZIndex = Zindex + 4
+			
+			LineGradient.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
+			LineGradient.Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 1),
+				NumberSequenceKeypoint.new(0.05, 0), -- Fades in quickly
+				NumberSequenceKeypoint.new(0.95, 0), -- Stays solid
+				NumberSequenceKeypoint.new(1, 1)     -- Fades out smoothly at edge
+			})
+			LineGradient.Parent = BlockLine
+
+			table.insert(Compkiller.Elements.LineColor,{
+				Element = BlockLine,
+				Property = "BackgroundColor3"
+			});
+
+			-- Content / Description Text (Premium Hierarchy: Muted, Medium)
+			DescriptionText.RichText = true
+			DescriptionText.Name = Compkiller:_RandomString()
+			DescriptionText.Parent = Paragraph
+			DescriptionText.BackgroundTransparency = 1.000
+			DescriptionText.Position = UDim2.new(0, 16, 0, 36) -- Dynamic position handled in UpdateScale
+			DescriptionText.Size = UDim2.new(1, -32, 1, -50)
+			DescriptionText.ZIndex = Zindex + 5
+			DescriptionText.Font = Enum.Font.GothamMedium
+			DescriptionText.Text = Config.Content
+			DescriptionText.TextColor3 = Color3.fromRGB(139, 139, 155) -- Premium Muted Text (#8b8b9b)
+			DescriptionText.TextSize = 13.000
+			DescriptionText.TextTransparency = 0.000
+			DescriptionText.LineHeight = 1.2 -- Better readability spacing
+			DescriptionText.TextXAlignment = Enum.TextXAlignment.Left
+			DescriptionText.TextYAlignment = Enum.TextYAlignment.Top
+
+			-- Interactive Hover State for the whole paragraph block
+			Compkiller:_Hover(Paragraph, function()
+				if Signal:GetValue() and paraAnim then
+					Compkiller:_Animation(Paragraph, TweenInfo.new(0.3), {
+						BackgroundTransparency = 0.97 -- Very subtle white highlight
+					})
+				end
+			end, function()
+				if Signal:GetValue() and paraAnim then
+					Compkiller:_Animation(Paragraph, TweenInfo.new(0.3), {
+						BackgroundTransparency = 1.000
+					})
+				end
+			end)
+
+			local BasePaddingTop = 14;
+			local BasePaddingBottom = 14;
+			local ElementGap = 6;
+
+			local UpdateScale = function()
+				local TitleScale = TextService:GetTextSize(BlockText.Text, BlockText.TextSize, BlockText.Font, Vector2.new(math.huge, math.huge));
+
+				if not DescriptionText.Text:byte() then
+					DescriptionText.Visible = false
+					BlockText.Size = UDim2.new(1, -32, 0, TitleScale.Y)
+					
+					Compkiller:_Animation(Paragraph, TweenInfo.new(0.2), {
+						Size = UDim2.new(1, -1, 0, TitleScale.Y + BasePaddingTop + BasePaddingBottom)
+					});
+				else
+					DescriptionText.Visible = true
+					local ContentScale = TextService:GetTextSize(DescriptionText.Text, DescriptionText.TextSize, DescriptionText.Font, Vector2.new(math.huge, math.huge));
+
+					BlockText.Size = UDim2.new(1, -32, 0, TitleScale.Y)
+					DescriptionText.Position = UDim2.new(0, 16, 0, BasePaddingTop + TitleScale.Y + ElementGap)
+					
+					Compkiller:_Animation(Paragraph, TweenInfo.new(0.2), {
+						Size = UDim2.new(1, -1, 0, BasePaddingTop + TitleScale.Y + ElementGap + ContentScale.Y + BasePaddingBottom)
+					});
+				end;
+			end;
+
+			UpdateScale();
+
+			local Args = {};
+
+			function Args:SetTitle(title)
+				BlockText.Text = title;
+				UpdateScale();
+			end;
+
+			function Args:SetContent(content)
+				if DescriptionText.Text ~= content then
+					DescriptionText.Text = content;
+					UpdateScale();
+					
+					-- The "Micro-animation" Flash effect on update
+					if paraAnim and Signal:GetValue() then
+						-- Instant jump to highlight cyan
+						DescriptionText.TextColor3 = Color3.fromRGB(79, 172, 254) 
+						-- Smooth fade back to muted
+						Compkiller:_Animation(DescriptionText, TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+							TextColor3 = Color3.fromRGB(139, 139, 155)
+						})
+					end
+				end
+			end;
+
+			Args.Signal = Signal:Connect(function(bool)
+				if bool then
+					if paraAnim then
+						Compkiller:_Animation(BlockText, TweenInfo.new(0.2), { TextTransparency = 0.050 });
+						Compkiller:_Animation(DescriptionText, TweenInfo.new(0.2), { TextTransparency = 0.000 });
+						Compkiller:_Animation(BlockLine, TweenInfo.new(0.2), { BackgroundTransparency = 0.500 });
+					else
+						BlockText.TextTransparency = 0.050
+						DescriptionText.TextTransparency = 0.000
+						BlockLine.BackgroundTransparency = 0.500
+					end
+				else
+					if paraAnim then
+						Compkiller:_Animation(BlockText, TweenInfo.new(0.2), { TextTransparency = 1 });
+						Compkiller:_Animation(DescriptionText, TweenInfo.new(0.2), { TextTransparency = 1 });
+						Compkiller:_Animation(BlockLine, TweenInfo.new(0.2), { BackgroundTransparency = 1 });
+						Compkiller:_Animation(Paragraph, TweenInfo.new(0.2), { BackgroundTransparency = 1 }); -- Ensure hover resets
+					else
+						BlockText.TextTransparency = 1
+						DescriptionText.TextTransparency = 1
+						BlockLine.BackgroundTransparency = 1
+						Paragraph.BackgroundTransparency = 1
+					end
+				end;
+			end);
+
+			return Args;
+		end;
+
+-- ────────────────────────────────────────────────────────────────────────────────────────
+-- ║ → Textboxes ───────────────────────────────────────────────────────────────── (5.5) ║
+-- ────────────────────────────────────────────────────────────────────────────────────────
+
+	function Args:AddTextBox(Config: TextBoxConfig)
+		Config = Compkiller.__CONFIG(Config , {
+			Name = "TextBox",
+			Default = "",
+			Placeholder = "Placeholder",
+			Numberic = false,
+			Callback = function() end,
+		});
+
+		local TextBox = Instance.new("Frame")
+		local BlockText = Instance.new("TextLabel")
+		local LinkValues = Instance.new("Frame")
+		local UIStroke = Instance.new("UIStroke")
+		local UICorner = Instance.new("UICorner")
+		local TextBox_2 = Instance.new("TextBox")
+		local BlockLine = Instance.new("Frame")
+
+		if Compkiller:_IsMobile() then
+			Compkiller:_AddDragBlacklist(TextBox);
+		end;
+
+		TextBox.Name = Compkiller:_RandomString()
+		TextBox.Parent = Parent
+		TextBox.BackgroundTransparency = 1.000
+		TextBox.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		TextBox.BorderSizePixel = 0
+		TextBox.Size = UDim2.new(1, -1, 0, 30)
+		TextBox.ZIndex = Zindex + 1
+
+		BlockText.Name = Compkiller:_RandomString()
+		BlockText.Parent = TextBox
+		BlockText.AnchorPoint = Vector2.new(0, 0.5)
+		BlockText.BackgroundTransparency = 1.000
+		BlockText.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		BlockText.BorderSizePixel = 0
+		BlockText.Position = UDim2.new(0, 12, 0.5, 0)
+		BlockText.Size = UDim2.new(1, -20, 0, 25)
+		BlockText.ZIndex = Zindex + 2
+		BlockText.Font = Enum.Font.GothamMedium
+		BlockText.Text = Config.Name
+		BlockText.TextColor3 = Compkiller.Colors.SwitchColor
+		BlockText.TextSize = 14.000
+		BlockText.TextTransparency = 0.300
+		BlockText.TextXAlignment = Enum.TextXAlignment.Left
+
+		table.insert(Compkiller.Elements.SwitchColor,{
+			Element = BlockText,
+			Property = "TextColor3"
+		})
+
+		LinkValues.Name = Compkiller:_RandomString()
+		LinkValues.Parent = TextBox
+		LinkValues.AnchorPoint = Vector2.new(1, 0.540000021)
+		LinkValues.BackgroundColor3 = Compkiller.Colors.DropColor
+		LinkValues.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		LinkValues.BorderSizePixel = 0
+		LinkValues.Position = UDim2.new(1, -12, 0.5, 0)
+		LinkValues.Size = UDim2.new(0, 95, 0, 16)
+		LinkValues.ZIndex = Zindex + 3
+
+		table.insert(Compkiller.Elements.DropColor,{
+			Element = LinkValues,
+			Property = "BackgroundColor3"
+		})
+
+		UIStroke.Color = Compkiller.Colors.StrokeColor
+		UIStroke.Parent = LinkValues
+
+		table.insert(Compkiller.Elements.StrokeColor,{
+			Element = UIStroke,
+			Property = "Color"
+		})
+
+		UICorner.CornerRadius = UDim.new(0, 3)
+		UICorner.Parent = LinkValues
+
+		TextBox_2.Parent = LinkValues
+		TextBox_2.AnchorPoint = Vector2.new(0.5, 0.5)
+		TextBox_2.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+		TextBox_2.BackgroundTransparency = 1.000
+		TextBox_2.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		TextBox_2.BorderSizePixel = 0
+		TextBox_2.ClipsDescendants = true
+		TextBox_2.Position = UDim2.new(0.5, 0, 0.5, 0)
+		TextBox_2.Size = UDim2.new(1, -5, 1, 0)
+		TextBox_2.ZIndex = Zindex + 5
+		TextBox_2.ClearTextOnFocus = false
+		TextBox_2.Font = Enum.Font.GothamMedium
+		TextBox_2.PlaceholderText = Config.Placeholder
+		TextBox_2.Text = Config.Default
+		TextBox_2.TextColor3 = Compkiller.Colors.SwitchColor
+		TextBox_2.TextSize = 11.000
+
+		table.insert(Compkiller.Elements.SwitchColor,{
+			Element = TextBox_2,
+			Property = "TextColor3"
+		})
+
+		BlockLine.Name = Compkiller:_RandomString()
+		BlockLine.Parent = TextBox
+		BlockLine.AnchorPoint = Vector2.new(0.5, 1)
+		BlockLine.BackgroundColor3 = Compkiller.Colors.LineColor
+		BlockLine.BackgroundTransparency = 0.500
+		BlockLine.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		BlockLine.BorderSizePixel = 0
+		BlockLine.Position = UDim2.new(0.5, 0, 1, 0)
+		BlockLine.Size = UDim2.new(1, -26, 0, 1)
+		BlockLine.ZIndex = Zindex + 3;
+
+		table.insert(Compkiller.Elements.LineColor,{
+			Element = BlockLine,
+			Property = "BackgroundColor3"
+		})
+
+		local Update = function()
+			local scale = TextService:GetTextSize(TextBox_2.Text,TextBox_2.TextSize,TextBox_2.Font,Vector2.new(math.huge,math.huge));
+			local Base = TextService:GetTextSize(TextBox_2.PlaceholderText,TextBox_2.TextSize,TextBox_2.Font,Vector2.new(math.huge,math.huge));
+
+			local MainScale = ((scale.X > Base.X) and scale.X) or Base.X;
+
+			local xp = pcall(function()
+				Compkiller:_Animation(LinkValues,TweenInfo.new(0.25),{
+					Size = UDim2.fromOffset(math.clamp(MainScale + 7 , Base.X , TextBox.AbsoluteSize.X / 2) , 16)
+				})
+			end);
+
+			if not xp then
+				Compkiller:_Animation(LinkValues,TweenInfo.new(0.25),{
+					Size = UDim2.fromOffset(MainScale + 7 , 16)
+				})
+			end;
+		end;
+
+		local parse = function(text)
+			if not text then
+				return "";	
+			end;
+
+			if Config.Numeric then
+				local out = string.gsub(tostring(text), '[^0-9.]', '')
+
+				if tonumber(out) then
+					return tonumber(out);
+				end;
+
+				return nil;
+			end;
+
+			return text;
+		end;
+
+		Update();
+
+		TextBox_2:GetPropertyChangedSignal('Text'):Connect(Update);
+
+		TextBox_2:GetPropertyChangedSignal('Text'):Connect(function()
+			local value = parse(TextBox_2.Text);
+
+			if value then
+
+				TextBox_2.Text = tostring(value);
+
+				task.spawn(Config.Callback,value);
+
+				Config.Default = value;
+			else
+				TextBox_2.Text = string.gsub(TextBox_2.Text, '[^0-9.]', '');
+
+				Config.Default = TextBox_2.Text;
+			end;
+		end);
+
+		local Args = {};
+
+		Args.Flag = Config.Flag;
+
+		function Args:SetText(str : string)
+			BlockText.Text = str or Config.Name
+		end;
+
+		function Args:GetText()
+			return BlockText.Text;
+		end;
+
+		function Args:SetValue(Value)
+			Config.Default = Value;
+
+			TextBox_2.Text = tostring(Config.Default);
+
+			Config.Callback(Value);
+		end;
+
+		Args.Signal = Signal:Connect(function(bool)
+			if bool then
+				Compkiller:_Animation(BlockText,TweenInfo.new(0.2),{
+					TextTransparency = 0.3
+				});
+
+				Compkiller:_Animation(BlockLine,TweenInfo.new(0.2),{
+					BackgroundTransparency = 0.5
+				});
+
+				Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
+					Transparency = 0
+				});
+
+				Compkiller:_Animation(LinkValues,TweenInfo.new(0.2),{
+					BackgroundTransparency = 0
+				});
+
+			else
+				Compkiller:_Animation(BlockText,TweenInfo.new(0.2),{
+					TextTransparency = 1
+				});
+
+				Compkiller:_Animation(BlockLine,TweenInfo.new(0.2),{
+					BackgroundTransparency = 1
+				});
+
+				Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
+					Transparency = 1
+				});
+
+				Compkiller:_Animation(LinkValues,TweenInfo.new(0.2),{
+					BackgroundTransparency = 1
+				});
+
+			end;
+		end);
+
+		function Args:GetValue()
+			return Config.Default;
+		end;
+
+		if Config.Flag then
+			Compkiller.Flags[Config.Flag] = Args;
+		end;
+
+		return Args;
+	end;
+
+
+-- ────────────────────────────────────────────────────────────────────────────────────────
+-- ║ → Dropdowns (including AddLinkOption / LinkValues) ────────────────────────── (5.4) ║
+-- ────────────────────────────────────────────────────────────────────────────────────────
+
+function Args:AddDropdown(Config : Dropdown)
+		Config = Compkiller.__CONFIG(Config,{
+			Name = "Dropdown",
+			Default = nil,
+			Values = {"Item 1","Item 2","Item 3"},
+			Multi = true, 
+			Callback = function() 
+			end;
+		});
+
+		local DaTabarser = function(value)
+			if not value then return 'Empty Configuration'; end;
+
+			local Out = "";
+
+			if typeof(value) == 'table' then
+				if #value > 0 then
+					local x = {};
+					for i,v in ipairs(value) do
+						table.insert(x , tostring(v))
+					end;
+					Out = table.concat(x, ', ');
+				else
+					local x = {};
+					for i,v in pairs(value) do
+						if v == true then
+							table.insert(x , tostring(i));
+						end			
+					end;
+					Out = table.concat(x, ', ');
+				end;
+			else
+				Out = tostring(value);
+			end;
+			
+			if Out == "" then return "Empty Configuration" end
+			
+			-- Truncate logic for modern clean UI
+			if string.len(Out) > 28 then
+				Out = string.sub(Out, 1, 25) .. "..."
+			end
+
+			return Out;
+		end;
+
+		local Dropdown = Instance.new("Frame")
+		local BlockText = Instance.new("TextLabel")
+		local LinkValues = Instance.new("Frame")
+		local UIListLayout = Instance.new("UIListLayout")
+		local ValueItems = Instance.new("Frame")
+		local UIScale = Instance.new("UIScale") -- Added for physical bounce effect
+		local UIStroke = Instance.new("UIStroke")
+		local UICorner = Instance.new("UICorner")
+		local ValueText = Instance.new("TextLabel")
+		local MainButton = Instance.new("ImageButton")
+		local ClearButton = Instance.new("ImageButton") -- Added for quick clear
+
+		Dropdown.Name = Compkiller:_RandomString()
+		Dropdown.Parent = Parent
+		Dropdown.BackgroundTransparency = 1.000
+		Dropdown.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		Dropdown.BorderSizePixel = 0
+		Dropdown.Size = UDim2.new(1, -1, 0, 65) -- Increased height to fit label + gap + box
+		Dropdown.ZIndex = Zindex + 2
+
+		-- Modernized Meta Label
+		BlockText.Name = Compkiller:_RandomString()
+		BlockText.Parent = Dropdown
+		BlockText.BackgroundTransparency = 1.000
+		BlockText.BorderColor3 = Color3.fromRGB(0, 0, 0)
+		BlockText.BorderSizePixel = 0
+		BlockText.Position = UDim2.new(0, 12, 0, 0)
+		BlockText.Size = UDim2.new(1, -20, 0, 15)
+		BlockText.ZIndex = Zindex + 3
+		BlockText.Font = Enum.Font.GothamBold
+		BlockText.Text = string.upper(Config.Name)
+		BlockText.TextColor3 = Color3.fromRGB(138, 138, 147) -- Subtle zinc/gray
+		BlockText.TextSize = 10.000
+		BlockText.TextTransparency = 0.100
+		BlockText.TextXAlignment = Enum.TextXAlignment.Left
+
+		table.insert(Compkiller.Elements.SwitchColor , {
+			Element = BlockText,
+			Property = 'TextColor3'
+		});
+
 		LinkValues.Name = Compkiller:_RandomString()
 		LinkValues.Parent = Dropdown
-		LinkValues.AnchorPoint = Vector2.new(1, 0.540000021)
+		LinkValues.AnchorPoint = Vector2.new(1, 0)
 		LinkValues.BackgroundTransparency = 1.000
 		LinkValues.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		LinkValues.BorderSizePixel = 0
-		LinkValues.Position = UDim2.new(1, -12, 0, 15)
+		LinkValues.Position = UDim2.new(1, -12, 0, -2)
 		LinkValues.Size = UDim2.new(1, 0, 0, 18)
 		LinkValues.ZIndex = Zindex + 3
 
@@ -4948,21 +5040,24 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		UIListLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 		UIListLayout.Padding = UDim.new(0, 8)
 
+		-- Main Trigger Box
 		ValueItems.Name = Compkiller:_RandomString()
 		ValueItems.Parent = Dropdown
-		ValueItems.AnchorPoint = Vector2.new(0.5, 1)
+		ValueItems.AnchorPoint = Vector2.new(0.5, 0)
 		ValueItems.BackgroundColor3 = Compkiller.Colors.DropColor
 		ValueItems.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		ValueItems.BorderSizePixel = 0
-		ValueItems.ClipsDescendants = true
-		ValueItems.Position = UDim2.new(0.5, 0, 1, -7)
-		ValueItems.Size = UDim2.new(1, -25, 0, 18)
+		ValueItems.Position = UDim2.new(0.5, 0, 0, 18) -- Positioned below text
+		ValueItems.Size = UDim2.new(1, -16, 0, 44) -- Taller, chunkier touch target
 		ValueItems.ZIndex = Zindex + 5
 
 		table.insert(Compkiller.Elements.DropColor , {
 			Element = ValueItems,
 			Property = "BackgroundColor3"
 		})
+		
+		UIScale.Parent = ValueItems
+		UIScale.Scale = 1
 
 		UIStroke.Color = Compkiller.Colors.StrokeColor
 		UIStroke.Parent = ValueItems
@@ -4972,22 +5067,22 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Property = "Color"
 		});
 
-		UICorner.CornerRadius = UDim.new(0, 3)
+		UICorner.CornerRadius = UDim.new(0, 10) -- Smoother, modern radius
 		UICorner.Parent = ValueItems
 
 		ValueText.Name = Compkiller:_RandomString()
 		ValueText.Parent = ValueItems
-		ValueText.AnchorPoint = Vector2.new(0.5, 0.5)
+		ValueText.AnchorPoint = Vector2.new(0, 0.5)
 		ValueText.BackgroundTransparency = 1.000
 		ValueText.BorderColor3 = Color3.fromRGB(0, 0, 0)
 		ValueText.BorderSizePixel = 0
-		ValueText.Position = UDim2.new(0.5, 0, 0.5, 0)
-		ValueText.Size = UDim2.new(1, -10, 0, 15)
+		ValueText.Position = UDim2.new(0, 16, 0.5, 0)
+		ValueText.Size = UDim2.new(1, -60, 0, 15)
 		ValueText.ZIndex = Zindex + 8
-		ValueText.Font = Enum.Font.Gotham
+		ValueText.Font = Enum.Font.GothamMedium
 		ValueText.Text = DaTabarser(Config.Default)
 		ValueText.TextColor3 = Compkiller.Colors.SwitchColor
-		ValueText.TextSize = 11.000
+		ValueText.TextSize = 13.000
 		ValueText.TextXAlignment = Enum.TextXAlignment.Left
 
 		table.insert(Compkiller.Elements.SwitchColor , {
@@ -4995,29 +5090,54 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			Property = 'TextColor3'
 		});
 
+		-- Chevron Icon
 		MainButton.Name = Compkiller:_RandomString()
 		MainButton.Parent = ValueItems
 		MainButton.AnchorPoint = Vector2.new(1, 0.5)
 		MainButton.BackgroundTransparency = 1.000
-		MainButton.BorderColor3 = Color3.fromRGB(0, 0, 0)
-		MainButton.BorderSizePixel = 0
-		MainButton.Position = UDim2.new(1, -5, 0.5, 0)
-		MainButton.Size = UDim2.new(0, 13, 0, 13)
+		MainButton.Position = UDim2.new(1, -16, 0.5, 0)
+		MainButton.Size = UDim2.new(0, 14, 0, 14)
 		MainButton.ZIndex = Zindex + 5
 		MainButton.Image = Compkiller:CacheImage("rbxassetid://109535175596957")
+		MainButton.ImageColor3 = Color3.fromRGB(161, 161, 170) -- zinc-400 equivalent
+		
+		-- Clear All "X" Button
+		ClearButton.Name = Compkiller:_RandomString()
+		ClearButton.Parent = ValueItems
+		ClearButton.AnchorPoint = Vector2.new(1, 0.5)
+		ClearButton.BackgroundTransparency = 1.000
+		ClearButton.Position = UDim2.new(1, -38, 0.5, 0)
+		ClearButton.Size = UDim2.new(0, 16, 0, 16)
+		ClearButton.ZIndex = Zindex + 9
+		ClearButton.Image = Compkiller:CacheImage("rbxassetid://11293981586") -- Roblox standard clear icon
+		ClearButton.ImageColor3 = Color3.fromRGB(161, 161, 170)
+		ClearButton.ImageTransparency = (DaTabarser(Config.Default) == "Empty Configuration") and 1 or 0
 
+		-- Hover Effects for Trigger Box
 		Compkiller:_Hover(ValueItems,function()
-			Compkiller:_Animation(ValueItems,TweenInfo.new(0.3),{
+			Compkiller:_Animation(ValueItems,TweenInfo.new(0.2),{
 				BackgroundColor3 = Compkiller.Colors.MouseEnter
 			});
 		end,function()
-			Compkiller:_Animation(ValueItems,TweenInfo.new(0.3),{
+			Compkiller:_Animation(ValueItems,TweenInfo.new(0.2),{
 				BackgroundColor3 = Compkiller.Colors.DropColor
 			});
 		end);
 
 		local repi;
 		local Button = Compkiller:_Input(ValueItems);
+		
+		-- Physical Bounce Animation
+		Button.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				Compkiller:_Animation(UIScale, TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Scale = 0.97})
+			end
+		end)
+		Button.InputEnded:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				Compkiller:_Animation(UIScale, TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Scale = 1})
+			end
+		end)
 
 		repi = Compkiller:_LoadDropdown(Button,function(value)
 			Config.Default = value;
@@ -5026,17 +5146,34 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 			repi:SetDefault(Config.Default);
 
 			ValueText.Text = DaTabarser(Config.Default);
+			
+			-- Toggle Clear Button logic based on emptiness
+			if ValueText.Text == "Empty Configuration" then
+				Compkiller:_Animation(ClearButton, TweenInfo.new(0.2), {ImageTransparency = 1})
+			else
+				Compkiller:_Animation(ClearButton, TweenInfo.new(0.2), {ImageTransparency = 0})
+			end
 
 			Config.Callback(Config.Default);
 		end);
+		
+		-- Logic for the Clear Button
+		ClearButton.MouseButton1Click:Connect(function()
+			Config.Default = Config.Multi and {} or nil
+			ValueText.Text = DaTabarser(Config.Default)
+			repi:SetData(Config.Default, Config.Values, Config.Multi, true)
+			repi:SetDefault(Config.Default)
+			Compkiller:_Animation(ClearButton, TweenInfo.new(0.2), {ImageTransparency = 1})
+			Config.Callback(Config.Default)
+		end)
 
 		repi.EventOut:Connect(function(v)
 			if v then
-				Compkiller:_Animation(MainButton,TweenInfo.new(0.2),{
+				Compkiller:_Animation(MainButton,TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out),{
 					Rotation = -180
 				})
 			else
-				Compkiller:_Animation(MainButton,TweenInfo.new(0.2),{
+				Compkiller:_Animation(MainButton,TweenInfo.new(0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out),{
 					Rotation = 0
 				})
 			end;
@@ -5051,16 +5188,20 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		function Args:SetValue(Value)
 			Config.Default = Value;
-
 			ValueText.Text = DaTabarser(Config.Default);
-
 			repi:SetData(Config.Default,Config.Values,Config.Multi,true);
-
+			
+			if ValueText.Text == "Empty Configuration" then
+				Compkiller:_Animation(ClearButton, TweenInfo.new(0.2), {ImageTransparency = 1})
+			else
+				Compkiller:_Animation(ClearButton, TweenInfo.new(0.2), {ImageTransparency = 0})
+			end
+			
 			Config.Callback(Value);
 		end;
 
 		function Args:SetText(str : string)
-			BlockText.Text = str or Config.Name
+			BlockText.Text = string.upper(str or Config.Name)
 		end;
 
 
@@ -5070,59 +5211,26 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 
 		function Args:SetValues(v)
 			Config.Values = v;
-
 			repi:SetData(Config.Default,Config.Values,Config.Multi,true);
 		end;
 
 		Args.Signal = Signal:Connect(function(bool)
 			if bool then
-				Compkiller:_Animation(BlockText,TweenInfo.new(0.2),{
-					TextTransparency = 0.100
-				});
-
-				Compkiller:_Animation(BlockLine,TweenInfo.new(0.2),{
-					BackgroundTransparency = 0.100
-				});
-
-				Compkiller:_Animation(ValueItems,TweenInfo.new(0.2),{
-					BackgroundTransparency = 0
-				});
-
-				Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
-					Transparency = 0
-				});
-
-				Compkiller:_Animation(ValueText,TweenInfo.new(0.32),{
-					TextTransparency = 0
-				});
-
-				Compkiller:_Animation(MainButton,TweenInfo.new(0.2),{
-					ImageTransparency = 0
-				});
+				Compkiller:_Animation(BlockText,TweenInfo.new(0.2),{TextTransparency = 0.100});
+				Compkiller:_Animation(ValueItems,TweenInfo.new(0.2),{BackgroundTransparency = 0});
+				Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{Transparency = 0});
+				Compkiller:_Animation(ValueText,TweenInfo.new(0.32),{TextTransparency = 0});
+				Compkiller:_Animation(MainButton,TweenInfo.new(0.2),{ImageTransparency = 0});
+				if ValueText.Text ~= "Empty Configuration" then
+					Compkiller:_Animation(ClearButton,TweenInfo.new(0.2),{ImageTransparency = 0});
+				end
 			else
-				Compkiller:_Animation(BlockText,TweenInfo.new(0.2),{
-					TextTransparency = 1
-				});
-
-				Compkiller:_Animation(BlockLine,TweenInfo.new(0.2),{
-					BackgroundTransparency = 1 
-				});
-
-				Compkiller:_Animation(ValueItems,TweenInfo.new(0.2),{
-					BackgroundTransparency = 1
-				});
-
-				Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{
-					Transparency = 1
-				});
-
-				Compkiller:_Animation(ValueText,TweenInfo.new(0.2),{
-					TextTransparency = 1
-				});
-
-				Compkiller:_Animation(MainButton,TweenInfo.new(0.2),{
-					ImageTransparency = 1
-				});
+				Compkiller:_Animation(BlockText,TweenInfo.new(0.2),{TextTransparency = 1});
+				Compkiller:_Animation(ValueItems,TweenInfo.new(0.2),{BackgroundTransparency = 1});
+				Compkiller:_Animation(UIStroke,TweenInfo.new(0.2),{Transparency = 1});
+				Compkiller:_Animation(ValueText,TweenInfo.new(0.2),{TextTransparency = 1});
+				Compkiller:_Animation(MainButton,TweenInfo.new(0.2),{ImageTransparency = 1});
+				Compkiller:_Animation(ClearButton,TweenInfo.new(0.2),{ImageTransparency = 1});
 			end;
 		end);
 
@@ -5144,17 +5252,12 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		end;
 
 		return Args;
-	end;
-
-
-
-
-
-
-
-
-	return Args;
 end;
+
+
+
+
+
 
 function Compkiller:GetTheme()
 	return Compkiller.Colors;
@@ -5971,7 +6074,7 @@ function Compkiller.new(Config : Window)
 
 	function WindowArgs:SetVisible(bool: boolean)
 		CompKiller.Enabled = bool;
-	end;
+end;
 
 
 -- ══════════════════════════════════════════════════════════════════════════════════════════
