@@ -4447,7 +4447,7 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		local BlockLine = Instance.new("Frame")
 		
 		local HelperIcon = Instance.new("ImageLabel")
-		local Tooltip = Instance.new("Frame")
+		local Tooltip = Instance.new("CanvasGroup")
 		local TooltipCorner = Instance.new("UICorner")
 		local TooltipStroke = Instance.new("UIStroke")
 		local TooltipText = Instance.new("TextLabel")
@@ -4647,7 +4647,8 @@ function Compkiller:_LoadElement(Parent: Frame , EnabledLine: boolean , Signal ,
 		ToggleBtn.ZIndex = Zindex + 5
 
 		ToggleBtn.MouseButton1Click:Connect(function()
-			Args:SetState(not Toggled)
+			Toggled = not Toggled
+			Args:SetState(Toggled)
 			if Args.Signal then Args.Signal:Fire(Toggled) end
 		end)
 
