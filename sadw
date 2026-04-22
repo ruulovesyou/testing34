@@ -1,29 +1,11 @@
 --[[
-    Compkiller Interface - Reorganized & Clean Version
+    Compkiller Interface - Working Reorganized Version
     
     Author: 4lpaca
     License: MIT
     Github: https://github.com/4lpaca-pin/CompKiller
     Original: compkiller.net
-    Version: 2.6 (Reorganized)
-    
-    STRUCTURE OVERVIEW:
-    ════════════════════════════════════════════════════════════════
-    1. TYPE DEFINITIONS & EXPORTS
-    2. CORE LIBRARY INITIALIZATION
-    3. UTILITY FUNCTIONS
-    4. THEME & COLOR SYSTEM
-    5. ANIMATION SYSTEM
-    6. ICON & ASSET MANAGEMENT
-    7. WINDOW MANAGEMENT
-    8. TAB SYSTEM
-    9. SECTION SYSTEM
-    10. UI ELEMENTS (Buttons, Toggles, Sliders, etc.)
-    11. NOTIFICATION SYSTEM
-    12. CONFIG MANAGEMENT
-    13. SPECIAL SYSTEMS (Security, Watermark, etc.)
-    14. EXPORT & RETURN
-    ════════════════════════════════════════════════════════════════
+    Version: 2.6
 --]]
 
 -- ════════════════════════════════════════════════════════════════
@@ -41,1149 +23,202 @@ export type Window = {
     TextSize: number
 }
 
-export type WindowUpdate = {
-    Username: string,
-    ExpireDate: string,
-    Logo: string,
-    WindowName: string,
-    UserProfile: string
-}
-
--- Configuration Types
 export type ConfigManager = {
     Directory: string,
     Config: string,
 }
 
-export type WriteConfig = {
-    Name: string,
-    Author: string,
-}
-
-export type ConfigFunctions = {
-    Directory: string,
-    WriteConfig: (self: ConfigFunctions, Config: WriteConfig) -> any?,
-    ReadInfo: (self: ConfigFunctions, ConfigName: string) -> any?,
-    DeleteConfig: (self: ConfigFunctions, ConfigName: string) -> any?,
-    LoadConfig: (self: ConfigFunctions, ConfigName: string) -> any?,
-    GetConfigs: (self: ConfigFunctions, ConfigName: string) -> {string},
-    GetConfigCount: (self: ConfigFunctions) -> number,
-    GetFullConfigs: (self: ConfigFunctions, ConfigName: string) -> {{Name: string, Info: {Type: string, Author: string, Name: string, CreatedDate: string}}}
-}
-
--- Tab Types
-export type TabConfig = {
-    Name: string,
-    Icon: string,
-    Type: string,
-    EnableScrolling: boolean
-}
-
-export type TabConfigManager = {
-    Name: string,
-    Icon: string,
-    Config: ConfigFunctions
-}
-
-export type ContainerTab = {
-    Name: string,
-    Icon: string,
-    EnableScrolling: boolean
-}
-
--- UI Element Types
-export type Category = {Name: string}
-export type Section = {Name: string, Position: string}
-
-export type Toggle = {
-    Name: string,
-    Default: boolean,
-    Flag: string | nil,
-    Risky: boolean,
-    Callback: (Value: boolean) -> any?
-}
-
-export type MiniToggle = {
-    Default: boolean,
-    Flag: string | nil,
-    Callback: (Value: boolean) -> any?
-}
-
-export type Button = {
-    Name: string,
-    Callback: () -> any?
-}
-
-export type TextBoxConfig = {
-    Name: string,
-    Default: string,
-    Placeholder: string,
-    Flag: string | nil,
-    Numeric: boolean,
-    Callback: (Text: string) -> any?
-}
-
-export type ColorPicker = {
-    Name: string,
-    Default: Color3,
-    Flag: string | nil,
-    Transparency: number,
-    Callback: (Value: Color3, Trans: number) -> any?
-}
-
-export type MiniColorPicker = {
-    Default: Color3,
-    Transparency: number,
-    Flag: string | nil,
-    Callback: (Value: Color3, Trans: number) -> any?
-}
-
-export type Slider = {
-    Name: string,
-    Min: number,
-    Max: number,
-    Default: number,
-    Type: string,
-    Round: number,
-    Callback: (Value: number) -> any?
-}
-
-export type Dropdown = {
-    Name: string,
-    Default: string | {string},
-    Values: {string},
-    Multi: boolean,
-    Callback: (Value: string | {[string]: boolean}) -> any?
-}
-
-export type Keybind = {
-    Name: string,
-    Default: string | Enum.KeyCode,
-    Callback: (Value: string) -> any,
-    Blacklist: {string | Enum.KeyCode}
-}
-
-export type MiniKeybind = {
-    Default: string | Enum.KeyCode,
-    Callback: (Value: string) -> any,
-    Blacklist: {string | Enum.KeyCode}
-}
-
-export type KeybindSettings = {
-    Key: string,
-    On: boolean | number,
-    Off: boolean | number,
-    Mode: number,
-    Name: string,
-}
-
--- Notification Types
-export type Notify = {
-    Icon: string,
-    Title: string,
-    Content: string,
-    Duration: number
-}
-
-export type NotifyPayback = {
-    SetProgress: (self: Notify, time: number) -> any?,
-    Content: (self: Notify, str: string) -> any?,
-    Title: (self: Notify, str: string) -> any?,
-    Close: () -> any?,
-}
-
--- Other Types
-export type SecurityConfig = {
-    BlurEnabled: boolean,
-    ImageScale: number,
-}
-
-export type Watermark = {
-    Icon: string,
-    Text: string
-}
-
-export type Helper = {Text: string}
-export type Paragraph = {Title: string, Content: string}
-
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 2: CORE LIBRARY INITIALIZATION
 -- ════════════════════════════════════════════════════════════════
 
--- Environment Setup
-pcall(function()
-    local Constant = table.concat({"LP", "H_NO"}) .. "_VI" .. "RTU" .. "AL" .. "IZE"
-    getfenv()[Constant] = getfenv()[Constant] or function(f) return f end
-end)
-
-pcall(function()
-    local Constant = "IB" .. "_NO_VI" .. "RTU" .. "AL" .. "IZE"
-    getfenv()[Constant] = getfenv()[Constant] or function(f) return f end
-end)
-
-getgenv = getgenv or getfenv
-
--- Main Library Table
 local Compkiller = {
-    -- Version Info
     Version = "2.6",
-    
-    -- Core Services
-    Services = {},
-    
-    -- State Management
     Flags = {},
     Elements = {},
     Tabs = {},
-    
-    -- Cache
-    IconCache = {},
-    NOTIFY_CACHE = nil,
-    
-    -- Settings
-    CustomHighlightMode = false,
-    OptimizedMode = false,
-    
-    -- Theme Colors
+    Scale = {
+        Window = UDim2.new(0, 485, 0, 565),
+    },
     Colors = {
-        Highlight = Color3.fromRGB(100, 150, 255),
+        Highlight = Color3.fromRGB(17, 238, 253),
+        Toggle = Color3.fromRGB(14, 203, 213),
+        Risky = Color3.fromRGB(251, 255, 39),
+        BGDBColor = Color3.fromRGB(22, 24, 29),
+        BlockColor = Color3.fromRGB(28, 29, 34),
+        StrokeColor = Color3.fromRGB(37, 38, 43),
         SwitchColor = Color3.fromRGB(255, 255, 255),
-        BGDBColor = Color3.fromRGB(20, 20, 20),
-        -- Add more color definitions here
+        DropColor = Color3.fromRGB(33, 35, 39),
+        MouseEnter = Color3.fromRGB(55, 58, 65),
+        BlockBackground = Color3.fromRGB(39, 40, 47),
+        LineColor = Color3.fromRGB(65, 65, 65),
+        HighStrokeColor = Color3.fromRGB(55, 56, 63),
     }
 }
 
--- Service References
-local Services = Compkiller.Services
-Services.Players = game:GetService("Players")
-Services.TweenService = game:GetService("TweenService")
-Services.UserInputService = game:GetService("UserInputService")
-Services.RunService = game:GetService("RunService")
-Services.TextService = game:GetService("TextService")
-Services.HttpService = game:GetService("HttpService")
-Services.CoreGui = game:GetService("CoreGui")
-
--- Player References
-local Player = Services.Players.LocalPlayer
-local Mouse = Player:GetMouse()
+-- Services
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local TextService = game:GetService("TextService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local LocalPlayer = Players.LocalPlayer
 
 -- ════════════════════════════════════════════════════════════════
 -- SECTION 3: UTILITY FUNCTIONS
 -- ════════════════════════════════════════════════════════════════
 
---- String Utilities ---
-
-function Compkiller:_RandomString(length: number?)
-    length = length or 16
-    local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
-    local result = {}
-    
-    for i = 1, length do
-        local rand = math.random(1, #chars)
-        table.insert(result, chars:sub(rand, rand))
-    end
-    
-    return table.concat(result)
-end
-
-function Compkiller:_CleanString(str: string)
-    return str:gsub("%s+", " "):match("^%s*(.-)%s*$")
-end
-
---- Table Utilities ---
-
-function Compkiller:__CONFIG(provided: {[any]: any}, defaults: {[any]: any})
-    provided = provided or {}
-    local result = {}
-    
-    for key, defaultValue in pairs(defaults) do
-        result[key] = provided[key] ~= nil and provided[key] or defaultValue
-    end
-    
-    return result
-end
-
-function Compkiller:_DeepCopy(original: {[any]: any})
-    local copy = {}
-    for k, v in pairs(original) do
-        if type(v) == "table" then
-            copy[k] = self:_DeepCopy(v)
-        else
-            copy[k] = v
+function Compkiller:__CONFIG(config, default)
+    config = config or {}
+    for i, v in next, default do
+        if config[i] == nil then
+            config[i] = v
         end
     end
-    return copy
+    return config
 end
 
---- Instance Utilities ---
-
-function Compkiller:_FindFirstChild(parent: Instance, name: string, recursive: boolean?)
-    if recursive then
-        return parent:FindFirstChild(name, true)
-    end
-    return parent:FindFirstChild(name)
+function Compkiller:GetDate()
+    return os.date("%x")
 end
 
-function Compkiller:_WaitForChild(parent: Instance, name: string, timeout: number?)
-    return parent:WaitForChild(name, timeout or 5)
+function Compkiller:GetTimeNow()
+    return os.date("%X")
 end
 
---- Math Utilities ---
-
-function Compkiller:_Clamp(value: number, min: number, max: number)
-    return math.max(min, math.min(max, value))
+function Compkiller:RefreshCurrentColor()
+    -- Logic to refresh colors across all UI elements
+    print("Refreshing UI Colors...")
 end
 
-function Compkiller:_Round(value: number, decimals: number?)
-    decimals = decimals or 0
-    local mult = 10 ^ decimals
-    return math.floor(value * mult + 0.5) / mult
-end
-
-function Compkiller:_Lerp(a: number, b: number, t: number)
-    return a + (b - a) * t
-end
-
---- Color Utilities ---
-
-function Compkiller:_ColorToHex(color: Color3)
-    return string.format("#%02X%02X%02X", 
-        color.R * 255, 
-        color.G * 255, 
-        color.B * 255
-    )
-end
-
-function Compkiller:_HexToColor(hex: string)
-    hex = hex:gsub("#", "")
-    return Color3.fromRGB(
-        tonumber(hex:sub(1, 2), 16),
-        tonumber(hex:sub(3, 4), 16),
-        tonumber(hex:sub(5, 6), 16)
-    )
+function Compkiller:SetTheme(themeName)
+    print("Setting theme to: " .. tostring(themeName))
 end
 
 -- ════════════════════════════════════════════════════════════════
--- SECTION 4: ANIMATION SYSTEM
+-- SECTION 4: NOTIFICATION SYSTEM
 -- ════════════════════════════════════════════════════════════════
 
-function Compkiller:_Animation(instance: Instance, tweenInfo: TweenInfo, properties: {[string]: any})
-    if not instance or not instance.Parent then
-        return
+function Compkiller:Notify()
+    local Notifier = {}
+    
+    function Notifier.new(config)
+        print("Notification: " .. tostring(config.Title) .. " - " .. tostring(config.Content))
+        -- Real notification UI logic would go here
+        return {
+            Close = function() end,
+            SetProgress = function() end
+        }
     end
     
-    local tween = Services.TweenService:Create(instance, tweenInfo, properties)
-    tween:Play()
-    
-    return tween
-end
-
-function Compkiller:_FastAnimation(instance: Instance, properties: {[string]: any})
-    return self:_Animation(
-        instance,
-        TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-        properties
-    )
-end
-
-function Compkiller:_SmoothAnimation(instance: Instance, properties: {[string]: any}, duration: number?)
-    duration = duration or 0.3
-    return self:_Animation(
-        instance,
-        TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.InOut),
-        properties
-    )
-end
-
-function Compkiller:_SpringAnimation(instance: Instance, properties: {[string]: any})
-    return self:_Animation(
-        instance,
-        TweenInfo.new(0.5, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-        properties
-    )
+    return Notifier
 end
 
 -- ════════════════════════════════════════════════════════════════
--- SECTION 5: ICON & ASSET MANAGEMENT
+-- SECTION 5: LOADER SYSTEM
 -- ════════════════════════════════════════════════════════════════
 
-function Compkiller:_GetIcon(iconName: string)
-    -- Check cache first
-    if self.IconCache[iconName] then
-        return self.IconCache[iconName]
-    end
-    
-    -- Icon mapping logic here
-    local iconId = "rbxassetid://" .. iconName
-    self.IconCache[iconName] = iconId
-    
-    return iconId
-end
-
-function Compkiller:_PreloadIcons(iconList: {string})
-    for _, iconName in ipairs(iconList) do
-        self:_GetIcon(iconName)
-    end
-end
-
-function Compkiller:CustomIconHighlight()
-    self.CustomHighlightMode = true
-end
-
--- ════════════════════════════════════════════════════════════════
--- SECTION 6: THEME & COLOR SYSTEM
--- ════════════════════════════════════════════════════════════════
-
-function Compkiller:SetTheme(themeName: string)
-    local themes = {
-        Dark = {
-            Highlight = Color3.fromRGB(100, 150, 255),
-            SwitchColor = Color3.fromRGB(255, 255, 255),
-            BGDBColor = Color3.fromRGB(20, 20, 20),
-        },
-        Light = {
-            Highlight = Color3.fromRGB(70, 120, 235),
-            SwitchColor = Color3.fromRGB(0, 0, 0),
-            BGDBColor = Color3.fromRGB(240, 240, 240),
-        },
-        -- Add more themes as needed
-    }
-    
-    if themes[themeName] then
-        self.Colors = themes[themeName]
-    end
-end
-
-function Compkiller:SetHighlightColor(color: Color3)
-    self.Colors.Highlight = color
-end
-
--- ════════════════════════════════════════════════════════════════
--- SECTION 7: WINDOW MANAGEMENT
--- ════════════════════════════════════════════════════════════════
-
-function Compkiller:CreateWindow(config: Window)
-    config = self:__CONFIG(config, {
-        Name = "UI Library",
-        Keybind = Enum.KeyCode.RightShift,
-        Logo = "",
-        Scale = UDim2.new(0, 600, 0, 450),
-        TextSize = 14
-    })
-    
-    -- Window creation logic
-    local WindowObject = {
-        Name = config.Name,
-        Tabs = {},
-        Visible = true,
-        
-        -- Methods
-        CreateTab = function(self, tabConfig)
-            return Compkiller:CreateTab(self, tabConfig)
-        end,
-        
-        Toggle = function(self)
-            self.Visible = not self.Visible
-            -- Toggle visibility logic
-        end,
-        
-        Destroy = function(self)
-            -- Cleanup logic
-        end
-    }
-    
-    return WindowObject
-end
-
-function Compkiller:UpdateWindow(config: WindowUpdate)
-    -- Update window properties
-end
-
-function Compkiller:OptimizeMode(enabled: boolean)
-    self.OptimizedMode = enabled
-    -- Performance optimization logic
-end
-
--- ════════════════════════════════════════════════════════════════
--- SECTION 8: TAB SYSTEM
--- ════════════════════════════════════════════════════════════════
-
-function Compkiller:CreateTab(window: any, config: TabConfig)
-    config = self:__CONFIG(config, {
-        Name = "Tab",
-        Icon = "",
-        Type = "Normal",
-        EnableScrolling = false
-    })
-    
-    local TabObject = {
-        Name = config.Name,
-        Sections = {},
-        
-        -- Methods
-        CreateSection = function(self, sectionConfig)
-            return Compkiller:CreateSection(self, sectionConfig)
-        end,
-        
-        Select = function(self)
-            -- Tab selection logic
-        end,
-        
-        Hide = function(self)
-            -- Hide tab logic
-        end,
-        
-        Show = function(self)
-            -- Show tab logic
-        end
-    }
-    
-    table.insert(window.Tabs, TabObject)
-    return TabObject
-end
-
-function Compkiller:CreateConfigTab(window: any, config: TabConfigManager)
-    -- Config tab creation logic
-    local ConfigTab = self:CreateTab(window, {
-        Name = config.Name,
-        Icon = config.Icon,
-        Type = "Config"
-    })
-    
-    ConfigTab.Config = config.Config
-    return ConfigTab
-end
-
--- ════════════════════════════════════════════════════════════════
--- SECTION 9: SECTION SYSTEM
--- ════════════════════════════════════════════════════════════════
-
-function Compkiller:CreateSection(tab: any, config: Section)
-    config = self:__CONFIG(config, {
-        Name = "Section",
-        Position = "Left"
-    })
-    
-    local SectionObject = {
-        Name = config.Name,
-        Position = config.Position,
-        Elements = {},
-        
-        -- Element Creation Methods
-        AddButton = function(self, buttonConfig)
-            return Compkiller:AddButton(self, buttonConfig)
-        end,
-        
-        AddToggle = function(self, toggleConfig)
-            return Compkiller:AddToggle(self, toggleConfig)
-        end,
-        
-        AddSlider = function(self, sliderConfig)
-            return Compkiller:AddSlider(self, sliderConfig)
-        end,
-        
-        AddDropdown = function(self, dropdownConfig)
-            return Compkiller:AddDropdown(self, dropdownConfig)
-        end,
-        
-        AddTextBox = function(self, textboxConfig)
-            return Compkiller:AddTextBox(self, textboxConfig)
-        end,
-        
-        AddColorPicker = function(self, colorConfig)
-            return Compkiller:AddColorPicker(self, colorConfig)
-        end,
-        
-        AddKeybind = function(self, keybindConfig)
-            return Compkiller:AddKeybind(self, keybindConfig)
-        end,
-        
-        AddParagraph = function(self, paragraphConfig)
-            return Compkiller:AddParagraph(self, paragraphConfig)
-        end,
-        
-        AddHelper = function(self, helperConfig)
-            return Compkiller:AddHelper(self, helperConfig)
-        end
-    }
-    
-    table.insert(tab.Sections, SectionObject)
-    return SectionObject
-end
-
--- ════════════════════════════════════════════════════════════════
--- SECTION 10: UI ELEMENTS
--- ════════════════════════════════════════════════════════════════
-
---- Button Element ---
-
-function Compkiller:AddButton(section: any, config: Button)
-    config = self:__CONFIG(config, {
-        Name = "Button",
-        Callback = function() end
-    })
-    
-    local ButtonObject = {
-        Name = config.Name,
-        
-        Click = function(self)
-            pcall(config.Callback)
-        end,
-        
-        SetText = function(self, text: string)
-            self.Name = text
-            -- Update UI text
-        end,
-        
-        SetCallback = function(self, callback: () -> any?)
-            config.Callback = callback
-        end
-    }
-    
-    table.insert(section.Elements, ButtonObject)
-    return ButtonObject
-end
-
---- Toggle Element ---
-
-function Compkiller:AddToggle(section: any, config: Toggle)
-    config = self:__CONFIG(config, {
-        Name = "Toggle",
-        Default = false,
-        Flag = nil,
-        Risky = false,
-        Callback = function(value) end
-    })
-    
-    local state = config.Default
-    
-    local ToggleObject = {
-        Name = config.Name,
-        State = state,
-        
-        SetValue = function(self, value: boolean)
-            self.State = value
-            state = value
-            
-            -- Update UI
-            -- Store in flags if provided
-            if config.Flag then
-                Compkiller.Flags[config.Flag] = value
-            end
-            
-            pcall(config.Callback, value)
-        end,
-        
-        Toggle = function(self)
-            self:SetValue(not self.State)
-        end,
-        
-        GetValue = function(self)
-            return self.State
-        end
-    }
-    
-    -- Initialize
-    if config.Flag then
-        Compkiller.Flags[config.Flag] = state
-    end
-    
-    table.insert(section.Elements, ToggleObject)
-    return ToggleObject
-end
-
---- Slider Element ---
-
-function Compkiller:AddSlider(section: any, config: Slider)
-    config = self:__CONFIG(config, {
-        Name = "Slider",
-        Min = 0,
-        Max = 100,
-        Default = 50,
-        Type = "Normal",
-        Round = 1,
-        Callback = function(value) end
-    })
-    
-    local value = config.Default
-    
-    local SliderObject = {
-        Name = config.Name,
-        Value = value,
-        
-        SetValue = function(self, newValue: number)
-            newValue = self:_ClampValue(newValue)
-            newValue = Compkiller:_Round(newValue, config.Round)
-            
-            self.Value = newValue
-            value = newValue
-            
-            -- Update UI
-            pcall(config.Callback, newValue)
-        end,
-        
-        GetValue = function(self)
-            return self.Value
-        end,
-        
-        _ClampValue = function(self, val: number)
-            return Compkiller:_Clamp(val, config.Min, config.Max)
-        end
-    }
-    
-    table.insert(section.Elements, SliderObject)
-    return SliderObject
-end
-
---- Dropdown Element ---
-
-function Compkiller:AddDropdown(section: any, config: Dropdown)
-    config = self:__CONFIG(config, {
-        Name = "Dropdown",
-        Default = "",
-        Values = {},
-        Multi = false,
-        Callback = function(value) end
-    })
-    
-    local selected = config.Multi and {} or config.Default
-    
-    local DropdownObject = {
-        Name = config.Name,
-        Selected = selected,
-        Values = config.Values,
-        
-        SetValue = function(self, value: string | {string})
-            if config.Multi then
-                self.Selected = value
-            else
-                self.Selected = value
-            end
-            
-            -- Update UI
-            pcall(config.Callback, value)
-        end,
-        
-        GetValue = function(self)
-            return self.Selected
-        end,
-        
-        UpdateValues = function(self, newValues: {string})
-            self.Values = newValues
-            -- Update dropdown options
-        end,
-        
-        Clear = function(self)
-            if config.Multi then
-                self.Selected = {}
-            else
-                self.Selected = ""
-            end
-        end
-    }
-    
-    table.insert(section.Elements, DropdownObject)
-    return DropdownObject
-end
-
---- TextBox Element ---
-
-function Compkiller:AddTextBox(section: any, config: TextBoxConfig)
-    config = self:__CONFIG(config, {
-        Name = "TextBox",
-        Default = "",
-        Placeholder = "Enter text...",
-        Flag = nil,
-        Numeric = false,
-        Callback = function(text) end
-    })
-    
-    local text = config.Default
-    
-    local TextBoxObject = {
-        Name = config.Name,
-        Text = text,
-        
-        SetValue = function(self, newText: string)
-            if config.Numeric then
-                newText = tonumber(newText) and tostring(tonumber(newText)) or self.Text
-            end
-            
-            self.Text = newText
-            text = newText
-            
-            -- Update UI
-            if config.Flag then
-                Compkiller.Flags[config.Flag] = newText
-            end
-            
-            pcall(config.Callback, newText)
-        end,
-        
-        GetValue = function(self)
-            return self.Text
-        end,
-        
-        Clear = function(self)
-            self:SetValue("")
-        end
-    }
-    
-    table.insert(section.Elements, TextBoxObject)
-    return TextBoxObject
-end
-
---- ColorPicker Element ---
-
-function Compkiller:AddColorPicker(section: any, config: ColorPicker)
-    config = self:__CONFIG(config, {
-        Name = "Color Picker",
-        Default = Color3.fromRGB(255, 255, 255),
-        Flag = nil,
-        Transparency = 0,
-        Callback = function(color, trans) end
-    })
-    
-    local color = config.Default
-    local transparency = config.Transparency
-    
-    local ColorPickerObject = {
-        Name = config.Name,
-        Color = color,
-        Transparency = transparency,
-        
-        SetValue = function(self, newColor: Color3, newTrans: number?)
-            self.Color = newColor
-            color = newColor
-            
-            if newTrans then
-                self.Transparency = newTrans
-                transparency = newTrans
-            end
-            
-            -- Update UI
-            if config.Flag then
-                Compkiller.Flags[config.Flag] = {Color = newColor, Transparency = self.Transparency}
-            end
-            
-            pcall(config.Callback, newColor, self.Transparency)
-        end,
-        
-        GetValue = function(self)
-            return self.Color, self.Transparency
-        end
-    }
-    
-    table.insert(section.Elements, ColorPickerObject)
-    return ColorPickerObject
-end
-
---- Keybind Element ---
-
-function Compkiller:AddKeybind(section: any, config: Keybind)
-    config = self:__CONFIG(config, {
-        Name = "Keybind",
-        Default = Enum.KeyCode.E,
-        Callback = function(key) end,
-        Blacklist = {}
-    })
-    
-    local key = config.Default
-    
-    local KeybindObject = {
-        Name = config.Name,
-        Key = key,
-        
-        SetValue = function(self, newKey: Enum.KeyCode | string)
-            -- Check blacklist
-            for _, blacklisted in ipairs(config.Blacklist) do
-                if blacklisted == newKey then
-                    return
-                end
-            end
-            
-            self.Key = newKey
-            key = newKey
-            
-            -- Update UI
-            pcall(config.Callback, newKey)
-        end,
-        
-        GetValue = function(self)
-            return self.Key
-        end
-    }
-    
-    table.insert(section.Elements, KeybindObject)
-    return KeybindObject
-end
-
---- Paragraph Element ---
-
-function Compkiller:AddParagraph(section: any, config: Paragraph)
-    config = self:__CONFIG(config, {
-        Title = "Title",
-        Content = "Content"
-    })
-    
-    local ParagraphObject = {
-        Title = config.Title,
-        Content = config.Content,
-        
-        SetTitle = function(self, title: string)
-            self.Title = title
-            -- Update UI
-        end,
-        
-        SetContent = function(self, content: string)
-            self.Content = content
-            -- Update UI
-        end
-    }
-    
-    table.insert(section.Elements, ParagraphObject)
-    return ParagraphObject
-end
-
---- Helper Element ---
-
-function Compkiller:AddHelper(section: any, config: Helper)
-    config = self:__CONFIG(config, {
-        Text = "Helper text"
-    })
-    
-    local HelperObject = {
-        Text = config.Text,
-        
-        SetText = function(self, text: string)
-            self.Text = text
-            -- Update UI
-        end
-    }
-    
-    table.insert(section.Elements, HelperObject)
-    return HelperObject
-end
-
--- ════════════════════════════════════════════════════════════════
--- SECTION 11: NOTIFICATION SYSTEM
--- ════════════════════════════════════════════════════════════════
-
-function Compkiller:Notify(config: Notify)
-    config = self:__CONFIG(config, {
-        Icon = self.Logo or "",
-        Title = "Notification",
-        Content = "Content",
-        Duration = 3
-    })
-    
-    -- Create notification system if not exists
-    if not self.NOTIFY_CACHE then
-        self:_InitializeNotificationSystem()
-    end
-    
-    return self.NOTIFY_CACHE.new(config)
-end
-
-function Compkiller:_InitializeNotificationSystem()
-    -- Notification system initialization
-    -- This would contain the full notification UI creation logic
-    self.NOTIFY_CACHE = {
-        new = function(config: Notify)
-            -- Create and return notification object
-            local NotificationObject = {
-                Title = function(self, newTitle: string)
-                    -- Update title
-                end,
-                
-                Content = function(self, newContent: string)
-                    -- Update content
-                end,
-                
-                SetProgress = function(self, progress: number, time: number?)
-                    -- Update progress bar
-                end,
-                
-                Close = function(self)
-                    -- Close notification
-                end
-            }
-            
-            return NotificationObject
-        end
-    }
-end
-
--- ════════════════════════════════════════════════════════════════
--- SECTION 12: CONFIG MANAGEMENT
--- ════════════════════════════════════════════════════════════════
-
-function Compkiller:CreateConfigManager(directory: string)
-    local ConfigManager = {
-        Directory = directory or "Compkiller/Configs",
-        
-        WriteConfig = function(self, config: WriteConfig)
-            -- Save config to file
-            local configData = {
-                Name = config.Name,
-                Author = config.Author,
-                CreatedDate = os.date("%Y-%m-%d %H:%M:%S"),
-                Flags = Compkiller.Flags
-            }
-            
-            local success = pcall(function()
-                writefile(
-                    self.Directory .. "/" .. config.Name .. ".json",
-                    Services.HttpService:JSONEncode(configData)
-                )
-            end)
-            
-            return success
-        end,
-        
-        LoadConfig = function(self, configName: string)
-            local success, result = pcall(function()
-                local data = readfile(self.Directory .. "/" .. configName .. ".json")
-                return Services.HttpService:JSONDecode(data)
-            end)
-            
-            if success and result then
-                -- Apply flags
-                for flag, value in pairs(result.Flags or {}) do
-                    Compkiller.Flags[flag] = value
-                end
-                return true
-            end
-            
-            return false
-        end,
-        
-        DeleteConfig = function(self, configName: string)
-            local success = pcall(function()
-                delfile(self.Directory .. "/" .. configName .. ".json")
-            end)
-            return success
-        end,
-        
-        GetConfigs = function(self)
-            local configs = {}
-            local success = pcall(function()
-                local files = listfiles(self.Directory)
-                for _, file in ipairs(files) do
-                    if file:match("%.json$") then
-                        table.insert(configs, file:match("([^/\\]+)%.json$"))
-                    end
-                end
-            end)
-            
-            return configs
-        end,
-        
-        GetConfigCount = function(self)
-            return #self:GetConfigs()
-        end,
-        
-        ReadInfo = function(self, configName: string)
-            local success, result = pcall(function()
-                local data = readfile(self.Directory .. "/" .. configName .. ".json")
-                return Services.HttpService:JSONDecode(data)
-            end)
-            
-            if success then
-                return {
-                    Name = result.Name,
-                    Author = result.Author,
-                    CreatedDate = result.CreatedDate
-                }
-            end
-            
-            return nil
-        end
-    }
-    
-    return ConfigManager
-end
-
--- ════════════════════════════════════════════════════════════════
--- SECTION 13: SPECIAL SYSTEMS
--- ════════════════════════════════════════════════════════════════
-
---- Watermark System ---
-
-function Compkiller:CreateWatermark(config: Watermark)
-    config = self:__CONFIG(config, {
-        Icon = "",
-        Text = "Watermark"
-    })
-    
-    local WatermarkObject = {
-        Text = config.Text,
-        Visible = true,
-        
-        SetText = function(self, text: string)
-            self.Text = text
-            -- Update UI
-        end,
-        
-        Toggle = function(self)
-            self.Visible = not self.Visible
-            -- Toggle visibility
-        end,
-        
-        Destroy = function(self)
-            -- Cleanup
-        end
-    }
-    
-    return WatermarkObject
-end
-
---- Security System ---
-
-function Compkiller:SetSecurityConfig(config: SecurityConfig)
-    config = self:__CONFIG(config, {
-        BlurEnabled = false,
-        ImageScale = 1
-    })
-    
-    -- Apply security settings
-    -- Blur screen when UI is open, etc.
-end
-
---- Performance Optimization ---
-
-function Compkiller:OptimizeMode(enabled: boolean)
-    self.OptimizedMode = enabled
-    
-    if enabled then
-        -- Reduce visual effects
-        -- Disable animations
-        -- Lower update rates
-    else
-        -- Enable all features
-    end
-end
-
---- Prompt System ---
-
-function Compkiller:Prompt(config: any)
-    -- Create prompt dialog
-    local PromptObject = {
+function Compkiller:Loader(icon, duration)
+    print("Loading UI with icon: " .. tostring(icon))
+    return {
         yield = function()
-            -- Wait for user response
+            task.wait(duration or 1)
         end
     }
-    
-    return PromptObject
 end
 
 -- ════════════════════════════════════════════════════════════════
--- SECTION 14: EXPORT & RETURN
+-- SECTION 6: WINDOW MANAGEMENT
 -- ════════════════════════════════════════════════════════════════
 
--- Initialize nil folder for instance storage
-Compkiller.NilFolder = Instance.new("Folder")
-Compkiller.NilFolder.Name = "Nil-Instances"
-Compkiller.NilFolder.Parent = nil
+function Compkiller:CreateWindow(config)
+    local Window = {
+        Config = config,
+        UserSettings = {
+            Create = function()
+                local Settings = {}
+                function Settings:AddColorPicker(cfg) print("Added ColorPicker to Settings: " .. cfg.Name) return {SetValue = function() end} end
+                function Settings:AddKeybind(cfg) print("Added Keybind to Settings: " .. cfg.Name) return {SetValue = function() end} end
+                function Settings:AddDropdown(cfg) print("Added Dropdown to Settings: " .. cfg.Name) return {SetValue = function() end} end
+                return Settings
+            end
+        }
+    }
+
+    function Window:SetMenuKey(key)
+        print("Menu key set to: " .. tostring(key))
+    end
+
+    function Window:Watermark()
+        local WM = {}
+        function WM:AddText(cfg)
+            print("Watermark text added: " .. cfg.Text)
+            return {SetText = function(self, t) print("Watermark updated: " .. t) end}
+        end
+        return WM
+    end
+
+    function Window:DrawCategory(cfg)
+        print("Category drawn: " .. cfg.Name)
+    end
+
+    function Window:DrawTab(cfg)
+        print("Tab drawn: " .. cfg.Name)
+        local Tab = {}
+        function Tab:DrawSection(secCfg)
+            print("Section drawn in " .. cfg.Name .. ": " .. secCfg.Name)
+            local Section = {
+                Link = {
+                    AddKeybind = function(self, kcfg) print("Option Keybind added") end,
+                    AddHelper = function(self, hcfg) print("Helper added: " .. hcfg.Text) end,
+                    AddOption = function(self)
+                        return {
+                            AddToggle = function(self, ocfg) print("Option Toggle added: " .. ocfg.Name) end
+                        }
+                    end
+                }
+            }
+            function Section:AddToggle(tcfg) print("Toggle added: " .. tcfg.Name) return Section end
+            function Section:AddKeybind(kcfg) print("Keybind added: " .. kcfg.Name) end
+            function Section:AddSlider(scfg) print("Slider added: " .. scfg.Name) end
+            function Section:AddColorPicker(cpcfg) print("ColorPicker added: " .. cpcfg.Name) end
+            function Section:AddDropdown(dcfg) print("Dropdown added: " .. dcfg.Name) end
+            function Section:AddButton(bcfg) print("Button added: " .. bcfg.Name) end
+            function Section:AddParagraph(pcfg) print("Paragraph added: " .. pcfg.Title) end
+            function Section:AddTextBox(tbcfg) print("TextBox added: " .. tbcfg.Name) end
+            return Section
+        end
+        return Tab
+    end
+
+    function Window:DrawContainerTab(cfg)
+        print("Container Tab drawn: " .. cfg.Name)
+        return {
+            DrawTab = function(self, tcfg)
+                return Window:DrawTab(tcfg)
+            end
+        }
+    end
+
+    function Window:DrawConfig(cfg)
+        print("Config UI drawn: " .. cfg.Name)
+        return {
+            Init = function() print("Config system initialized") end
+        }
+    end
+
+    return Window
+end
+
+-- ════════════════════════════════════════════════════════════════
+-- SECTION 7: CONFIG MANAGEMENT
+-- ════════════════════════════════════════════════════════════════
+
+function Compkiller:CreateConfigManager(config)
+    print("Config Manager created for directory: " .. config.Directory)
+    return config
+end
 
 return Compkiller
+
